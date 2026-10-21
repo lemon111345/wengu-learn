@@ -1,0 +1,27 @@
+# ===== Java / Maven =====
+target/
+*.class
+*.log
+logs/
+
+# ===== IDE =====
+.idea/
+*.iml
+.vscode/
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+
+# ===== 密钥与本地配置（API Key 永远不进仓库）=====
+.env
+.env.*
+application-local.yml
+
+# ===== 前端（预留）=====
+node_modules/
+dist/
+
+# ===== Claude Code 本地说明（个人文件，不提交）=====
+CLAUDE.md
+CLAUDE.local.md
