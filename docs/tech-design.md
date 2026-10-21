@@ -70,7 +70,7 @@ com.wengu
 | user | 用户 | id、username、password_hash |
 | user_settings | 用户设置 | user_id、daily_new_limit（每天新学数量）、timezone、day_start_hour（一天的分界，默认 4 点） |
 | source | 导入的学习材料 | id、user_id、type（题目 / 源码 / 文档 / 截图）、name、content |
-| knowledge_point | 知识点（很少变） | id、user_id、title（写成一个问题）、summary、status（正常 / 暂停） |
+| knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（正常 / 暂停） |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id |
 | card_state | 调度状态（每次复习都更新） | kp_id、user_id（冗余）、state、due、stability、difficulty、reps、lapses、last_review |
 | study_session | 一次学习会话，也是自动计时的来源 | id、user_id、kp_id、started_at、ended_at |
@@ -117,9 +117,35 @@ com.wengu
 | 流式输出用 SSE | AI 回复是单向推送，SSE 实现简单 | WebSocket |
 | 按业务分包，FSRS 独立为纯 Java 子包 | 功能代码集中、依赖清晰、便于以后拆分；算法与副作用分离，方便单元测试 | 按层分包 |
 
+## 知识点粒度与类型（初稿，M0 验证）
+
+本节基于对 200 道 Java 后端面试题的分析。
+
+**粒度标准：一个知识点 = 能在 3～5 分钟对话里讲清、用一个问题就能检验的概念。** 以面试的提问方式为参照：一道题和它的常见追问构成一条追问链，主问题和每个追问各算一个知识点。
+
+抽取规则：
+
+- **拆分**：原理类大题按追问链拆成多个知识点，例如 HashMap 原理拆为整体结构、引入红黑树的原因、负载因子、扩容机制等
+- **合并**：多道题考同一内容时合并为一个知识点，通过 kp_source 关联所有来源题，例如“Spring 启动流程”和“Spring Boot 启动流程”
+- **排序**：AI 按学习顺序输出知识点，新知识按创建顺序派发，暂不建依赖关系表
+
+知识点类型（knowledge_point.type）：
+
+| 类型 | 枚举值 | 识别特征 | 学习与复习方式 |
+| --- | --- | --- | --- |
+| 原子概念 | CONCEPT | 单一概念，如回表、CAS | 对话讲解，复习时换角度提问 |
+| 对比 | COMPARISON | “A 和 B 的区别” | 追问差异和各自适用场景 |
+| 原理机制 | MECHANISM | 流程或原理，常带追问链 | 深度对话，按顺序学习 |
+| 列举 | ENUMERATION | “有哪些” | 偏记忆，快问快答 |
+| 排查实战 | TROUBLESHOOTING | “线上出了问题怎么办” | 情景模拟，考察步骤和工具 |
+| 系统设计 | SYSTEM_DESIGN | “设计一个 XX 系统” | 综合多个知识点；M1 只标记、不进入每日计划，以后做模拟面试 |
+| 个人经历 | EXPERIENCE | “你项目里怎么做的” | 必须结合用户源码追问 |
+
+加 type 字段的理由：不同类型的复习方式差别很大，用类型选择不同的对话 prompt，成本几乎为零，却直接决定学习体验。
+
 ## 待补充
 
 - [ ] 接口设计：各模块的 URL、参数和返回值（M1 前确定）
 - [ ] 知识点抽取、学习对话、评分建议三类 prompt 的设计（M0 中实验得出）
 - [x] 后端包结构与分层约定
-- [ ] M0 结论：知识点粒度标准
+- [ ] M0 结论：用约 30 道样本题验证粒度标准和类型判断（初稿见上一节）

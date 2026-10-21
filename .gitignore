@@ -18,6 +18,9 @@ Thumbs.db
 .env.*
 application-local.yml
 
+# ===== 私人数据（如付费平台题库，绝不提交）=====
+data-private/
+
 # ===== 前端（预留）=====
 node_modules/
 dist/
