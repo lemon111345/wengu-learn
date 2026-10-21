@@ -5,6 +5,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.DoubleSupplier;
 
 /**
  * FSRS-6 调度器：输入卡片当前状态、评分和复习时间，输出新的卡片状态。
@@ -45,11 +47,22 @@ public final class Scheduler {
     private static final double MAX_DIFFICULTY = 10.0;
     private static final long SECONDS_PER_DAY = 86_400;
 
+    /** fuzz 范围：间隔落在 [start, end) 天的部分，每天贡献 factor 天的扰动幅度。与 py-fsrs 的 FUZZ_RANGES 相同。 */
+    private record FuzzRange(double start, double end, double factor) {
+    }
+
+    private static final List<FuzzRange> FUZZ_RANGES = List.of(
+            new FuzzRange(2.5, 7.0, 0.15),
+            new FuzzRange(7.0, 20.0, 0.1),
+            new FuzzRange(20.0, Double.POSITIVE_INFINITY, 0.05));
+
     private final double[] w;
     private final double desiredRetention;
     private final List<Duration> learningSteps;
     private final List<Duration> relearningSteps;
     private final int maximumInterval;
+    private final boolean enableFuzzing;
+    private final DoubleSupplier randomSource;
     private final double decay;
     private final double factor;
 
@@ -59,25 +72,36 @@ public final class Scheduler {
      * @param learningSteps    学习步，可以为空：为空时新卡复习一次就进入 REVIEW
      * @param relearningSteps  重学步，可以为空：为空时忘了也留在 REVIEW，只重新计算间隔
      * @param maximumInterval  最大间隔（天）
+     * @param enableFuzzing    是否给复习间隔加随机扰动，避免同一天学的卡片总在同一天到期
+     * @param randomSource     fuzz 用的随机数来源，返回 [0, 1) 的数；enableFuzzing 为 false 时可以为 null。
+     *                         多线程共享本实例时，它本身必须线程安全
      */
     public Scheduler(double[] parameters, double desiredRetention, List<Duration> learningSteps,
-                     List<Duration> relearningSteps, int maximumInterval) {
+                     List<Duration> relearningSteps, int maximumInterval,
+                     boolean enableFuzzing, DoubleSupplier randomSource) {
         validateParameters(parameters);
+        if (enableFuzzing) {
+            Objects.requireNonNull(randomSource, "开启 fuzz 时必须提供 randomSource");
+        }
         this.w = parameters.clone();
         this.desiredRetention = desiredRetention;
         this.learningSteps = List.copyOf(learningSteps);
         this.relearningSteps = List.copyOf(relearningSteps);
         this.maximumInterval = maximumInterval;
+        this.enableFuzzing = enableFuzzing;
+        this.randomSource = randomSource;
         this.decay = -w[20];
         this.factor = Math.pow(0.9, 1 / decay) - 1;
     }
 
     /**
-     * 本项目的默认配置：默认参数、目标保持率 0.9、最大间隔 36500 天，学习步和重学步都为空。
+     * 本项目的默认配置：默认参数、目标保持率 0.9、最大间隔 36500 天，学习步和重学步都为空，开启 fuzz。
      * 每个知识点是一段几分钟的 AI 对话，同一天重复出现体验差且浪费模型调用，见决策记录 003。
+     * 随机数用 ThreadLocalRandom：每个线程各用各的，实例可以安全地在多个请求间共享。
      */
     public static Scheduler projectDefault() {
-        return new Scheduler(DEFAULT_PARAMETERS, 0.9, List.of(), List.of(), 36500);
+        return new Scheduler(DEFAULT_PARAMETERS, 0.9, List.of(), List.of(), 36500,
+                true, () -> ThreadLocalRandom.current().nextDouble());
     }
 
     /** 返回默认参数的副本。 */
@@ -127,7 +151,12 @@ public final class Scheduler {
             case REVIEW -> fromReview(rating, stability);
         };
 
-        return new Card(next.state(), next.step(), stability, difficulty, reviewTime.plus(next.interval()), reviewTime);
+        // 第三步：只对进入 REVIEW 的卡片做 fuzz，学习步、重学步的分钟级间隔保持不变
+        Duration interval = enableFuzzing && next.state() == State.REVIEW
+                ? fuzz(next.interval())
+                : next.interval();
+
+        return new Card(next.state(), next.step(), stability, difficulty, reviewTime.plus(interval), reviewTime);
     }
 
     /** 复习后的状态、步数和下次间隔。 */
@@ -235,6 +264,30 @@ public final class Scheduler {
                 * (Math.pow(Math.E, (1 - retrievability) * w[10]) - 1)
                 * hardPenalty
                 * easyBonus);
+    }
+
+    /**
+     * 在原间隔附近随机取一个整天数，对应 py-fsrs 的 _get_fuzzed_interval。
+     * 间隔越长，扰动幅度越大；不足 2.5 天的间隔不扰动，也不消耗随机数。
+     */
+    private Duration fuzz(Duration interval) {
+        long days = interval.toDays();
+        if (days < 2.5) {
+            return interval;
+        }
+        double delta = 1.0;
+        for (FuzzRange range : FUZZ_RANGES) {
+            delta += range.factor() * Math.max(Math.min((double) days, range.end()) - range.start(), 0.0);
+        }
+        long minDays = (long) Math.rint(days - delta);
+        long maxDays = (long) Math.rint(days + delta);
+        minDays = Math.max(2, minDays);
+        maxDays = Math.min(maxDays, maximumInterval);
+        minDays = Math.min(minDays, maxDays);
+
+        // 在 [minDays, maxDays] 中取值：random * (区间长度 + 1) + minDays，再取整
+        double fuzzed = randomSource.getAsDouble() * (maxDays - minDays + 1) + minDays;
+        return Duration.ofDays(Math.min((long) Math.rint(fuzzed), maximumInterval));
     }
 
     private static double clampStability(double stability) {

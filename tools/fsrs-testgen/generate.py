@@ -102,6 +102,13 @@ def build_configs(rng: random.Random) -> dict[str, dict]:
         # 目标保持率 0.9 时，首次复习的原始间隔 ≈ 初始稳定性。设成 x.5 正好落在取整的分界上，
         # 用来区分 Python round()（四舍六入五成双）和四舍五入。放在最后，不影响前面用例的随机序列。
         "half_intervals": {**base, **empty_steps, "parameters": (1.5, 2.5, 3.5, 4.5) + DEFAULT_PARAMETERS[4:]},
+        # 以天为单位的学习步和重学步：超过 2.5 天，用来验证 fuzz 只作用于 REVIEW 状态，不作用于学习步、重学步
+        "long_steps_fuzz": {
+            **base,
+            "learning_steps": (timedelta(days=1), timedelta(days=3)),
+            "relearning_steps": (timedelta(days=3),),
+            "enable_fuzzing": True,
+        },
     }
 
 

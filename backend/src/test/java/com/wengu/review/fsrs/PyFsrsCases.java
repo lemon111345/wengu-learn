@@ -36,10 +36,6 @@ final class PyFsrsCases {
         }
     }
 
-    static boolean fuzzEnabled(JsonNode testCase) {
-        return testCase.get("scheduler").get("enable_fuzzing").asBoolean();
-    }
-
     static double[] parameters(JsonNode testCase) {
         JsonNode node = testCase.get("scheduler").get("parameters");
         double[] parameters = new double[node.size()];
