@@ -59,7 +59,24 @@ com.wengu
 
 - 模块之间只能调用对方的 Service，不能直接使用对方的 Mapper 或访问对方的表，为以后拆分保留边界
 - review.fsrs 只放纯计算代码：不加 Spring 注解、不访问数据库，输入当前状态和评分、输出新状态，用 Python 版结果做单元测试
-- 依赖方向单向：plan 依赖 review 和 knowledge，反之不行
+- 依赖方向单向，不允许循环依赖，完整关系见下图和 [决策 002](./decisions/002-模块依赖边界.md)
+- review 只通过 kp_id 工作，不依赖 knowledge；知识点创建时由 knowledge 调用 review 初始化调度状态
+- llm 是底层模块，管理 model_config，不依赖任何业务模块
+- 当前用户 id 由 common 提供（单用户模式返回默认用户），各模块不为此依赖 user
+
+```mermaid
+flowchart TB
+    plan --> knowledge
+    plan --> review
+    plan --> user
+    chat --> knowledge
+    chat --> llm
+    knowledge --> source
+    knowledge --> llm
+    knowledge --> review
+```
+
+所有模块都可以依赖 common，图中省略。
 
 ## 数据模型
 
