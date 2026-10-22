@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 @Service
 public class KnowledgeExtractionService {
 
-    public static final String PROMPT_VERSION = "v1";
+    public static final String PROMPT_VERSION = "v2";
 
     private static final String PROMPT_PATH = "prompts/knowledge-extraction-" + PROMPT_VERSION + ".md";
 
