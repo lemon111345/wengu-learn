@@ -5,6 +5,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -44,12 +45,24 @@ public class LlmService {
      * @throws LlmOutputParseException 返回内容无法解析时抛出，携带原始返回
      */
     public <T> LlmResult<T> call(String system, String user, Class<T> type) {
+        return call(system, user, type, null);
+    }
+
+    /**
+     * 结构化调用，并指定本次请求的 temperature。只影响这一次请求，不改变全局配置。
+     *
+     * @param temperature 为 null 时不设置，使用服务商的默认值
+     */
+    public <T> LlmResult<T> call(String system, String user, Class<T> type, Double temperature) {
         BeanOutputConverter<T> converter = new BeanOutputConverter<>(type);
-        ChatResponse response = chatClient.prompt()
+        ChatClient.ChatClientRequestSpec request = chatClient.prompt()
                 .system(system)
-                .user(user + "\n\n" + converter.getFormat())
-                .call()
-                .chatResponse();
+                .user(user + "\n\n" + converter.getFormat());
+        if (temperature != null) {
+            // 传入的选项会叠加在 application.yml 的默认选项（如 model）之上
+            request = request.options(ChatOptions.builder().temperature(temperature));
+        }
+        ChatResponse response = request.call().chatResponse();
         if (response == null || response.getResult() == null) {
             throw new IllegalStateException("模型没有返回结果");
         }

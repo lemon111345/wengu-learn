@@ -23,6 +23,9 @@ public class KnowledgeExtractionService {
 
     public static final String PROMPT_VERSION = "v2";
 
+    /** 抽取要的是稳定，不是多样：默认 temperature（DeepSeek 为 1.0）下，同一 prompt 两次结果差别很大。 */
+    public static final double TEMPERATURE = 0.2;
+
     private static final String PROMPT_PATH = "prompts/knowledge-extraction-" + PROMPT_VERSION + ".md";
 
     private final LlmService llmService;
@@ -39,7 +42,7 @@ public class KnowledgeExtractionService {
      * @throws com.wengu.llm.service.LlmOutputParseException 模型返回无法解析时抛出
      */
     public LlmResult<ExtractionResult> extract(List<ExtractionQuestion> questions) {
-        return llmService.call(systemPrompt, formatQuestions(questions), ExtractionResult.class);
+        return llmService.call(systemPrompt, formatQuestions(questions), ExtractionResult.class, TEMPERATURE);
     }
 
     /** 题目列表格式：每行“[题号] 题目”，题号即模型在 sourceQuestionIds 中引用的数字。 */

@@ -86,6 +86,7 @@ class KnowledgeExtractionExperiment {
         meta.put("time", LocalDateTime.now().toString());
         meta.put("model", result.model());
         meta.put("promptVersion", KnowledgeExtractionService.PROMPT_VERSION);
+        meta.put("temperature", KnowledgeExtractionService.TEMPERATURE);
         meta.put("questionCount", questions.size());
         meta.put("knowledgePointCount", result.content() instanceof ExtractionResult r && r.knowledgePoints() != null
                 ? r.knowledgePoints().size() : null);
