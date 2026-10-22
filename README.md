@@ -23,6 +23,7 @@ cd backend
 | `WENGU_LLM_API_KEY` | API Key | 空（应用照常启动，调用模型时才失败） |
 | `WENGU_LLM_BASE_URL` | 接口地址 | `https://api.deepseek.com` |
 | `WENGU_LLM_MODEL` | 模型名 | `deepseek-flash` |
+| `WENGU_LLM_TIMEOUT` | 单次请求超时，如 `300s` | `180s` |
 
 > **注意 base-url 的写法**：地址会原样使用，程序只在后面拼接 `/chat/completions`，不会自动补 `/v1`。服务商的地址本身带 `/v1` 的，要写全。
 
