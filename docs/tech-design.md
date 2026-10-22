@@ -33,7 +33,7 @@ Redis 在接口入口处做限流；调用大模型和 FSRS 调度都在 Service
 | 缓存 / 计数 | Redis | 只用于 AI 接口限流、线上免费额度计数，不做过早缓存 |
 | 大模型接入 | Spring AI 2.x | Spring 官方项目，用法与其他 starter 一致；兼容 OpenAI 格式与 Ollama |
 | 流式输出 | SSE | 单向推送，比 WebSocket 简单 |
-| 调度算法 | FSRS，自行移植为 Java | 用 Python 版输出做单元测试校验 |
+| 调度算法 | FSRS-6，从 py-fsrs 6.3.2 移植为 Java | 用 Python 版输出做单元测试校验，见 [决策 003](./decisions/003-FSRS移植.md) |
 | 文档解析 | Apache PDFBox、Apache POI | PDF 与 DOCX 文字提取 |
 | 前端 | Vue 3 + TypeScript + Vite + Element Plus | 上手平缓；TS 是前端主流，静态类型对 Java 背景更友好，也让 AI 写的代码更好读、错误在编译时暴露 |
 | 部署 | Docker Compose + Nginx | 一条命令启动 |
@@ -89,10 +89,10 @@ flowchart TB
 | source | 导入的学习材料 | id、user_id、type（题目 / 源码 / 文档 / 截图）、name、content |
 | knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（正常 / 暂停） |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id |
-| card_state | 调度状态（每次复习都更新） | kp_id、user_id（冗余）、state、due、stability、difficulty、reps、lapses、last_review |
+| card_state | 调度状态（每次复习都更新） | kp_id、user_id（冗余）、state（学习中 / 复习 / 重学）、step（学习步或重学步序号，复习状态为空）、due、stability、difficulty、last_review（为空表示新知识） |
 | study_session | 一次学习会话，也是自动计时的来源 | id、user_id、kp_id、started_at、ended_at |
 | message | 会话中的对话消息 | id、session_id、role、content、created_at |
-| review_log | 每次评分的流水 | id、user_id、kp_id、session_id、rating_user、rating_ai、state_before、reviewed_at |
+| review_log | 每次评分的流水 | id、user_id、kp_id、session_id、rating_user、rating_ai、state_before、is_first_review（是否为该知识点的第一次学习）、reviewed_at |
 | model_config | 模型配置 | user_id、base_url、model、api_key_encrypted |
 
 关键索引：
@@ -101,6 +101,12 @@ flowchart TB
 - review_log 建联合索引 (user_id, reviewed_at)，用于统计今天已学的新知识和学习历史
 - message 建索引 (session_id, created_at)，用于按顺序取出会话上下文
 
+调度状态说明：
+
+- state 与 FSRS-6 一致，只有学习中、复习、重学三种，没有单独的“新”状态。**新知识 = card_state 中 last_review 为空**（知识点创建时由 knowledge 调用 review 初始化，此时 state 为学习中）
+- 复习次数、遗忘次数不单独存储，需要时从 review_log 统计
+- 项目默认没有学习步和重学步，每个知识点一天最多出现一次，见 [决策 003](./decisions/003-FSRS移植.md)
+
 ## 每日计划的计算逻辑
 
 **每日计划不建表，每次打开时实时计算。** 它是派生数据，事实已经存在 card_state 和 review_log 里。
@@ -108,10 +114,10 @@ flowchart TB
 计算步骤：
 
 1. 根据用户时区和 day_start_hour，算出“今天”的起止时间（换算成 UTC）。
-2. 到期复习：查 card_state 中 user_id 匹配、state 不是“新”、且 due 早于今天结束时间的知识点。
-3. 今天已学的新知识数：查 review_log 中今天范围内、state_before 为“新”的记录条数。
+2. 到期复习：查 card_state 中 user_id 匹配、**last_review 不为空**、且 due 早于今天结束时间的知识点。必须排除 last_review 为空的新卡片，否则新知识会被误当成到期复习。
+3. 今天已学的新知识数：查 review_log 中今天范围内、**is_first_review 为真**的记录条数。不能用 state_before 判断：新卡片的 state 也是“学习中”。
 4. 剩余新知识名额 = daily_new_limit − 第 3 步的数量，小于 0 时取 0。
-5. 新知识：从 state 为“新”的知识点中按创建时间取出剩余名额数量。
+5. 新知识：从 last_review 为空的卡片中，按知识点创建时间取出剩余名额数量。
 6. 返回：到期复习列表 + 新知识列表，先复习后新学。
 
 第 3 步是防止重复派发的关键：如果不扣除今天已学的新知识，用户下午再打开页面时会被重新分配一批新知识，每日上限就失效了。
@@ -133,6 +139,7 @@ flowchart TB
 | Redis 只用于限流和额度计数 | 这些场景需要高频读写计数器；每日计划无需缓存 | 缓存每日计划（过早优化） |
 | 流式输出用 SSE | AI 回复是单向推送，SSE 实现简单 | WebSocket |
 | 按业务分包，FSRS 独立为纯 Java 子包 | 功能代码集中、依赖清晰、便于以后拆分；算法与副作用分离，方便单元测试 | 按层分包 |
+| 自行移植 FSRS-6，状态模型与 py-fsrs 一致，默认无学习步 | 逐条比对 Python 结果；新知识用 last_review 为空表示；知识点是几分钟的 AI 对话，不宜当天重复 | 引入现成 Java 库；增加 NEW 状态；保留分钟级学习步 |
 
 ## 知识点粒度与类型（初稿，M0 验证）
 
