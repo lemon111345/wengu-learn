@@ -31,7 +31,7 @@ Redis 在接口入口处做限流；调用大模型和 FSRS 调度都在 Service
 | 持久层 | MyBatis-Plus + MySQL | 熟悉；MVP 不需要向量检索 |
 | 安全 | Spring Security + JWT | 仅多用户模式启用 |
 | 缓存 / 计数 | Redis | 只用于 AI 接口限流、线上免费额度计数，不做过早缓存 |
-| 大模型接入 | Spring AI 2.x | Spring 官方项目，用法与其他 starter 一致；兼容 OpenAI 格式与 Ollama |
+| 大模型接入 | Spring AI 2.0.1（OpenAI starter） | Spring 官方项目，用法与其他 starter 一致；兼容 OpenAI 格式与 Ollama，见 [决策 004](./decisions/004-大模型接入.md) |
 | 流式输出 | SSE | 单向推送，比 WebSocket 简单 |
 | 调度算法 | FSRS-6，从 py-fsrs 6.3.2 移植为 Java | 用 Python 版输出做单元测试校验，见 [决策 003](./decisions/003-FSRS移植.md) |
 | 文档解析 | Apache PDFBox、Apache POI | PDF 与 DOCX 文字提取 |
