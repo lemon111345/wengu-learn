@@ -1,6 +1,11 @@
 package com.wengu.llm.service;
 
+import com.wengu.llm.dto.LlmResult;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -28,5 +33,43 @@ public class LlmService {
     /** 流式调用：模型每生成一段就推送一段，供 SSE 逐字输出。 */
     public Flux<String> stream(String prompt) {
         return chatClient.prompt().user(prompt).stream().content();
+    }
+
+    /**
+     * 结构化调用：要求模型按 type 对应的 JSON 结构回复，并解析成对象。
+     * <p>
+     * JSON 格式要求由 Spring AI 根据 type 自动生成，追加在 user 消息末尾。
+     * 文本按原样发送，不做模板渲染，其中的花括号不需要转义。
+     *
+     * @throws LlmOutputParseException 返回内容无法解析时抛出，携带原始返回
+     */
+    public <T> LlmResult<T> call(String system, String user, Class<T> type) {
+        BeanOutputConverter<T> converter = new BeanOutputConverter<>(type);
+        ChatResponse response = chatClient.prompt()
+                .system(system)
+                .user(user + "\n\n" + converter.getFormat())
+                .call()
+                .chatResponse();
+        if (response == null || response.getResult() == null) {
+            throw new IllegalStateException("模型没有返回结果");
+        }
+
+        Generation generation = response.getResult();
+        Usage usage = response.getMetadata().getUsage();
+        LlmResult<T> raw = new LlmResult<>(null,
+                generation.getOutput().getText(),
+                response.getMetadata().getModel(),
+                generation.getMetadata().getFinishReason(),
+                usage == null ? null : usage.getPromptTokens(),
+                usage == null ? null : usage.getCompletionTokens());
+
+        try {
+            T content = converter.convert(raw.rawText() == null ? "" : raw.rawText());
+            return new LlmResult<>(content, raw.rawText(), raw.model(), raw.finishReason(),
+                    raw.promptTokens(), raw.completionTokens());
+        } catch (RuntimeException e) {
+            String reason = raw.truncated() ? "输出达到长度上限被截断" : "返回内容不符合要求的 JSON 结构";
+            throw new LlmOutputParseException(reason, raw, e);
+        }
     }
 }
