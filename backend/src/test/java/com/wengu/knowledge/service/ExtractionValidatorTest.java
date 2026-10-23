@@ -22,7 +22,7 @@ class ExtractionValidatorTest {
 
     @Test
     void 合格的结果没有问题() {
-        ExtractionResult result = new ExtractionResult(List.of(
+        ExtractionResult result = new ExtractionResult(List.of(), List.of(
                 kp(1, "TCP 四次挥手的过程是怎样的？", 1),
                 kp(2, "为什么需要 TIME_WAIT 状态？", 1, 7)));
 
@@ -31,7 +31,7 @@ class ExtractionValidatorTest {
 
     @Test
     void 发现漏题和编造的题号() {
-        ExtractionResult result = new ExtractionResult(List.of(kp(1, "TCP 四次挥手的过程是怎样的？", 1, 99)));
+        ExtractionResult result = new ExtractionResult(List.of(), List.of(kp(1, "TCP 四次挥手的过程是怎样的？", 1, 99)));
 
         assertThat(ExtractionValidator.validate(QUESTIONS, result))
                 .anyMatch(p -> p.contains("来源题号 99 不存在"))
@@ -40,7 +40,7 @@ class ExtractionValidatorTest {
 
     @Test
     void 发现编号不连续和标题重复() {
-        ExtractionResult result = new ExtractionResult(List.of(
+        ExtractionResult result = new ExtractionResult(List.of(), List.of(
                 kp(1, "TCP 四次挥手的过程是怎样的？", 1),
                 kp(3, "TCP 四次挥手的过程是怎样的？", 7)));
 
@@ -51,7 +51,7 @@ class ExtractionValidatorTest {
 
     @Test
     void 发现缺少类型和来源() {
-        ExtractionResult result = new ExtractionResult(List.of(
+        ExtractionResult result = new ExtractionResult(List.of(), List.of(
                 new ExtractedKnowledgePoint(1, "什么是 TIME_WAIT？", "要点", null, List.of(1, 7)),
                 new ExtractedKnowledgePoint(2, "TCP 四次挥手的过程是怎样的？", "要点", KnowledgePointType.MECHANISM, List.of())));
 
@@ -62,7 +62,7 @@ class ExtractionValidatorTest {
 
     @Test
     void 空结果() {
-        assertThat(ExtractionValidator.validate(QUESTIONS, new ExtractionResult(List.of())))
+        assertThat(ExtractionValidator.validate(QUESTIONS, new ExtractionResult(List.of(), List.of())))
                 .containsExactly("没有抽取出任何知识点");
     }
 

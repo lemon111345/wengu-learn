@@ -37,7 +37,7 @@ class ExperimentHelpersTest {
         List<ExtractionQuestion> questions = List.of(
                 new ExtractionQuestion(1, "说说 TCP 的四次挥手？"),
                 new ExtractionQuestion(81, "为什么需要 TIME_WAIT？"));
-        ExtractionResult result = new ExtractionResult(List.of(
+        ExtractionResult result = new ExtractionResult(List.of(), List.of(
                 new ExtractedKnowledgePoint(2, "为什么需要 \"TIME_WAIT\"？", "等待 2MSL, 防止旧报文", KnowledgePointType.CONCEPT, List.of(1, 81)),
                 new ExtractedKnowledgePoint(1, "四次挥手的过程？", "四个报文", KnowledgePointType.MECHANISM, List.of(1))));
 

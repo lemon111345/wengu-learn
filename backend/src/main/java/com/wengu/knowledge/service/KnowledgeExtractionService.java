@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 @Service
 public class KnowledgeExtractionService {
 
-    public static final String PROMPT_VERSION = "v2";
+    public static final String PROMPT_VERSION = "v3";
 
     /** 抽取要的是稳定，不是多样：默认 temperature（DeepSeek 为 1.0）下，同一 prompt 两次结果差别很大。 */
     public static final double TEMPERATURE = 0.2;
