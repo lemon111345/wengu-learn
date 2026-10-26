@@ -60,7 +60,7 @@ com.wengu
 - 模块之间只能调用对方的 Service，不能直接使用对方的 Mapper 或访问对方的表，为以后拆分保留边界
 - review.fsrs 只放纯计算代码：不加 Spring 注解、不访问数据库，输入当前状态和评分、输出新状态，用 Python 版结果做单元测试
 - 依赖方向单向，不允许循环依赖，完整关系见下图和 [决策 002](./decisions/002-模块依赖边界.md)
-- review 只通过 kp_id 工作，不依赖 knowledge；知识点创建时由 knowledge 调用 review 初始化调度状态
+- review 只通过 kp_id 工作，不依赖 knowledge；知识点创建时由 knowledge 调用 review 初始化调度状态，结束评分时由 chat 调用 review 更新调度状态、写评分流水
 - llm 是底层模块，管理 model_config，不依赖任何业务模块
 - 当前用户 id 由 common 提供（单用户模式返回默认用户），各模块不为此依赖 user
 
@@ -71,6 +71,7 @@ flowchart TB
     plan --> user
     chat --> knowledge
     chat --> llm
+    chat --> review
     knowledge --> source
     knowledge --> llm
     knowledge --> review
@@ -87,13 +88,14 @@ flowchart TB
 | user | 用户 | id、username、password_hash |
 | user_settings | 用户设置 | user_id、daily_new_limit（每天新学数量）、timezone、day_start_hour（一天的分界，默认 4 点） |
 | source | 导入的学习材料 | id、user_id、type（题目 / 源码 / 文档 / 截图）、name、content |
-| knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（正常 / 暂停） |
+| knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（正常 / 暂停）、排序字段（新知识按它派发，字段名待 #13 确定）、来源草稿（待 #17 确定） |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id |
 | card_state | 调度状态（每次复习都更新） | kp_id、user_id（冗余）、state（学习中 / 复习 / 重学）、step（学习步或重学步序号，复习状态为空）、due、stability、difficulty、last_review（为空表示新知识） |
 | study_session | 一次学习会话，也是自动计时的来源 | id、user_id、kp_id、started_at、ended_at |
 | message | 会话中的对话消息 | id、session_id、role、content、created_at |
 | review_log | 每次评分的流水 | id、user_id、kp_id、session_id、rating_user、rating_ai、state_before、is_first_review（是否为该知识点的第一次学习）、reviewed_at |
-| model_config | 模型配置 | user_id、base_url、model、api_key_encrypted |
+| 抽取草稿 | 一次抽取的结果，用户确认后才生成知识点 | 保存模型的原始 JSON、prompt 版本、模型名；表结构待 #15 确定 |
+| model_config | 模型配置（M3；M1 用环境变量，见决策 007） | user_id、base_url、model、api_key_encrypted |
 
 关键索引：
 
@@ -104,6 +106,7 @@ flowchart TB
 调度状态说明：
 
 - state 与 FSRS-6 一致，只有学习中、复习、重学三种，没有单独的“新”状态。**新知识 = card_state 中 last_review 为空**（知识点创建时由 knowledge 调用 review 初始化，此时 state 为学习中）
+- 不参与调度的类型不初始化 card_state，由 knowledge 在创建时决定：SYSTEM_DESIGN；M1 中还有 EXPERIENCE（见决策 007）
 - 复习次数、遗忘次数不单独存储，需要时从 review_log 统计
 - 项目默认没有学习步和重学步，每个知识点一天最多出现一次，见 [决策 003](./decisions/003-FSRS移植.md)
 
@@ -114,15 +117,18 @@ flowchart TB
 计算步骤：
 
 1. 根据用户时区和 day_start_hour，算出“今天”的起止时间（换算成 UTC）。
-2. 到期复习：查 card_state 中 user_id 匹配、**last_review 不为空**、且 due 早于今天结束时间的知识点。必须排除 last_review 为空的新卡片，否则新知识会被误当成到期复习。
-3. 今天已学的新知识数：查 review_log 中今天范围内、**is_first_review 为真**的记录条数。不能用 state_before 判断：新卡片的 state 也是“学习中”。
+2. 到期复习：review 查 card_state 中 user_id 匹配、**last_review 不为空**、且 due 早于今天结束时间的 kp_id。必须排除 last_review 为空的新卡片，否则新知识会被误当成到期复习。
+3. 今天已学的新知识数：review 查 review_log 中今天范围内、**is_first_review 为真**的记录条数。不能用 state_before 判断：新卡片的 state 也是“学习中”。
 4. 剩余新知识名额 = daily_new_limit − 第 3 步的数量，小于 0 时取 0。
-5. 新知识：从 last_review 为空的卡片中，按知识点创建时间取出剩余名额数量。
-6. 返回：到期复习列表 + 新知识列表，先复习后新学。
+5. 新知识候选：review 查 card_state 中 last_review 为空的 kp_id。
+6. 过滤与排序：plan 把第 2、5 步的 kp_id 交给 knowledge，在内存中排除暂停的知识点、按排序字段排序；新知识取前“剩余名额”个。
+7. 返回：到期复习列表 + 新知识列表，先复习后新学。
 
 第 3 步是防止重复派发的关键：如果不扣除今天已学的新知识，用户下午再打开页面时会被重新分配一批新知识，每日上限就失效了。
 
 复习完的知识点 due 会被推到未来，自然不会再出现在第 2 步的结果里，无需额外处理。
+
+查询分在 review 和 knowledge 两个模块中完成，各自只读自己的表；SYSTEM_DESIGN（M1 中还有 EXPERIENCE）没有 card_state，自然不会进入计划。第 6 步在内存中处理，是 MVP 只有几百个知识点时的取舍，见[决策 002](./decisions/002-模块依赖边界.md)。
 
 ## 关键设计决策
 
@@ -155,7 +161,7 @@ flowchart TB
 - **小追问不拆**：“是什么”加上一两句就能答完的直接追问，合为一个知识点；追问本身是完整机制时才拆开。一两句就能答完的“是什么”题，并入以它为前提的另一道题
 - **摘要不越界**：摘要只覆盖原题和它的直接追问；原题限定了角度的（如“从网络角度”），不讲角度之外的内容
 - **包含不算重复**：一个流程包含另一个流程时不合并，分别输出，先排作为基础的那个，例如“Spring refresh 流程”和“Spring Boot 启动流程”
-- **排序**：AI 按学习顺序输出知识点，新知识按创建顺序派发，暂不建依赖关系表
+- **排序**：AI 按学习顺序输出知识点，确认时写入 knowledge_point 的排序字段，新知识按排序字段派发，暂不建依赖关系表
 
 M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取 prompt 第一版为 v5，已知问题是大题的细节知识点常被主干代替，MVP 之后改进（#9）。详见 [决策 006](./decisions/006-知识点粒度标准与抽取prompt第一版.md)。
 
@@ -169,13 +175,13 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 列举 | ENUMERATION | “有哪些” | 偏记忆，快问快答 |
 | 排查实战 | TROUBLESHOOTING | “线上出了问题怎么办” | 情景模拟，考察步骤和工具 |
 | 系统设计 | SYSTEM_DESIGN | “设计一个 XX 系统” | 综合多个知识点；M1 只标记、不进入每日计划，以后做模拟面试 |
-| 个人经历 | EXPERIENCE | “你项目里怎么做的” | 必须结合用户源码追问 |
+| 个人经历 | EXPERIENCE | “你项目里怎么做的” | 必须结合用户源码追问；M1 只标记、不进入每日计划，M2 有源码导入后启用 |
 
 加 type 字段的理由：不同类型的复习方式差别很大，用类型选择不同的对话 prompt，成本几乎为零，却直接决定学习体验。
 
 ## 待补充
 
-- [ ] 接口设计：各模块的 URL、参数和返回值（M1 前确定）
+- [ ] 接口设计：各模块的 URL、参数和返回值。不在开工前一次定完，每个 issue 在方案中确定自己的接口，完成后汇总到本文档（见决策 007）
 - [ ] 知识点抽取、学习对话、评分建议三类 prompt 的设计（抽取 prompt 已定，见决策 006）
 - [x] 后端包结构与分层约定
 - [x] M0 结论：用 30 道样本题验证粒度标准和类型判断，见决策 006
