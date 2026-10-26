@@ -1,5 +1,6 @@
 package com.wengu.llm.service;
 
+import com.wengu.llm.dto.LlmResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -8,6 +9,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import java.time.Duration;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -51,5 +53,23 @@ class LlmServiceLiveTest {
         String reply = String.join("", chunks);
         assertFalse(reply.isBlank(), "回复为空");
         System.out.println("[流式调用] 共 " + chunks.size() + " 段: " + reply);
+    }
+
+    record Language(String name, int releaseYear, List<String> keywords) {
+    }
+
+    @Test
+    void 结构化调用解析为对象() {
+        LlmResult<Language> result = llmService.call(
+                "你是一个只输出 JSON 的助手。",
+                "介绍 Java 语言：名称、首次发布年份、三个关键词。",
+                Language.class);
+
+        assertNotNull(result.content(), "没有解析出对象");
+        assertEquals(1995, result.content().releaseYear());
+        assertFalse(result.content().keywords().isEmpty(), "关键词为空");
+        assertFalse(result.truncated(), "输出被截断");
+        System.out.println("[结构化调用] " + result.content() + "，模型 " + result.model()
+                + "，token " + result.promptTokens() + " + " + result.completionTokens());
     }
 }

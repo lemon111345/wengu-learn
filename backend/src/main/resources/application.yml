@@ -9,6 +9,8 @@ spring:
       # 默认为空：没有 Key 时应用照常启动，调用模型时才失败。
       # 显式给出值，也避免 Spring AI 隐式读取 OPENAI_API_KEY 环境变量
       api-key: ${WENGU_LLM_API_KEY:}
+      # 单次请求超时。Spring AI 默认 60 秒，知识点抽取等长输出在较强的模型上会超时
+      timeout: ${WENGU_LLM_TIMEOUT:180s}
       chat:
         options:
           model: ${WENGU_LLM_MODEL:deepseek-flash}
