@@ -14,6 +14,9 @@ final class ChatExperimentSupport {
     /** 学习对话 prompt 约定的结束标记，模型收尾时单独输出一行。 */
     static final String END_MARKER = "【学习结束】";
 
+    /** 学生回答到倒数第二次时附在消息末尾，prompt 中约定看到它就停止引导，让学生完整回答原题。 */
+    static final String RESTATE_NOTE = "（只剩最后一轮：请停止讲解和追问，让学生完整回答原题。）";
+
     /** 学生回答达到上限时附在消息末尾，prompt 中约定看到它就直接收尾。 */
     static final String MAX_TURNS_NOTE = "（已达到最大轮数，请直接收尾。）";
 
@@ -22,7 +25,7 @@ final class ChatExperimentSupport {
 
     static final List<String> CSV_HEADER = List.of(
             "知识点", "类型", "作者学习前的自述", "学生回答次数", "模型主动结束",
-            "rating_ai", "AI 的理由", "自评", "差距（AI − 自评）", "学懂了吗", "追问有效吗", "备注");
+            "rating_ai", "AI 的判断依据", "还没掌握的点", "自评", "差距（AI − 自评）", "学懂了吗", "追问有效吗", "备注");
 
     private ChatExperimentSupport() {
     }
@@ -40,6 +43,21 @@ final class ChatExperimentSupport {
                 %s
 
                 请开始。""".formatted(kp.title(), typeLabel(kp), kp.summary(), questions);
+    }
+
+    /**
+     * 按学生已回答的次数，在这次回答后面附上轮数提示：倒数第二次要求完整作答，最后一次要求收尾。
+     *
+     * @param answers 包括这一次在内，学生已回答的次数
+     */
+    static String withTurnNote(String answer, int answers, int maxAnswers) {
+        if (answers >= maxAnswers) {
+            return answer + "\n\n" + MAX_TURNS_NOTE;
+        }
+        if (answers == maxAnswers - 1) {
+            return answer + "\n\n" + RESTATE_NOTE;
+        }
+        return answer;
     }
 
     /** 模型可能把标记写在同一行的末尾，所以只检查是否出现，不要求单独成行。 */
@@ -76,7 +94,9 @@ final class ChatExperimentSupport {
                 + "\n- 备注：" + self.note());
         parts.add(suggestion == null
                 ? "## AI 评分建议\n\n调用失败：" + ratingError
-                : "## AI 评分建议\n\n- 评分：" + suggestion.rating().display() + "\n- 理由：" + suggestion.reason());
+                : "## AI 评分建议\n\n- 评分：" + suggestion.rating().display()
+                + "\n- 判断依据：" + suggestion.analysis()
+                + "\n- 还没掌握的点：" + weakPoints(suggestion, "；"));
         return String.join("\n\n", parts) + "\n";
     }
 
@@ -91,7 +111,8 @@ final class ChatExperimentSupport {
                 String.valueOf(answers),
                 endedByModel ? "是" : "否",
                 suggestion == null ? "" : suggestion.rating().display(),
-                suggestion == null ? "" : nullToEmpty(suggestion.reason()),
+                suggestion == null ? "" : nullToEmpty(suggestion.analysis()),
+                suggestion == null ? "" : weakPoints(suggestion, "\n"),
                 self.rating().display(),
                 gap,
                 self.understood(),
@@ -110,6 +131,10 @@ final class ChatExperimentSupport {
         return dialogue.stream()
                 .map(t -> (t.role() == ChatTurn.Role.ASSISTANT ? "【老师】" : "【学生】") + "\n" + t.content().strip())
                 .collect(Collectors.joining("\n\n"));
+    }
+
+    private static String weakPoints(RatingSuggestion suggestion, String delimiter) {
+        return suggestion.weakPoints() == null ? "" : String.join(delimiter, suggestion.weakPoints());
     }
 
     private static String typeLabel(ChatKnowledgePoint kp) {

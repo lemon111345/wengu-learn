@@ -50,15 +50,24 @@ class ChatExperimentSupportTest {
     }
 
     @Test
+    void 倒数第二次回答要求完整作答最后一次要求收尾() {
+        assertThat(ChatExperimentSupport.withTurnNote("答案", 6, 8)).isEqualTo("答案");
+        assertThat(ChatExperimentSupport.withTurnNote("答案", 7, 8))
+                .isEqualTo("答案\n\n" + ChatExperimentSupport.RESTATE_NOTE);
+        assertThat(ChatExperimentSupport.withTurnNote("答案", 8, 8))
+                .isEqualTo("答案\n\n" + ChatExperimentSupport.MAX_TURNS_NOTE);
+    }
+
+    @Test
     void CSV行计算差距并正确转义() {
         SelfAssessment self = new SelfAssessment(Rating.GOOD, "是", "有效，但第二问偏了", "说 \"还行\"");
-        RatingSuggestion ai = new RatingSuggestion("回答完整, 无遗漏", Rating.EASY);
+        RatingSuggestion ai = new RatingSuggestion("回答完整, 无遗漏", Rating.EASY, List.of("覆盖索引", "索引代价"));
 
         String row = ChatExperimentSupport.csvRow(kp, 4, true, self, ai);
 
         assertThat(row)
                 .startsWith("\"什么是回表？\",\"CONCEPT（原子概念）\",\"很熟\",\"4\",\"是\",\"EASY（简单）\"")
-                .contains("\"回答完整, 无遗漏\",\"GOOD（良好）\",\"1\"")
+                .contains("\"回答完整, 无遗漏\",\"覆盖索引\n索引代价\",\"GOOD（良好）\",\"1\"")
                 .endsWith("\"说 \"\"还行\"\"\"");
     }
 
@@ -68,6 +77,6 @@ class ChatExperimentSupportTest {
 
         String row = ChatExperimentSupport.csvRow(kp, 8, false, self, null);
 
-        assertThat(row).contains("\"否\",\"\",\"\",\"HARD（困难）\",\"\"");
+        assertThat(row).contains("\"否\",\"\",\"\",\"\",\"HARD（困难）\",\"\"");
     }
 }

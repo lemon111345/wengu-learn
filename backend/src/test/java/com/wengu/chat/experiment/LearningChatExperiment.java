@@ -43,15 +43,15 @@ import java.util.Set;
  * 会真实调用模型、产生费用。需要在终端里交互输入，不能作为测试运行（类名不以 Test 结尾，mvnw test 不会执行）。
  * 在 backend 目录下：
  * <pre>
- * chcp 65001
  * .\mvnw.cmd -q spring-boot:test-run "-Dspring-boot.run.main-class=com.wengu.chat.experiment.LearningChatExperiment"
  * </pre>
- * chcp 65001 把控制台切换为 UTF-8，否则输入的中文可能乱码。换模型：设置 WENGU_LLM_MODEL 环境变量。
+ * 不要先运行 chcp 65001：Java 会因此改用 UTF-8 输出，但经过 mvnw.cmd 后终端仍按 GBK 显示，中文全是乱码。
+ * 换模型：设置 WENGU_LLM_MODEL 环境变量。
  */
 public class LearningChatExperiment {
 
-    static final String CHAT_PROMPT_VERSION = "v1";
-    static final String RATING_PROMPT_VERSION = "v1";
+    static final String CHAT_PROMPT_VERSION = "v2";
+    static final String RATING_PROMPT_VERSION = "v2";
 
     /** 讲解需要一些变化，但 DeepSeek 默认的 1.0 在抽取实验中波动很大，先用 0.7 观察。 */
     static final double CHAT_TEMPERATURE = 0.7;
@@ -59,7 +59,7 @@ public class LearningChatExperiment {
     /** 评分要稳定，同抽取一样用 0.2。 */
     static final double RATING_TEMPERATURE = 0.2;
 
-    /** 学生回答达到这个次数后，要求模型直接收尾，防止对话停不下来。 */
+    /** 学生回答到倒数第二次时要求完整作答，达到这个次数后要求直接收尾，防止对话停不下来。 */
     static final int MAX_ANSWERS = 8;
 
     private static final Duration REPLY_TIMEOUT = Duration.ofMinutes(3);
@@ -100,9 +100,13 @@ public class LearningChatExperiment {
     void run() throws IOException {
         List<ChatKnowledgePoint> kps = json.readValue(Files.readString(KNOWLEDGE_POINTS), new TypeReference<>() {
         });
+        // 中文乱码时用来排查：输出、输入各按什么编码处理
+        System.out.println("[编码] stdout=" + System.getProperty("stdout.encoding")
+                + "，stdin=" + consoleCharset() + "，console=" + (System.console() != null));
         System.out.println("模型 " + model + "，学习对话 prompt " + CHAT_PROMPT_VERSION
                 + "，评分建议 prompt " + RATING_PROMPT_VERSION);
-        System.out.println("对话中输入 /end 可以随时结束当前知识点。结果目录：" + outputDir.toAbsolutePath().normalize());
+        System.out.println("回答可以写多行，空一行（连按两次回车）才发送；输入 /end 可以随时结束当前知识点。");
+        System.out.println("结果目录：" + outputDir.toAbsolutePath().normalize());
 
         Set<Integer> learned = new HashSet<>();
         while (true) {
@@ -157,8 +161,7 @@ public class LearningChatExperiment {
                 break;
             }
             answers++;
-            history.add(ChatTurn.user(answers >= MAX_ANSWERS
-                    ? answer + "\n\n" + ChatExperimentSupport.MAX_TURNS_NOTE : answer));
+            history.add(ChatTurn.user(ChatExperimentSupport.withTurnNote(answer, answers, MAX_ANSWERS)));
         }
         List<ChatTurn> dialogue = history.subList(1, history.size());
 
@@ -187,7 +190,9 @@ public class LearningChatExperiment {
 
         if (suggestion != null) {
             System.out.println("\nAI 建议：" + suggestion.rating().display() + "（你的自评：" + self.rating().display() + "）");
-            System.out.println("理由：" + suggestion.reason());
+            System.out.println("判断依据：" + suggestion.analysis());
+            System.out.println("还没掌握的点：" + (suggestion.weakPoints() == null || suggestion.weakPoints().isEmpty()
+                    ? "无" : String.join("；", suggestion.weakPoints())));
         } else {
             System.out.println("\n[评分建议失败] " + ratingError);
         }
@@ -209,13 +214,29 @@ public class LearningChatExperiment {
         return chunks == null ? "" : String.join("", chunks);
     }
 
-    /** 读一行回答，空行不发给模型，重新输入。输入结束（Ctrl+Z / Ctrl+D）时返回 null。 */
+    /**
+     * 读一次回答：可以写多行，遇到空行才算写完，这样粘贴的多行文本不会被拆成几次回答。
+     * 还没写内容时的空行忽略；第一行是 /end 时直接返回；输入结束（Ctrl+Z）时返回已写的内容，没有内容则返回 null。
+     */
     private String readAnswer() throws IOException {
+        System.out.print("\n你（空一行发送）：");
+        System.out.flush();
+        List<String> lines = new ArrayList<>();
         while (true) {
-            String answer = prompt("\n你：");
-            if (answer == null || !answer.isEmpty()) {
-                return answer;
+            String line = in.readLine();
+            if (line == null) {
+                return lines.isEmpty() ? null : String.join("\n", lines);
             }
+            if (lines.isEmpty() && line.strip().equals("/end")) {
+                return "/end";
+            }
+            if (line.isBlank()) {
+                if (lines.isEmpty()) {
+                    continue;
+                }
+                return String.join("\n", lines);
+            }
+            lines.add(line.stripTrailing());
         }
     }
 
