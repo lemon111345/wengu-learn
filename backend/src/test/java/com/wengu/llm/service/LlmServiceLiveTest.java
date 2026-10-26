@@ -1,5 +1,6 @@
 package com.wengu.llm.service;
 
+import com.wengu.llm.dto.ChatTurn;
 import com.wengu.llm.dto.LlmResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -53,6 +54,22 @@ class LlmServiceLiveTest {
         String reply = String.join("", chunks);
         assertFalse(reply.isBlank(), "回复为空");
         System.out.println("[流式调用] 共 " + chunks.size() + " 段: " + reply);
+    }
+
+    @Test
+    void 多轮调用能看到之前的对话() {
+        // 数字只出现在第一轮，模型能答出来，说明历史消息确实发过去了
+        List<ChatTurn> history = List.of(
+                ChatTurn.user("请记住这个数字：4721。只回复“好的”。"),
+                ChatTurn.assistant("好的"),
+                ChatTurn.user("我刚才让你记住的数字是多少？只回复数字。"));
+
+        String reply = String.join("", llmService.stream("你是一个简洁的助手。", history, 0.2)
+                .collectList()
+                .block(TIMEOUT));
+
+        assertTrue(reply.contains("4721"), "没有答出第一轮的数字：" + reply);
+        System.out.println("[多轮调用] " + reply);
     }
 
     record Language(String name, int releaseYear, List<String> keywords) {
