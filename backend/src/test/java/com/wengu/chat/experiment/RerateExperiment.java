@@ -1,5 +1,6 @@
 package com.wengu.chat.experiment;
 
+import com.wengu.NoDatabase;
 import com.wengu.WenguApplication;
 import com.wengu.chat.experiment.ChatExperimentSupport.ParsedTranscript;
 import com.wengu.chat.experiment.RatingSuggestion.Rating;
@@ -81,7 +82,7 @@ public class RerateExperiment {
         SpringApplication app = new SpringApplication(WenguApplication.class);
         app.setWebApplicationType(WebApplicationType.NONE);
         app.setBannerMode(Banner.Mode.OFF);
-        app.setDefaultProperties(Map.of("logging.level.root", "WARN"));
+        app.setDefaultProperties(Map.of("logging.level.root", "WARN", NoDatabase.EXCLUDE_KEY, NoDatabase.EXCLUDE_VALUE));
         try (ConfigurableApplicationContext context = app.run(args)) {
             String model = context.getEnvironment().getProperty("spring.ai.openai.chat.options.model", "unknown");
             new RerateExperiment(context.getBean(LlmService.class), model).run();
