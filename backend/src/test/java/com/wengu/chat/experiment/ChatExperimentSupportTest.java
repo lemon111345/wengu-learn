@@ -72,6 +72,36 @@ class ChatExperimentSupportTest {
     }
 
     @Test
+    void 对话记录能解析回写入前的内容() {
+        List<ChatTurn> dialogue = List.of(
+                ChatTurn.assistant("先摸个底：\n\n你知道什么是聚簇索引吗？"),
+                ChatTurn.user("主键索引，叶子节点存整行"),
+                ChatTurn.assistant("对。参考答法……\n\n【学习结束】"));
+        SelfAssessment self = new SelfAssessment(Rating.GOOD, "是", "有效", "");
+        RatingSuggestion ai = new RatingSuggestion("答出了核心", Rating.HARD, List.of("覆盖索引"));
+
+        ChatExperimentSupport.ParsedTranscript parsed =
+                ChatExperimentSupport.parseTranscript(ChatExperimentSupport.transcript(kp, dialogue, self, ai, null));
+
+        assertThat(parsed.title()).isEqualTo("什么是回表？");
+        assertThat(parsed.dialogue()).isEqualTo(dialogue);
+        assertThat(parsed.selfRating()).isEqualTo(Rating.GOOD);
+        assertThat(parsed.aiRating()).isEqualTo(Rating.HARD);
+    }
+
+    @Test
+    void 评分建议失败的记录解析出的AI评分为空() {
+        List<ChatTurn> dialogue = List.of(ChatTurn.assistant("你知道什么是聚簇索引吗？"), ChatTurn.user("不知道"));
+        SelfAssessment self = new SelfAssessment(Rating.AGAIN, "否", "有效", "");
+
+        ChatExperimentSupport.ParsedTranscript parsed =
+                ChatExperimentSupport.parseTranscript(ChatExperimentSupport.transcript(kp, dialogue, self, null, "超时"));
+
+        assertThat(parsed.selfRating()).isEqualTo(Rating.AGAIN);
+        assertThat(parsed.aiRating()).isNull();
+    }
+
+    @Test
     void 评分建议失败时AI相关列留空() {
         SelfAssessment self = new SelfAssessment(Rating.HARD, "部分", "有效", "");
 

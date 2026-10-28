@@ -1,5 +1,6 @@
 package com.wengu.chat.experiment;
 
+import com.wengu.chat.experiment.RatingSuggestion.Rating;
 import com.wengu.llm.dto.ChatTurn;
 
 import java.util.ArrayList;
@@ -22,6 +23,14 @@ final class ChatExperimentSupport {
 
     /** CSV 开头的 UTF-8 BOM，Excel 双击打开不会出现中文乱码。 */
     static final String BOM = "﻿";
+
+    // NN-transcript.md 中的标题和标记，写入（transcript）和读回（parseTranscript）共用
+    private static final String TEACHER = "【老师】";
+    private static final String STUDENT = "【学生】";
+    private static final String DIALOGUE_HEADING = "## 对话";
+    private static final String SELF_HEADING = "## 自评";
+    private static final String AI_HEADING = "## AI 评分建议";
+    private static final String RATING_PREFIX = "- 评分：";
 
     static final List<String> CSV_HEADER = List.of(
             "知识点", "类型", "作者学习前的自述", "学生回答次数", "模型主动结束",
@@ -87,17 +96,74 @@ final class ChatExperimentSupport {
         List<String> parts = new ArrayList<>();
         parts.add("# " + kp.title());
         parts.add("- 类型：" + typeLabel(kp) + "\n- 学习前的自述：" + nullToEmpty(kp.note()));
-        parts.add("## 对话\n\n" + formatDialogue(dialogue));
-        parts.add("## 自评\n\n- 评分：" + self.rating().display()
+        parts.add(DIALOGUE_HEADING + "\n\n" + formatDialogue(dialogue));
+        parts.add(SELF_HEADING + "\n\n" + RATING_PREFIX + self.rating().display()
                 + "\n- 学懂了吗：" + self.understood()
                 + "\n- 追问有效吗：" + self.followUpEffective()
                 + "\n- 备注：" + self.note());
         parts.add(suggestion == null
-                ? "## AI 评分建议\n\n调用失败：" + ratingError
-                : "## AI 评分建议\n\n- 评分：" + suggestion.rating().display()
+                ? AI_HEADING + "\n\n调用失败：" + ratingError
+                : AI_HEADING + "\n\n" + RATING_PREFIX + suggestion.rating().display()
                 + "\n- 判断依据：" + suggestion.analysis()
                 + "\n- 还没掌握的点：" + weakPoints(suggestion, "；"));
         return String.join("\n\n", parts) + "\n";
+    }
+
+    /**
+     * 从 NN-transcript.md 读回的内容，用于离线重评。
+     *
+     * @param aiRating 当时的 AI 评分建议；评分建议调用失败时为 null
+     */
+    record ParsedTranscript(String title, List<ChatTurn> dialogue, Rating selfRating, Rating aiRating) {
+    }
+
+    /**
+     * transcript() 的逆操作：按二级标题切出对话、自评、AI 评分建议三部分，再把对话按【老师】【学生】拆回一条条消息。
+     * 二级标题从后往前找，即使对话内容里出现同样的文字也不会切错。
+     */
+    static ParsedTranscript parseTranscript(String markdown) {
+        String title = markdown.lines().findFirst().orElseThrow().substring("# ".length());
+        int dialogueStart = markdown.indexOf("\n" + DIALOGUE_HEADING + "\n") + DIALOGUE_HEADING.length() + 2;
+        int selfStart = markdown.lastIndexOf("\n" + SELF_HEADING + "\n");
+        int aiStart = markdown.lastIndexOf("\n" + AI_HEADING + "\n");
+        return new ParsedTranscript(
+                title,
+                parseDialogue(markdown.substring(dialogueStart, selfStart)),
+                ratingIn(markdown.substring(selfStart, aiStart)),
+                ratingIn(markdown.substring(aiStart)));
+    }
+
+    /** formatDialogue() 的逆操作。 */
+    private static List<ChatTurn> parseDialogue(String text) {
+        List<ChatTurn> turns = new ArrayList<>();
+        ChatTurn.Role role = null;
+        StringBuilder content = new StringBuilder();
+        for (String line : text.lines().toList()) {
+            ChatTurn.Role next = line.equals(TEACHER) ? ChatTurn.Role.ASSISTANT
+                    : line.equals(STUDENT) ? ChatTurn.Role.USER : null;
+            if (next == null) {
+                content.append(line).append('\n');
+                continue;
+            }
+            if (role != null) {
+                turns.add(new ChatTurn(role, content.toString().strip()));
+            }
+            role = next;
+            content.setLength(0);
+        }
+        if (role != null) {
+            turns.add(new ChatTurn(role, content.toString().strip()));
+        }
+        return turns;
+    }
+
+    /** 找出“- 评分：GOOD（良好）”这一行并取出评分；没有这一行（调用失败）时返回 null。 */
+    private static Rating ratingIn(String section) {
+        return section.lines()
+                .filter(line -> line.startsWith(RATING_PREFIX))
+                .findFirst()
+                .map(line -> Rating.valueOf(line.substring(RATING_PREFIX.length(), line.indexOf('（'))))
+                .orElse(null);
     }
 
     /** ratings.csv 中的一行（不含行尾）。suggestion 为 null 时 AI 相关的列留空。 */
@@ -129,7 +195,7 @@ final class ChatExperimentSupport {
 
     private static String formatDialogue(List<ChatTurn> dialogue) {
         return dialogue.stream()
-                .map(t -> (t.role() == ChatTurn.Role.ASSISTANT ? "【老师】" : "【学生】") + "\n" + t.content().strip())
+                .map(t -> (t.role() == ChatTurn.Role.ASSISTANT ? TEACHER : STUDENT) + "\n" + t.content().strip())
                 .collect(Collectors.joining("\n\n"));
     }
 

@@ -310,7 +310,7 @@ public class LearningChatExperiment {
         return encoding == null ? Charset.defaultCharset() : Charset.forName(encoding);
     }
 
-    private static String loadPrompt(String path) {
+    static String loadPrompt(String path) {
         try {
             return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
         } catch (IOException e) {
