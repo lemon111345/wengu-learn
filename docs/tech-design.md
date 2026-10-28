@@ -94,7 +94,7 @@ flowchart TB
 | study_session | 一次学习会话，也是自动计时的来源 | id、user_id、kp_id、started_at、ended_at |
 | message | 会话中的对话消息 | id、session_id、role、content、created_at |
 | review_log | 每次评分的流水 | id、user_id、kp_id、session_id、rating_user、rating_ai、state_before、is_first_review（是否为该知识点的第一次学习）、reviewed_at |
-| 抽取草稿 | 一次抽取的结果，用户确认后才生成知识点 | 保存模型的原始 JSON、prompt 版本、模型名；表结构待 #15 确定 |
+| 抽取草稿 | 一次抽取的结果，用户确认后才生成知识点 | 保存模型的原始 JSON、prompt 版本、模型名；来源可以是导入批次，也可以是学习会话（候选知识点，见决策 008）；表结构待 #13、#15 确定 |
 | model_config | 模型配置（M3；M1 用环境变量，见决策 007） | user_id、base_url、model、api_key_encrypted |
 
 关键索引：
@@ -179,9 +179,23 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 
 加 type 字段的理由：不同类型的复习方式差别很大，用类型选择不同的对话 prompt，成本几乎为零，却直接决定学习体验。
 
+## 学习对话与评分建议
+
+一次学习分两段，详见 [决策 008](./decisions/008-学习对话与评分建议prompt第一版.md)：
+
+| 阶段 | 流程 | 评分 |
+| --- | --- | --- |
+| 主线 | 摸底 → 讲解 → 检验 → 追问 → 完整作答 → 收尾，建议 4～6 次回答；第 7 次回答后要求完整作答，第 8 次后要求收尾 | 收尾后调用评分建议，用户确认后交给 FSRS |
+| 接着问 | 收尾后学生自由提问，老师只回答、不出题，设一个防失控的上限 | 不评分 |
+
+- 学习对话 prompt：`prompts/learning-chat-v2.md`。知识点信息放在第一条用户消息里，system prompt 不变；收尾时输出“【学习结束】”作为结束标记
+- 评分建议 prompt：`prompts/rating-suggestion-v3.md`。以完整作答为主要依据、以知识点要点为标准，输出 `analysis`、`outOfScopeGaps`、`rating`、`weakPoints`（Spring AI 按字段名字母顺序生成 Schema，模型也按这个顺序输出，所以依据排在第一个）
+- `weakPoints` 供复习时针对性提问（#21）；`outOfScopeGaps` 和“接着问”中的新内容在学完后成为候选知识点，复用草稿确认流程（#15、#17）
+- 用户确认的评分为准，AI 建议的评分同时记录
+
 ## 待补充
 
 - [ ] 接口设计：各模块的 URL、参数和返回值。不在开工前一次定完，每个 issue 在方案中确定自己的接口，完成后汇总到本文档（见决策 007）
-- [ ] 知识点抽取、学习对话、评分建议三类 prompt 的设计（抽取 prompt 已定，见决策 006）
+- [x] 知识点抽取、学习对话、评分建议三类 prompt 的设计：抽取见决策 006，学习对话与评分建议见决策 008
 - [x] 后端包结构与分层约定
 - [x] M0 结论：用 30 道样本题验证粒度标准和类型判断，见决策 006
