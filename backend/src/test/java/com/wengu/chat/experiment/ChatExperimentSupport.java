@@ -34,7 +34,7 @@ final class ChatExperimentSupport {
 
     static final List<String> CSV_HEADER = List.of(
             "知识点", "类型", "作者学习前的自述", "学生回答次数", "模型主动结束",
-            "rating_ai", "AI 的判断依据", "还没掌握的点", "自评", "差距（AI − 自评）", "学懂了吗", "追问有效吗", "备注");
+            "rating_ai", "AI 的判断依据", "还没掌握的点", "超出范围的缺口", "自评", "差距（AI − 自评）", "学懂了吗", "追问有效吗", "备注");
 
     private ChatExperimentSupport() {
     }
@@ -105,7 +105,8 @@ final class ChatExperimentSupport {
                 ? AI_HEADING + "\n\n调用失败：" + ratingError
                 : AI_HEADING + "\n\n" + RATING_PREFIX + suggestion.rating().display()
                 + "\n- 判断依据：" + suggestion.analysis()
-                + "\n- 还没掌握的点：" + weakPoints(suggestion, "；"));
+                + "\n- 还没掌握的点：" + join(suggestion.weakPoints(), "；")
+                + "\n- 超出范围的缺口：" + join(suggestion.outOfScopeGaps(), "；"));
         return String.join("\n\n", parts) + "\n";
     }
 
@@ -178,7 +179,8 @@ final class ChatExperimentSupport {
                 endedByModel ? "是" : "否",
                 suggestion == null ? "" : suggestion.rating().display(),
                 suggestion == null ? "" : nullToEmpty(suggestion.analysis()),
-                suggestion == null ? "" : weakPoints(suggestion, "\n"),
+                suggestion == null ? "" : join(suggestion.weakPoints(), "\n"),
+                suggestion == null ? "" : join(suggestion.outOfScopeGaps(), "\n"),
                 self.rating().display(),
                 gap,
                 self.understood(),
@@ -199,8 +201,9 @@ final class ChatExperimentSupport {
                 .collect(Collectors.joining("\n\n"));
     }
 
-    private static String weakPoints(RatingSuggestion suggestion, String delimiter) {
-        return suggestion.weakPoints() == null ? "" : String.join(delimiter, suggestion.weakPoints());
+    /** 模型可能漏掉列表字段，此时为 null。 */
+    private static String join(List<String> items, String delimiter) {
+        return items == null ? "" : String.join(delimiter, items);
     }
 
     private static String typeLabel(ChatKnowledgePoint kp) {

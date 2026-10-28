@@ -42,10 +42,10 @@ import java.util.stream.Stream;
  */
 public class RerateExperiment {
 
-    /** 参与对比的 prompt 版本及其输出格式。v2 用原来的 RatingSuggestion，和当时评分的条件一致。 */
+    /** 参与对比的 prompt 版本及其输出格式。旧版本用当时的输出格式，和当时评分的条件一致。 */
     static final List<Version> VERSIONS = List.of(
-            new Version("v2", RatingSuggestion.class),
-            new Version("v3", SuggestionV3.class));
+            new Version("v2", SuggestionV2.class),
+            new Version("v3", RatingSuggestion.class));
 
     static final int RUNS = 3;
 
@@ -54,13 +54,8 @@ public class RerateExperiment {
     private static final List<Path> KNOWLEDGE_POINT_FILES = List.of(
             DATA.resolve("samples/chat-kps.json"), DATA.resolve("samples/chat-kps-v1.json"));
 
-    /**
-     * v3 的输出格式，比 v2 多了 outOfScopeGaps。字段按字母顺序输出（analysis、outOfScopeGaps、rating、weakPoints），
-     * 模型先把要点以外的内容分出去，再给评分。v3 确定采用后并入 RatingSuggestion，这里删掉。
-     *
-     * @param outOfScopeGaps 学生还不会、但超出要点范围的内容，每条是一个可以单独学习的知识点标题
-     */
-    record SuggestionV3(String analysis, List<String> outOfScopeGaps, Rating rating, List<String> weakPoints) {
+    /** v2 的输出格式：v3 起 RatingSuggestion 多了 outOfScopeGaps，重跑 v2 时仍用当时的三个字段。 */
+    record SuggestionV2(String analysis, Rating rating, List<String> weakPoints) {
     }
 
     /** 评分 prompt 的版本号（对应 prompts/rating-suggestion-版本号.md）和它的输出格式。 */
@@ -206,7 +201,7 @@ public class RerateExperiment {
     private static Rating ratingOf(Object suggestion) {
         return switch (suggestion) {
             case RatingSuggestion s -> s.rating();
-            case SuggestionV3 s -> s.rating();
+            case SuggestionV2 s -> s.rating();
             default -> throw new IllegalArgumentException("未知的输出格式：" + suggestion);
         };
     }

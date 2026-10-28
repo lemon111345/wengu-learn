@@ -61,13 +61,14 @@ class ChatExperimentSupportTest {
     @Test
     void CSV行计算差距并正确转义() {
         SelfAssessment self = new SelfAssessment(Rating.GOOD, "是", "有效，但第二问偏了", "说 \"还行\"");
-        RatingSuggestion ai = new RatingSuggestion("回答完整, 无遗漏", Rating.EASY, List.of("覆盖索引", "索引代价"));
+        RatingSuggestion ai = new RatingSuggestion("回答完整, 无遗漏", List.of("B+ 树为什么矮？"), Rating.EASY,
+                List.of("覆盖索引", "索引代价"));
 
         String row = ChatExperimentSupport.csvRow(kp, 4, true, self, ai);
 
         assertThat(row)
                 .startsWith("\"什么是回表？\",\"CONCEPT（原子概念）\",\"很熟\",\"4\",\"是\",\"EASY（简单）\"")
-                .contains("\"回答完整, 无遗漏\",\"覆盖索引\n索引代价\",\"GOOD（良好）\",\"1\"")
+                .contains("\"回答完整, 无遗漏\",\"覆盖索引\n索引代价\",\"B+ 树为什么矮？\",\"GOOD（良好）\",\"1\"")
                 .endsWith("\"说 \"\"还行\"\"\"");
     }
 
@@ -78,7 +79,7 @@ class ChatExperimentSupportTest {
                 ChatTurn.user("主键索引，叶子节点存整行"),
                 ChatTurn.assistant("对。参考答法……\n\n【学习结束】"));
         SelfAssessment self = new SelfAssessment(Rating.GOOD, "是", "有效", "");
-        RatingSuggestion ai = new RatingSuggestion("答出了核心", Rating.HARD, List.of("覆盖索引"));
+        RatingSuggestion ai = new RatingSuggestion("答出了核心", List.of(), Rating.HARD, List.of("覆盖索引"));
 
         ChatExperimentSupport.ParsedTranscript parsed =
                 ChatExperimentSupport.parseTranscript(ChatExperimentSupport.transcript(kp, dialogue, self, ai, null));
@@ -107,6 +108,6 @@ class ChatExperimentSupportTest {
 
         String row = ChatExperimentSupport.csvRow(kp, 8, false, self, null);
 
-        assertThat(row).contains("\"否\",\"\",\"\",\"\",\"HARD（困难）\",\"\"");
+        assertThat(row).contains("\"否\",\"\",\"\",\"\",\"\",\"HARD（困难）\",\"\"");
     }
 }

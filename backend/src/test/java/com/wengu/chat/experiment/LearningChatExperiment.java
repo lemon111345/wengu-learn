@@ -51,7 +51,7 @@ import java.util.Set;
 public class LearningChatExperiment {
 
     static final String CHAT_PROMPT_VERSION = "v2";
-    static final String RATING_PROMPT_VERSION = "v2";
+    static final String RATING_PROMPT_VERSION = "v3";
 
     /** 讲解需要一些变化，但 DeepSeek 默认的 1.0 在抽取实验中波动很大，先用 0.7 观察。 */
     static final double CHAT_TEMPERATURE = 0.7;
@@ -193,6 +193,8 @@ public class LearningChatExperiment {
             System.out.println("判断依据：" + suggestion.analysis());
             System.out.println("还没掌握的点：" + (suggestion.weakPoints() == null || suggestion.weakPoints().isEmpty()
                     ? "无" : String.join("；", suggestion.weakPoints())));
+            System.out.println("超出范围的缺口：" + (suggestion.outOfScopeGaps() == null || suggestion.outOfScopeGaps().isEmpty()
+                    ? "无" : String.join("；", suggestion.outOfScopeGaps())));
         } else {
             System.out.println("\n[评分建议失败] " + ratingError);
         }
