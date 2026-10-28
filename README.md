@@ -69,4 +69,6 @@ cd backend
 
 ## 许可
 
-[MIT](LICENSE)。本项目包含移植自第三方开源项目的代码，见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+[GNU AGPL-3.0](LICENSE)。可以自由使用、修改和自部署；如果修改后通过网络对外提供服务，需要按同样的许可公开修改后的完整源码。
+
+本项目包含移植自第三方开源项目的代码（MIT 许可），见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
