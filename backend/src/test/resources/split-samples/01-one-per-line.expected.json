@@ -1,0 +1,14 @@
+[
+  {"text": "synchronized 和 ReentrantLock 有什么区别？", "followUps": []},
+  {"text": "volatile 能保证原子性吗？", "followUps": []},
+  {"text": "什么是 CAS？它有什么问题？", "followUps": []},
+  {"text": "线程池的核心参数有哪些？", "followUps": []},
+  {"text": "为什么不推荐用 Executors 创建线程池？", "followUps": []},
+  {"text": "ThreadLocal 为什么可能导致内存泄漏？", "followUps": []},
+  {"text": "AQS 的原理是什么", "followUps": []},
+  {"text": "说说 Java 中线程的几种状态", "followUps": []},
+  {"text": "死锁产生的四个必要条件是什么？", "followUps": []},
+  {"text": "线上 CPU 占用过高，你会怎么排查？", "followUps": []},
+  {"text": "CountDownLatch 和 CyclicBarrier 有什么区别？", "followUps": []},
+  {"text": "说说 happens-before 原则", "followUps": []}
+]

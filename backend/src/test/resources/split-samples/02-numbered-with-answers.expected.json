@@ -1,0 +1,10 @@
+[
+  {"text": "什么是 MySQL 的 MVCC？", "followUps": []},
+  {"text": "InnoDB 为什么用 B+ 树做索引？", "followUps": []},
+  {"text": "一条 SQL 很慢，你会怎么分析？", "followUps": []},
+  {"text": "什么情况下索引会失效？", "followUps": []},
+  {"text": "redo log 和 binlog 有什么区别？", "followUps": []},
+  {"text": "为什么需要两阶段提交？", "followUps": []},
+  {"text": "MySQL 的隔离级别有哪些？默认是哪个？", "followUps": []},
+  {"text": "说说间隙锁的作用", "followUps": []}
+]

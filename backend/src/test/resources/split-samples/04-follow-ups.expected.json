@@ -1,0 +1,9 @@
+[
+  {"text": "说说 TCP 三次握手的过程", "followUps": ["为什么不能是两次握手？", "第三次握手的 ACK 丢了会怎样？"]},
+  {"text": "浏览器输入 URL 到页面显示，中间发生了什么？", "followUps": ["DNS 解析的过程是怎样的？", "浏览器拿到 HTML 后是怎么渲染页面的？"]},
+  {"text": "HTTPS 是怎么保证安全的？", "followUps": ["为什么不全程使用非对称加密？"]},
+  {"text": "HTTP/1.1 和 HTTP/2 有什么区别？", "followUps": []},
+  {"text": "HTTP/2 的多路复用解决了什么问题？", "followUps": []},
+  {"text": "TCP 和 UDP 有什么区别？", "followUps": ["什么场景下选 UDP？", "基于 UDP 怎么实现可靠传输？"]},
+  {"text": "说说 TCP 的拥塞控制", "followUps": []}
+]
