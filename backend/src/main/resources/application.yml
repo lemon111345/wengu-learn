@@ -3,7 +3,7 @@ spring:
     name: wengu
   datasource:
     # 默认连接仓库根目录 compose.yaml 启动的 MySQL。connectionTimeZone=UTC：Instant 按 UTC 写入 DATETIME，见决策 009
-    url: ${WENGU_DB_URL:jdbc:mysql://localhost:3306/wengu?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true}
+    url: ${WENGU_DB_URL:jdbc:mysql://localhost:3307/wengu?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true}
     username: ${WENGU_DB_USERNAME:wengu}
     password: ${WENGU_DB_PASSWORD:wengu}
   flyway:

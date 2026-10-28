@@ -28,7 +28,8 @@ Redis 在接口入口处做限流；调用大模型和 FSRS 调度都在 Service
 | 层 | 选型 | 理由 |
 | --- | --- | --- |
 | 后端框架 | Spring Boot 4，Java 21，Maven | 作者最熟悉，也贴合 Java 后端面试；Spring AI 2.x 要求 Spring Boot 4 |
-| 持久层 | MyBatis-Plus + MySQL | 熟悉；MVP 不需要向量检索 |
+| 持久层 | MyBatis-Plus + MySQL 8.4，Flyway 管理表结构 | 熟悉；MVP 不需要向量检索；表结构随代码版本化，见 [决策 009](./decisions/009-数据库迁移与表结构约定.md) |
+| 测试数据库 | Testcontainers（MySQL 8.4） | 迁移脚本和时区处理要在真实的 MySQL 上测，H2 不可靠 |
 | 安全 | Spring Security + JWT | 仅多用户模式启用 |
 | 缓存 / 计数 | Redis | 只用于 AI 接口限流、线上免费额度计数，不做过早缓存 |
 | 大模型接入 | Spring AI 2.0.1（OpenAI starter） | Spring 官方项目，用法与其他 starter 一致；兼容 OpenAI 格式与 Ollama，见 [决策 004](./decisions/004-大模型接入.md) |
@@ -81,18 +82,18 @@ flowchart TB
 
 ## 数据模型
 
-所有业务表都带 user_id，单用户模式下只有一个默认用户，切换多用户时表结构不变。时间统一存 UTC。
+所有业务表都带 user_id，单用户模式下只有一个默认用户（id 为 1，由迁移脚本 V1 插入），切换多用户时表结构不变。时间统一用 `DATETIME(3)` 存 UTC，枚举存名称，不建外键，约定见 [决策 009](./decisions/009-数据库迁移与表结构约定.md)。下表是 V1 建出的表，后续 issue 需要的字段由各自的迁移脚本添加。
 
 | 表 | 作用 | 关键字段 |
 | --- | --- | --- |
 | user | 用户 | id、username、password_hash |
-| user_settings | 用户设置 | user_id、daily_new_limit（每天新学数量）、timezone、day_start_hour（一天的分界，默认 4 点） |
+| user_settings | 用户设置 | user_id、daily_new_limit（每天新学数量，默认 3）、timezone（默认取环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点） |
 | source | 导入的学习材料 | id、user_id、type（题目 / 源码 / 文档 / 截图）、name、content |
-| knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（正常 / 暂停）、排序字段（新知识按它派发，字段名待 #13 确定）、来源草稿（待 #17 确定） |
-| kp_source | 知识点与材料的多对多关联 | kp_id、source_id |
+| knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（ACTIVE / SUSPENDED）、sort_order（新知识按 sort_order、id 派发）、来源草稿（待 #17 确定） |
+| kp_source | 知识点与材料的多对多关联 | kp_id、source_id、user_id |
 | card_state | 调度状态（每次复习都更新） | kp_id、user_id（冗余）、state（学习中 / 复习 / 重学）、step（学习步或重学步序号，复习状态为空）、due、stability、difficulty、last_review（为空表示新知识） |
 | study_session | 一次学习会话，也是自动计时的来源 | id、user_id、kp_id、started_at、ended_at |
-| message | 会话中的对话消息 | id、session_id、role、content、created_at |
+| message | 会话中的对话消息 | id、user_id、session_id、role、content、created_at |
 | review_log | 每次评分的流水 | id、user_id、kp_id、session_id、rating_user、rating_ai、state_before、is_first_review（是否为该知识点的第一次学习）、reviewed_at |
 | 抽取草稿 | 一次抽取的结果，用户确认后才生成知识点 | 保存模型的原始 JSON、prompt 版本、模型名；来源可以是导入批次，也可以是学习会话（候选知识点，见决策 008）；表结构待 #13、#15 确定 |
 | model_config | 模型配置（M3；M1 用环境变量，见决策 007） | user_id、base_url、model、api_key_encrypted |
@@ -142,6 +143,8 @@ flowchart TB
 | 状态表与流水表分离 | card_state 存“现在”，review_log 存“全部历史”，供统计和 FSRS 参数优化 | 只更新状态，不留历史 |
 | 评分以用户确认为准，同时记录 AI 建议 | 用户最了解自己；保留差异以后可评估 AI 准确度 | 完全由 AI 评分 |
 | 单用户 / 多用户同一套代码，用配置切换 | 只维护一个版本；默认单用户，开箱即用 | 维护两个分支 |
+| Flyway 管理表结构，字段随 issue 增量添加 | 空库启动即建好表，每次改动有记录；实现前不预先猜字段，见 [决策 009](./decisions/009-数据库迁移与表结构约定.md) | 手写 SQL 手动执行；V1 一次建好所有字段 |
+| “现在”从注入的 Clock 获取 | 测试中可以换成固定时间，覆盖“今天”的边界 | 直接调用 Instant.now() |
 | Redis 只用于限流和额度计数 | 这些场景需要高频读写计数器；每日计划无需缓存 | 缓存每日计划（过早优化） |
 | 流式输出用 SSE | AI 回复是单向推送，SSE 实现简单 | WebSocket |
 | 知识点抽取：整批题目一次请求，先输出主题分组再输出知识点，temperature 0.2 | 一次请求才能跨题合并；分组字段迫使模型先判断重叠；低 temperature 让结果可复现，见 [决策 005](./decisions/005-知识点抽取实现.md) | 逐题调用；两步调用；默认 temperature |

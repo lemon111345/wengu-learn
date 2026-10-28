@@ -9,7 +9,8 @@ services:
       MYSQL_PASSWORD: wengu
       MYSQL_ROOT_PASSWORD: wengu-root
     ports:
-      - "3306:3306"
+      # 宿主机用 3307，避免和本机已安装的 MySQL（3306）冲突
+      - "3307:3306"
     volumes:
       - mysql-data:/var/lib/mysql
 

@@ -2,17 +2,26 @@
 
 把“AI 追问式学习”和“间隔重复编排”结合的开源学习平台：导入面试题、源码和文档，系统每天安排少量新知识和到期复习，通过 AI 对话学懂，再由 FSRS 算法安排下次复习。
 
-> 项目处于早期开发阶段（M0 技术验证）。需求见 [docs/prd.md](docs/prd.md)，技术方案见 [docs/tech-design.md](docs/tech-design.md)。
+> 项目处于早期开发阶段（M1 自部署闭环）。需求见 [docs/prd.md](docs/prd.md)，技术方案见 [docs/tech-design.md](docs/tech-design.md)。
 
 ## 本地开发
 
-需要 JDK 21。Maven 不用单独安装，使用项目自带的 Maven Wrapper：
+需要 JDK 21 和 Docker。Maven 不用单独安装，使用项目自带的 Maven Wrapper：
 
 ```powershell
+docker compose up -d         # 在仓库根目录启动本地开发用的 MySQL 8.4（宿主机端口 3307）
 cd backend
-.\mvnw.cmd test              # 运行测试
+.\mvnw.cmd test              # 运行测试（测试会用 Testcontainers 另起一个 MySQL，需要 Docker 在运行）
 .\mvnw.cmd spring-boot:run   # 启动后端，健康检查：http://localhost:8080/api/health
 ```
+
+后端启动时由 Flyway 自动建表（`backend/src/main/resources/db/migration`）。数据库连接默认对应 `compose.yaml`，需要时用环境变量覆盖：
+
+| 环境变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `WENGU_DB_URL` | JDBC 地址，需带 `connectionTimeZone=UTC` | `jdbc:mysql://localhost:3307/wengu?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true` |
+| `WENGU_DB_USERNAME` / `WENGU_DB_PASSWORD` | 数据库账号 | `wengu` / `wengu` |
+| `WENGU_TIMEZONE` | 默认用户的时区，只在第一次建库时写入 | `Asia/Shanghai` |
 
 ### 配置大模型
 
