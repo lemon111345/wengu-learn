@@ -1,7 +1,11 @@
 package com.wengu.llm.service;
 
+import com.wengu.llm.dto.ChatTurn;
 import com.wengu.llm.dto.LlmResult;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -9,6 +13,8 @@ import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+
+import java.util.List;
 
 /**
  * 大模型调用入口。其他模块（knowledge、chat）只通过本类调用大模型，不直接使用 Spring AI，
@@ -34,6 +40,31 @@ public class LlmService {
     /** 流式调用：模型每生成一段就推送一段，供 SSE 逐字输出。 */
     public Flux<String> stream(String prompt) {
         return chatClient.prompt().user(prompt).stream().content();
+    }
+
+    /**
+     * 多轮流式调用：带上 system prompt 和此前的全部对话，模型每生成一段就推送一段。
+     * <p>
+     * 模型本身不记得之前的对话，每次都要把完整历史发过去，history 的最后一条通常是用户刚说的话。
+     *
+     * @param temperature 为 null 时不设置，使用服务商的默认值
+     */
+    public Flux<String> stream(String system, List<ChatTurn> history, Double temperature) {
+        List<Message> messages = history.stream().map(LlmService::toMessage).toList();
+        ChatClient.ChatClientRequestSpec request = chatClient.prompt()
+                .system(system)
+                .messages(messages);
+        if (temperature != null) {
+            request = request.options(ChatOptions.builder().temperature(temperature));
+        }
+        return request.stream().content();
+    }
+
+    private static Message toMessage(ChatTurn turn) {
+        return switch (turn.role()) {
+            case USER -> new UserMessage(turn.content());
+            case ASSISTANT -> new AssistantMessage(turn.content());
+        };
     }
 
     /**
