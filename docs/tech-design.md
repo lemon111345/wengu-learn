@@ -89,7 +89,7 @@ flowchart TB
 | --- | --- | --- |
 | user | 用户 | id、username、password_hash |
 | user_settings | 用户设置 | user_id、daily_new_limit（每天新学数量，默认 3）、timezone（默认取环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点） |
-| source | 导入的学习材料 | id、user_id、type（题目 / 源码 / 文档 / 截图）、name、content |
+| source | 导入的学习材料 | id、user_id、type（题目 / 源码 / 文档 / 截图）、name、content（用户粘贴的原文，包括答案）、questions（切分出的题目 JSON，V2 添加，见决策 011） |
 | knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（ACTIVE / SUSPENDED）、sort_order（新知识按 sort_order、id 派发）、来源草稿（待 #17 确定） |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id、user_id |
 | card_state | 调度状态（每次复习都更新） | kp_id、user_id（冗余）、state（学习中 / 复习 / 重学）、step（学习步或重学步序号，复习状态为空）、due、stability、difficulty、last_review（为空表示新知识） |
@@ -197,6 +197,14 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 - 评分建议 prompt：`prompts/rating-suggestion-v3.md`。以完整作答为主要依据、以知识点要点为标准，输出 `analysis`、`outOfScopeGaps`、`rating`、`weakPoints`（Spring AI 按字段名字母顺序生成 Schema，模型也按这个顺序输出，所以依据排在第一个）
 - `weakPoints` 供复习时针对性提问（#21）；`outOfScopeGaps` 和“接着问”中的新内容在学完后成为候选知识点，复用草稿确认流程（#15、#17）
 - 用户确认的评分为准，AI 建议的评分同时记录
+
+## 接口
+
+所有接口返回统一格式 `{code, message, data}`（决策 001）。每个 issue 完成后把自己的接口补到这里。
+
+| 接口 | 作用 | 请求 | 返回 data | 说明 |
+| --- | --- | --- | --- | --- |
+| `POST /api/sources` | 导入面试题并切分（#15） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 调用模型，耗时几秒到十几秒；原文不超过 30000 字、切分后不超过 30 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`。见决策 011 |
 
 ## 待补充
 

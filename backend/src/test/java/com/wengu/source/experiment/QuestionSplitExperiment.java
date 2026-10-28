@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * </ul>
  * 结果写入 data-private/experiments/split-时间戳-模型名/。每份样本跑几次由 -Dsplit.runs 指定，默认 3。
  */
-@SpringBootTest(properties = NoDatabase.PROPERTY)
+@SpringBootTest(properties = {NoDatabase.PROPERTY, NoDatabase.LAZY_PROPERTY})
 @EnabledIfSystemProperty(named = "llm.experiment", matches = "true")
 class QuestionSplitExperiment {
 
