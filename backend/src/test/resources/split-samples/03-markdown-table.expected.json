@@ -1,0 +1,16 @@
+[
+  {"text": "Redis 为什么这么快？", "followUps": []},
+  {"text": "Redis 有哪些数据类型？分别适合什么场景？", "followUps": []},
+  {"text": "RDB 和 AOF 有什么区别？", "followUps": []},
+  {"text": "什么是缓存穿透、缓存击穿和缓存雪崩？", "followUps": []},
+  {"text": "如何保证缓存和数据库的一致性？", "followUps": []},
+  {"text": "SETNX 实现分布式锁有什么问题？", "followUps": []},
+  {"text": "Redisson 的看门狗机制是什么？", "followUps": []},
+  {"text": "Redis 的过期键删除策略有哪些？", "followUps": []},
+  {"text": "Redis 的内存淘汰策略有哪些？", "followUps": []},
+  {"text": "说说 Redis 主从复制的过程", "followUps": []},
+  {"text": "哨兵模式是怎么做故障转移的？", "followUps": []},
+  {"text": "Redis Cluster 为什么是 16384 个槽？", "followUps": []},
+  {"text": "ZSet 的底层数据结构是什么？", "followUps": []},
+  {"text": "大 key 有什么危害？怎么处理？", "followUps": []}
+]

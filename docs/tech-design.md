@@ -76,6 +76,7 @@ flowchart TB
     knowledge --> source
     knowledge --> llm
     knowledge --> review
+    source --> llm
 ```
 
 所有模块都可以依赖 common，图中省略。
@@ -88,7 +89,7 @@ flowchart TB
 | --- | --- | --- |
 | user | 用户 | id、username、password_hash |
 | user_settings | 用户设置 | user_id、daily_new_limit（每天新学数量，默认 3）、timezone（默认取环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点） |
-| source | 导入的学习材料 | id、user_id、type（题目 / 源码 / 文档 / 截图）、name、content |
+| source | 导入的学习材料 | id、user_id、type（题目 / 源码 / 文档 / 截图）、name、content（用户粘贴的原文，包括答案）、questions（切分出的题目 JSON，V2 添加，见决策 011） |
 | knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（ACTIVE / SUSPENDED）、sort_order（新知识按 sort_order、id 派发）、来源草稿（待 #17 确定） |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id、user_id |
 | card_state | 调度状态（每次复习都更新） | kp_id、user_id（冗余）、state（学习中 / 复习 / 重学）、step（学习步或重学步序号，复习状态为空）、due、stability、difficulty、last_review（为空表示新知识） |
@@ -147,6 +148,7 @@ flowchart TB
 | “现在”从注入的 Clock 获取 | 测试中可以换成固定时间，覆盖“今天”的边界 | 直接调用 Instant.now() |
 | Redis 只用于限流和额度计数 | 这些场景需要高频读写计数器；每日计划无需缓存 | 缓存每日计划（过早优化） |
 | 流式输出用 SSE | AI 回复是单向推送，SSE 实现简单 | WebSocket |
+| 题目切分交给模型：只输出题目原文，程序逐字核对，temperature 0；导入分两步，先预览再抽取 | 真实资料格式很乱（表格、带答案、网页复制），规则写不全；逐字核对能查出改写和编造，见 [决策 011](./decisions/011-题目切分交给模型.md) | 规则切分；切分合并进抽取 prompt |
 | 知识点抽取：整批题目一次请求，先输出主题分组再输出知识点，temperature 0.2 | 一次请求才能跨题合并；分组字段迫使模型先判断重叠；低 temperature 让结果可复现，见 [决策 005](./decisions/005-知识点抽取实现.md) | 逐题调用；两步调用；默认 temperature |
 | 按业务分包，FSRS 独立为纯 Java 子包 | 功能代码集中、依赖清晰、便于以后拆分；算法与副作用分离，方便单元测试 | 按层分包 |
 | 自行移植 FSRS-6，状态模型与 py-fsrs 一致，默认无学习步 | 逐条比对 Python 结果；新知识用 last_review 为空表示；知识点是几分钟的 AI 对话，不宜当天重复 | 引入现成 Java 库；增加 NEW 状态；保留分钟级学习步 |
@@ -195,6 +197,14 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 - 评分建议 prompt：`prompts/rating-suggestion-v3.md`。以完整作答为主要依据、以知识点要点为标准，输出 `analysis`、`outOfScopeGaps`、`rating`、`weakPoints`（Spring AI 按字段名字母顺序生成 Schema，模型也按这个顺序输出，所以依据排在第一个）
 - `weakPoints` 供复习时针对性提问（#21）；`outOfScopeGaps` 和“接着问”中的新内容在学完后成为候选知识点，复用草稿确认流程（#15、#17）
 - 用户确认的评分为准，AI 建议的评分同时记录
+
+## 接口
+
+所有接口返回统一格式 `{code, message, data}`（决策 001）。每个 issue 完成后把自己的接口补到这里。
+
+| 接口 | 作用 | 请求 | 返回 data | 说明 |
+| --- | --- | --- | --- | --- |
+| `POST /api/sources` | 导入面试题并切分（#15） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 调用模型，耗时几秒到十几秒；原文不超过 30000 字、切分后不超过 30 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`。见决策 011 |
 
 ## 待补充
 

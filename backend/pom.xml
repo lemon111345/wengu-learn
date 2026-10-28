@@ -55,6 +55,12 @@
 			<artifactId>mysql-connector-j</artifactId>
 			<scope>runtime</scope>
 		</dependency>
+		<!-- 持久层，版本选择见决策 009 -->
+		<dependency>
+			<groupId>com.baomidou</groupId>
+			<artifactId>mybatis-plus-spring-boot4-starter</artifactId>
+			<version>3.5.17</version>
+		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
