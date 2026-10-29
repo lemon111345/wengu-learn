@@ -11,6 +11,9 @@ public class ExtractionDraftItem {
     private Long id;
     private Long userId;
     private Long draftId;
+    /** 来自哪一批（extraction_batch.id） */
+    private Long batchId;
+    /** 在这一批中的学习顺序，从 1 开始 */
     private Integer itemOrder;
     private String title;
     private String summary;
@@ -40,6 +43,14 @@ public class ExtractionDraftItem {
 
     public void setDraftId(Long draftId) {
         this.draftId = draftId;
+    }
+
+    public Long getBatchId() {
+        return batchId;
+    }
+
+    public void setBatchId(Long batchId) {
+        this.batchId = batchId;
     }
 
     public Integer getItemOrder() {

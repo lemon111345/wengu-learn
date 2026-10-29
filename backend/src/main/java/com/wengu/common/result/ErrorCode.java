@@ -13,6 +13,8 @@ public enum ErrorCode {
     BAD_REQUEST(HttpStatus.BAD_REQUEST, "请求参数错误"),
     NOT_FOUND(HttpStatus.NOT_FOUND, "请求的资源不存在"),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "不支持的请求方法"),
+    /** 资源当前的状态不允许这个操作，如草稿还在抽取中时重试 */
+    CONFLICT(HttpStatus.CONFLICT, "当前状态不允许这个操作"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "服务器内部错误"),
 
     /** 模型的切分结果重试后仍不可用。502：上游（模型）返回了无效的结果 */

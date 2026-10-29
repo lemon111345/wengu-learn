@@ -21,7 +21,7 @@ public class DraftController {
         this.draftService = draftService;
     }
 
-    /** 对导入的材料抽取知识点。同步调用模型，耗时 1～3 分钟；失败时也返回草稿，status 为 FAILED。 */
+    /** 对导入的材料抽取知识点。在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET 查看进度。 */
     @PostMapping
     public Result<DraftView> create(@RequestBody CreateDraftRequest request) {
         return Result.ok(draftService.create(request));
@@ -30,5 +30,11 @@ public class DraftController {
     @GetMapping("/{id}")
     public Result<DraftView> get(@PathVariable long id) {
         return Result.ok(draftService.get(id));
+    }
+
+    /** 重新抽取失败的批次，成功的批次不动。 */
+    @PostMapping("/{id}/retry")
+    public Result<DraftView> retry(@PathVariable long id) {
+        return Result.ok(draftService.retry(id));
     }
 }
