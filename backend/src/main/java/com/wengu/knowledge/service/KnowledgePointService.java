@@ -1,6 +1,7 @@
 package com.wengu.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
@@ -20,7 +21,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 知识点：创建、关联材料，以及抽取去重要用的查询。编辑、合并、暂停由 #25 添加。
+ * 知识点：创建、关联材料，以及抽取去重、每日计划要用的查询。编辑、合并、暂停由 #25 添加。
  */
 @Service
 public class KnowledgePointService {
@@ -132,6 +133,28 @@ public class KnowledgePointService {
                 kpSourceMapper.insert(KpSource.of(kpId, sourceId, userId));
             }
         }
+    }
+
+    /**
+     * 每日计划第 6 步：从给定的 id 中去掉暂停的，按学习顺序（sort_order、id）排列（决策 002 第 6 条）。
+     * 候选 id 来自 review，这里只读 knowledge 自己的表；不属于该用户的 id 直接忽略。
+     * <p>
+     * 用 IN 查询、在数据库中排序，MVP 只有几百个知识点，足够快；到几千个以后再改。
+     */
+    public List<KnowledgePointSummary> activeInOrder(long userId, Collection<Long> kpIds) {
+        if (kpIds.isEmpty()) {
+            return List.of();
+        }
+        return knowledgePointMapper.selectList(new LambdaQueryWrapper<KnowledgePoint>()
+                        .select(KnowledgePoint::getId, KnowledgePoint::getTitle, KnowledgePoint::getType)
+                        .eq(KnowledgePoint::getUserId, userId)
+                        .eq(KnowledgePoint::getStatus, KnowledgePointStatus.ACTIVE)
+                        .in(KnowledgePoint::getId, kpIds)
+                        .orderByAsc(KnowledgePoint::getSortOrder)
+                        .orderByAsc(KnowledgePoint::getId))
+                .stream()
+                .map(kp -> new KnowledgePointSummary(kp.getId(), kp.getTitle(), kp.getType()))
+                .toList();
     }
 
     /** 用户已有知识点中最大的 sort_order，没有知识点时为 0。 */
