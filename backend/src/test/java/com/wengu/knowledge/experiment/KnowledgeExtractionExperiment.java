@@ -1,5 +1,6 @@
 package com.wengu.knowledge.experiment;
 
+import com.wengu.NoDatabase;
 import com.wengu.knowledge.dto.ExtractionQuestion;
 import com.wengu.knowledge.dto.ExtractionResult;
 import com.wengu.knowledge.service.ExtractionValidator;
@@ -36,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * </pre>
  * 换模型：设置 WENGU_LLM_MODEL 环境变量。样本题和结果都是私人数据，只放在 data-private（已被 git 忽略）。
  */
-@SpringBootTest
+@SpringBootTest(properties = {NoDatabase.PROPERTY, NoDatabase.LAZY_PROPERTY, NoDatabase.NO_RECOVERY_PROPERTY})
 @EnabledIfSystemProperty(named = "llm.experiment", matches = "true")
 class KnowledgeExtractionExperiment {
 

@@ -68,7 +68,7 @@ class ExtractionDraftServiceTest {
     private ExtractionDraftService draftService;
 
     @Autowired
-    private ExtractionWorker worker;
+    private ExtractionRecovery recovery;
 
     @Autowired
     private SourceService sourceService;
@@ -295,19 +295,19 @@ class ExtractionDraftServiceTest {
                 .eq(ExtractionBatch::getDraftId, running.id())
                 .set(ExtractionBatch::getStatus, BatchStatus.RUNNING));
 
-        assertThat(worker.failInterrupted()).isEqualTo(2);
+        assertThat(recovery.failInterrupted()).isEqualTo(2);
 
         for (DraftView view : List.of(pending, running)) {
             assertThat(draftService.get(view.id()).status()).isEqualTo(DraftStatus.FAILED);
             ExtractionBatch batch = onlyBatch(view);
-            assertThat(batch.getError()).isEqualTo(ExtractionWorker.INTERRUPTED);
+            assertThat(batch.getError()).isEqualTo(ExtractionRecovery.INTERRUPTED);
             assertThat(batch.getFinishedAt()).isNotNull();
         }
         // 线程池里残留的任务不会再领取已经标为失败的批次
         extractionExecutor.runAll();
         verify(extractionService, never()).extract(any());
         // 已经完成的批次不受影响
-        assertThat(worker.failInterrupted()).isZero();
+        assertThat(recovery.failInterrupted()).isZero();
     }
 
     @Test

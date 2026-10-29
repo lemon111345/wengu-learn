@@ -15,8 +15,6 @@ import com.wengu.llm.service.LlmOutputParseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
@@ -31,6 +29,7 @@ import java.util.stream.Collectors;
 
 /**
  * 在后台线程池中执行抽取：按批号顺序处理草稿中排队的批次，每批调用一次模型，结果写回批次和条目（决策 013）。
+ * 服务重启时未完成的批次由 {@link ExtractionRecovery} 处理。
  * <p>
  * 这里的代码运行在线程池的线程里，不使用 CurrentUser：多用户模式下当前用户来自请求线程，到这里就读不到了。
  * 用户 id 一律取自批次。
@@ -44,8 +43,6 @@ public class ExtractionWorker {
     private static final int MAX_ATTEMPTS = 2;
 
     static final String QUEUE_FULL = "任务队列已满";
-
-    static final String INTERRUPTED = "服务重启，任务中断";
 
     private final KnowledgeExtractionService extractionService;
     private final ExtractionBatchMapper batchMapper;
@@ -84,27 +81,6 @@ public class ExtractionWorker {
                     .set(ExtractionBatch::getError, QUEUE_FULL)
                     .set(ExtractionBatch::getFinishedAt, Instant.now(clock)));
         }
-    }
-
-    /**
-     * 服务启动时，把上次运行留下的排队中和执行中的批次标为失败，由用户决定是否重试（决策 013）。
-     * 不自动重跑：重跑要花钱，用户并不知道；如果正是这个任务把进程搞崩了，自动重跑会让应用反复崩溃。
-     * <p>
-     * 前提是只部署一个实例：多个实例时，这里会把其他实例正在执行的批次也标为失败。
-     *
-     * @return 标为失败的批次数
-     */
-    @EventListener(ApplicationReadyEvent.class)
-    public int failInterrupted() {
-        int count = batchMapper.update(new LambdaUpdateWrapper<ExtractionBatch>()
-                .in(ExtractionBatch::getStatus, BatchStatus.PENDING, BatchStatus.RUNNING)
-                .set(ExtractionBatch::getStatus, BatchStatus.FAILED)
-                .set(ExtractionBatch::getError, INTERRUPTED)
-                .set(ExtractionBatch::getFinishedAt, Instant.now(clock)));
-        if (count > 0) {
-            log.warn("服务重启，{} 个未完成的抽取批次已标为失败", count);
-        }
-        return count;
     }
 
     /** 按批号顺序执行草稿中排队的批次。 */
