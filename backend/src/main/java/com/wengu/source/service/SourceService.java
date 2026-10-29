@@ -105,6 +105,22 @@ public class SourceService {
     }
 
     /**
+     * 读取导入时切分出的题目，供抽取使用。题号只在同一份材料内唯一。
+     *
+     * @throws BusinessException 材料不存在或不属于当前用户时为 NOT_FOUND；材料没有题目时为 BAD_REQUEST
+     */
+    public List<SourceQuestion> getQuestions(long sourceId) {
+        Source source = sourceMapper.selectById(sourceId);
+        if (source == null || source.getUserId() != currentUser.id()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "材料不存在");
+        }
+        if (source.getQuestions() == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "这份材料没有题目");
+        }
+        return List.of(jsonMapper.readValue(source.getQuestions(), SourceQuestion[].class));
+    }
+
+    /**
      * 调用模型切分，返回去重后的题目。只有输出解析失败或校验不通过时才重试；
      * 模型调用本身抛出的异常（网络错误、Key 不对）重试也没用，直接抛出。
      */

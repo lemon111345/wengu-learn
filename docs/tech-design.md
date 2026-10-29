@@ -96,7 +96,8 @@ flowchart TB
 | study_session | 一次学习会话，也是自动计时的来源 | id、user_id、kp_id、started_at、ended_at |
 | message | 会话中的对话消息 | id、user_id、session_id、role、content、created_at |
 | review_log | 每次评分的流水 | id、user_id、kp_id、session_id、rating_user、rating_ai、state_before、is_first_review（是否为该知识点的第一次学习）、reviewed_at |
-| 抽取草稿 | 一次抽取的结果，用户确认后才生成知识点 | 保存模型的原始 JSON、prompt 版本、模型名；来源可以是导入批次，也可以是学习会话（候选知识点，见决策 008）；表结构待 #13、#15 确定 |
+| extraction_draft | 一次抽取，用户确认后才生成知识点（V3 添加） | id、user_id、source_id（会话来源由 #31 添加，见决策 008）、status（READY / FAILED）、questions（发给模型的题目）、raw_output、error（不返回前端）、attempts、prompt_version、model、prompt_tokens、completion_tokens（多次调用累加），见决策 012 |
+| extraction_draft_item | 草稿中的一个知识点（V3 添加） | id、user_id、draft_id、item_order、title、summary、type、source_question_ids（如 "1,3,5"，对应 source 中的题号）；勾选状态由 #17 添加 |
 | model_config | 模型配置（M3；M1 用环境变量，见决策 007） | user_id、base_url、model、api_key_encrypted |
 
 关键索引：
@@ -205,6 +206,8 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 接口 | 作用 | 请求 | 返回 data | 说明 |
 | --- | --- | --- | --- | --- |
 | `POST /api/sources` | 导入面试题并切分（#15） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 调用模型，耗时几秒到十几秒；原文不超过 30000 字、切分后不超过 30 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`。见决策 011 |
+| `POST /api/drafts` | 抽取知识点，生成草稿（#15） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, status, items: [{id, order, title, summary, type, sourceQuestionIds}]}` | 同步调用模型，耗时 1～3 分钟；抽取失败也返回 200 和草稿，status 为 FAILED、items 为空；材料不存在 404，题号不存在或为空 400。见决策 012 |
+| `GET /api/drafts/{id}` | 查看草稿（#15） | — | 同上 | 不存在或不属于当前用户 404 |
 
 ## 待补充
 

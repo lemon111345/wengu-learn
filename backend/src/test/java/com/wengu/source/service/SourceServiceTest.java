@@ -21,6 +21,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -186,6 +187,34 @@ class SourceServiceTest {
         assertThatThrownBy(() -> sourceService.importQuestions(new ImportQuestionsRequest("Java 基础", null)))
                 .hasMessageContaining("请粘贴面试题");
         verify(splitService, never()).split(anyString());
+    }
+
+    @Test
+    void 读取导入时保存的题目() {
+        when(splitService.split(anyString())).thenReturn(result(
+                q("说说 HashMap 的原理？", "为什么容量是 2 的幂？"),
+                q("什么是 MVCC？")));
+        ImportedSource imported = sourceService.importQuestions(request(CONTENT));
+
+        assertThat(sourceService.getQuestions(imported.id())).isEqualTo(imported.questions());
+    }
+
+    @Test
+    void 读取不存在或不属于当前用户的材料时报404() {
+        Source others = new Source();
+        others.setUserId(999L);
+        others.setType(SourceType.QUESTION);
+        others.setName("别人的题");
+        others.setContent("什么是 MVCC？");
+        others.setQuestions("[]");
+        others.setCreatedAt(Instant.now());
+        sourceMapper.insert(others);
+
+        for (long id : new long[]{others.getId(), others.getId() + 1}) {
+            assertThatThrownBy(() -> sourceService.getQuestions(id))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+        }
     }
 
     private static LlmOutputParseException parseException() {
