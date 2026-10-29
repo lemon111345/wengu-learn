@@ -1,15 +1,20 @@
 package com.wengu.knowledge.dto;
 
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+
 import java.util.List;
 
 /**
  * 一次抽取的结果，也是要求模型返回的 JSON 结构的根对象。
  * <p>
- * groups 必须排在 knowledgePoints 前面：模型按顺序生成，先写下分组和重叠判断，输出知识点时才能据此合并。
- * Spring AI 生成的 JSON Schema 按字段名字母排序，不按声明顺序，groups 在前是因为 g 排在 k 前面。改字段名时要注意。
+ * 字段顺序就是模型的思考顺序：先写分组和重叠判断，再写哪些题已被已有知识点覆盖，最后只为剩下的内容输出知识点。
+ * Spring AI 生成 JSON Schema 时默认按字段名字母排序，所以用 @JsonPropertyOrder 固定（决策 011 实测有效）。
  *
  * @param groups          主题分组，只是推理草稿，不入库
- * @param knowledgePoints 抽取出的知识点
+ * @param covered         已被已有知识点覆盖的题；没有给出已有知识点时为空（决策 014）
+ * @param knowledgePoints 抽取出的新知识点
  */
-public record ExtractionResult(List<TopicGroup> groups, List<ExtractedKnowledgePoint> knowledgePoints) {
+@JsonPropertyOrder({"groups", "covered", "knowledgePoints"})
+public record ExtractionResult(List<TopicGroup> groups, List<CoveredQuestion> covered,
+                               List<ExtractedKnowledgePoint> knowledgePoints) {
 }

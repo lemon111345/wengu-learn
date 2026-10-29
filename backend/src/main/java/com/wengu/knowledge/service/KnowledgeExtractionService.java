@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 @Service
 public class KnowledgeExtractionService {
 
-    public static final String PROMPT_VERSION = "v5";
+    public static final String PROMPT_VERSION = "v6";
 
     /** 抽取要的是稳定，不是多样：默认 temperature（DeepSeek 为 1.0）下，同一 prompt 两次结果差别很大。 */
     public static final double TEMPERATURE = 0.2;
@@ -36,21 +36,35 @@ public class KnowledgeExtractionService {
         this.systemPrompt = loadPrompt();
     }
 
+    /** 不带去重上下文的抽取。 */
+    public LlmResult<ExtractionResult> extract(List<ExtractionQuestion> questions) {
+        return extract(questions, DedupContext.EMPTY);
+    }
+
     /**
-     * 抽取知识点。返回的结果尚未校验，调用方用 {@link ExtractionValidator} 检查。
+     * 抽取知识点，context 中已有的内容不再输出成新知识点，而是写进 covered（决策 014）。
+     * 返回的结果尚未校验，调用方用 {@link ExtractionValidator} 检查。
      *
      * @throws com.wengu.llm.service.LlmOutputParseException 模型返回无法解析时抛出
      */
-    public LlmResult<ExtractionResult> extract(List<ExtractionQuestion> questions) {
-        return llmService.call(systemPrompt, formatQuestions(questions), ExtractionResult.class, TEMPERATURE);
+    public LlmResult<ExtractionResult> extract(List<ExtractionQuestion> questions, DedupContext context) {
+        return llmService.call(systemPrompt, formatQuestions(questions, context), ExtractionResult.class, TEMPERATURE);
     }
 
-    /** 题目列表格式：每行“[题号] 题目”，题号即模型在 sourceQuestionIds 中引用的数字。 */
-    static String formatQuestions(List<ExtractionQuestion> questions) {
+    /**
+     * 用户消息。题目每行“[题号] 题目”，题号即模型在 sourceQuestionIds 中引用的数字。
+     * 有去重上下文时，在题目前面先列已有知识点，每行“[E编号] 标题”；没有时和 v5 的输入完全相同。
+     */
+    static String formatQuestions(List<ExtractionQuestion> questions, DedupContext context) {
         String lines = questions.stream()
                 .map(q -> "[" + q.id() + "] " + q.text().strip())
                 .collect(Collectors.joining("\n"));
-        return "以下是 " + questions.size() + " 道面试题，方括号内是题号：\n\n" + lines;
+        String questionPart = "以下是 " + questions.size() + " 道面试题，方括号内是题号：\n\n" + lines;
+        if (context.isEmpty()) {
+            return questionPart;
+        }
+        return "以下是已有的 " + context.entries().size() + " 个知识点，方括号内是编号：\n\n" + context.format()
+                + "\n\n" + questionPart;
     }
 
     private static String loadPrompt() {
