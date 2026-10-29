@@ -1,5 +1,6 @@
 package com.wengu.source.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.wengu.common.context.CurrentUser;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
@@ -21,7 +22,10 @@ import tools.jackson.databind.json.JsonMapper;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 学习材料的导入和读取。导入面试题时调用模型切分题目，切分结果和原文一起保存，供用户预览后发起抽取（见决策 011）。
@@ -124,6 +128,21 @@ public class SourceService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "这份材料没有题目");
         }
         return List.of(jsonMapper.readValue(source.getQuestions(), SourceQuestion[].class));
+    }
+
+    /**
+     * 按 id 查材料名称，供草稿列表显示。只查 id 和 name 两列，不读原文；不存在或不属于当前用户的 id 不在结果中。
+     */
+    public Map<Long, String> getNames(Collection<Long> sourceIds) {
+        if (sourceIds.isEmpty()) {
+            return Map.of();
+        }
+        return sourceMapper.selectList(new LambdaQueryWrapper<Source>()
+                        .select(Source::getId, Source::getName)
+                        .eq(Source::getUserId, currentUser.id())
+                        .in(Source::getId, sourceIds))
+                .stream()
+                .collect(Collectors.toMap(Source::getId, Source::getName));
     }
 
     /**

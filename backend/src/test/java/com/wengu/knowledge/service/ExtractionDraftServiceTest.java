@@ -10,6 +10,7 @@ import com.wengu.knowledge.dto.CoveredQuestion;
 import com.wengu.knowledge.dto.CoveredView;
 import com.wengu.knowledge.dto.CreateDraftRequest;
 import com.wengu.knowledge.dto.DraftItemView;
+import com.wengu.knowledge.dto.DraftSummary;
 import com.wengu.knowledge.dto.DraftView;
 import com.wengu.knowledge.dto.ExtractedKnowledgePoint;
 import com.wengu.knowledge.dto.ExtractionQuestion;
@@ -549,5 +550,47 @@ class ExtractionDraftServiceTest {
         assertThat(view.status()).isEqualTo(DraftStatus.READY);
         assertThat(view.covered()).isEmpty();
         assertThat(onlyBatch(view).getAttempts()).isEqualTo(2);
+    }
+
+    @Test
+    void 草稿列表新的在前且状态和详情一致() {
+        // 依次用于：第一份草稿第一次（失败）、第一份草稿重试、第二份草稿。
+        // 确认的草稿放在后面做：确认后生成的知识点会进入去重上下文，再抽出同样的标题就校验不通过了
+        when(extractionService.extract(anyList(), any()))
+                .thenThrow(new IllegalStateException("连接超时"))
+                .thenReturn(validResult())
+                .thenReturn(validResult());
+        DraftView retried = createAndRun(null);
+        draftService.retry(retried.id());
+        extractionExecutor.runAll();
+        DraftView confirmed = createAndRun(null);
+        draftService.confirm(confirmed.id(), null);
+        DraftView running = draftService.create(new CreateDraftRequest(sourceId, null));
+
+        List<DraftSummary> list = draftService.list();
+
+        assertThat(list).extracting(DraftSummary::id)
+                .containsExactly(running.id(), confirmed.id(), retried.id());
+        // 重试过的草稿有一行旧的失败批次，状态要按最新一行算
+        assertThat(list).extracting(DraftSummary::status)
+                .containsExactly(DraftStatus.RUNNING, DraftStatus.CONFIRMED, DraftStatus.READY);
+        assertThat(list).allSatisfy(d -> {
+            assertThat(d.sourceId()).isEqualTo(sourceId);
+            assertThat(d.sourceName()).isEqualTo("Java 基础");
+            assertThat(d.createdAt()).isNotNull();
+        });
+    }
+
+    @Test
+    void 草稿列表最多返回20份() {
+        long last = 0;
+        for (int i = 0; i < ExtractionDraftService.LIST_LIMIT + 1; i++) {
+            last = draftService.create(new CreateDraftRequest(sourceId, null)).id();
+        }
+
+        List<DraftSummary> list = draftService.list();
+
+        assertThat(list).hasSize(ExtractionDraftService.LIST_LIMIT);
+        assertThat(list.getFirst().id()).isEqualTo(last);
     }
 }

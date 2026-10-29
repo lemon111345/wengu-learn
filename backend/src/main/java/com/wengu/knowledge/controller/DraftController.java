@@ -3,6 +3,7 @@ package com.wengu.knowledge.controller;
 import com.wengu.common.result.Result;
 import com.wengu.knowledge.dto.ConfirmDraftRequest;
 import com.wengu.knowledge.dto.CreateDraftRequest;
+import com.wengu.knowledge.dto.DraftSummary;
 import com.wengu.knowledge.dto.DraftView;
 import com.wengu.knowledge.service.ExtractionDraftService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -11,6 +12,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/drafts")
@@ -26,6 +29,12 @@ public class DraftController {
     @PostMapping
     public Result<DraftView> create(@RequestBody CreateDraftRequest request) {
         return Result.ok(draftService.create(request));
+    }
+
+    /** 最近的 20 份草稿，新的在前。 */
+    @GetMapping
+    public Result<List<DraftSummary>> list() {
+        return Result.ok(draftService.list());
     }
 
     @GetMapping("/{id}")
