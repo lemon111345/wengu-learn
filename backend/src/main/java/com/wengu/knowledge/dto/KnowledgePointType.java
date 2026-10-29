@@ -29,4 +29,12 @@ public enum KnowledgePointType {
     public String label() {
         return label;
     }
+
+    /**
+     * 是否参与调度（进入每日计划）。不参与的类型不初始化 card_state，由 knowledge 在创建知识点时判断（决策 007）：
+     * SYSTEM_DESIGN 在 M1 只标记；EXPERIENCE 要结合用户源码追问，M2 有了源码导入后再启用。
+     */
+    public boolean isScheduled() {
+        return this != SYSTEM_DESIGN && this != EXPERIENCE;
+    }
 }
