@@ -2,8 +2,12 @@ package com.wengu.review.service;
 
 import com.wengu.TestcontainersConfiguration;
 import com.wengu.review.entity.CardState;
+import com.wengu.review.entity.ReviewLog;
+import com.wengu.review.fsrs.Card;
+import com.wengu.review.fsrs.Rating;
 import com.wengu.review.fsrs.State;
 import com.wengu.review.mapper.CardStateMapper;
+import com.wengu.review.mapper.ReviewLogMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,6 +17,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.test.context.bean.override.convention.TestBean;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -39,9 +44,13 @@ class ReviewServiceTest {
     @Autowired
     private CardStateMapper cardStateMapper;
 
+    @Autowired
+    private ReviewLogMapper reviewLogMapper;
+
     @BeforeEach
     void clean() {
         cardStateMapper.delete(null);
+        reviewLogMapper.delete(null);
     }
 
     @Test
@@ -58,6 +67,54 @@ class ReviewServiceTest {
         assertThat(card.getDifficulty()).isNull();
         assertThat(card.getDue()).isEqualTo(NOW);
         assertThat(card.getLastReview()).isNull();
+    }
+
+    /** 插入一张复习过的卡片。 */
+    private void reviewedCard(long kpId, long userId, Instant due) {
+        CardState card = CardState.of(kpId, userId, Card.newCard(NOW));
+        card.setState(State.REVIEW);
+        card.setStep(null);
+        card.setDue(due);
+        card.setLastReview(NOW.minus(Duration.ofDays(3)));
+        cardStateMapper.insert(card);
+    }
+
+    private void log(long kpId, long userId, boolean firstReview, Instant reviewedAt) {
+        ReviewLog log = new ReviewLog();
+        log.setUserId(userId);
+        log.setKpId(kpId);
+        log.setRatingUser(Rating.GOOD);
+        log.setStateBefore(State.LEARNING);
+        log.setFirstReview(firstReview);
+        log.setReviewedAt(reviewedAt);
+        reviewLogMapper.insert(log);
+    }
+
+    @Test
+    void 到期复习不包括新卡和之后才到期的卡() {
+        Instant endOfToday = NOW.plus(Duration.ofHours(10));
+        reviewedCard(201, 1, NOW.minus(Duration.ofDays(1)));
+        reviewedCard(202, 1, endOfToday.minusMillis(1));
+        reviewedCard(203, 1, endOfToday);
+        reviewedCard(204, 2, NOW.minus(Duration.ofDays(1)));
+        reviewService.initCards(1, List.of(205L));
+
+        assertThat(reviewService.dueKpIds(1, endOfToday)).containsExactlyInAnyOrder(201L, 202L);
+        assertThat(reviewService.newKpIds(1)).containsExactly(205L);
+    }
+
+    @Test
+    void 只统计时间范围内的第一次学习() {
+        Instant start = NOW.minus(Duration.ofHours(4));
+        Instant end = start.plus(Duration.ofDays(1));
+        log(301, 1, true, start);
+        log(302, 1, true, end.minusMillis(1));
+        log(303, 1, true, start.minusMillis(1));
+        log(304, 1, true, end);
+        log(305, 1, false, NOW);
+        log(306, 2, true, NOW);
+
+        assertThat(reviewService.countFirstReviews(1, start, end)).isEqualTo(2);
     }
 
     @Test
