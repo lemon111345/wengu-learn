@@ -96,8 +96,9 @@ flowchart TB
 | study_session | 一次学习会话，也是自动计时的来源 | id、user_id、kp_id、started_at、ended_at |
 | message | 会话中的对话消息 | id、user_id、session_id、role、content、created_at |
 | review_log | 每次评分的流水 | id、user_id、kp_id、session_id、rating_user、rating_ai、state_before、is_first_review（是否为该知识点的第一次学习）、reviewed_at |
-| extraction_draft | 一次抽取，用户确认后才生成知识点（V3 添加） | id、user_id、source_id（会话来源由 #31 添加，见决策 008）、status（READY / FAILED）、questions（发给模型的题目）、raw_output、error（不返回前端）、attempts、prompt_version、model、prompt_tokens、completion_tokens（多次调用累加），见决策 012 |
-| extraction_draft_item | 草稿中的一个知识点（V3 添加） | id、user_id、draft_id、item_order、title、summary、type、source_question_ids（如 "1,3,5"，对应 source 中的题号）；勾选状态由 #17 添加 |
+| extraction_draft | 一次抽取，用户确认后才生成知识点（V3 添加，V4 精简） | id、user_id、source_id（会话来源由 #31 添加，见决策 008）、created_at；状态由批次推算（RUNNING / READY / FAILED），不存库，见决策 012、013 |
+| extraction_batch | 草稿中的一批，每批调用一次抽取（V4 添加） | id、user_id、draft_id、batch_no（重试时新增一行、批号不变，旧行保留）、status（PENDING / RUNNING / READY / FAILED）、questions（发给模型的题目）、raw_output、error（不返回前端）、attempts、prompt_version、model、prompt_tokens、completion_tokens（多次调用累加）、created_at、started_at、finished_at，见决策 013 |
+| extraction_draft_item | 草稿中的一个知识点（V3 添加） | id、user_id、draft_id、batch_id（V4 添加）、item_order（批内顺序）、title、summary、type、source_question_ids（如 "1,3,5"，对应 source 中的题号）；勾选状态由 #17 添加 |
 | model_config | 模型配置（M3；M1 用环境变量，见决策 007） | user_id、base_url、model、api_key_encrypted |
 
 关键索引：
@@ -149,6 +150,7 @@ flowchart TB
 | “现在”从注入的 Clock 获取 | 测试中可以换成固定时间，覆盖“今天”的边界 | 直接调用 Instant.now() |
 | Redis 只用于限流和额度计数 | 这些场景需要高频读写计数器；每日计划无需缓存 | 缓存每日计划（过早优化） |
 | 流式输出用 SSE | AI 回复是单向推送，SSE 实现简单 | WebSocket |
+| 抽取在后台执行：草稿下面挂批次，状态由批次推算；专用线程池显式提交；重启时未完成的批次标为失败，由用户重试 | 抽取要 1～3 分钟，不能挂着请求；分批不暴露给用户；重跑要花钱，不自动重跑，见 [决策 013](./decisions/013-异步抽取与分批.md) | 一批一份草稿；`@Async`；数据库轮询队列；重启后自动重跑 |
 | 题目切分交给模型：只输出题目原文，程序逐字核对，temperature 0；导入分两步，先预览再抽取 | 真实资料格式很乱（表格、带答案、网页复制），规则写不全；逐字核对能查出改写和编造，见 [决策 011](./decisions/011-题目切分交给模型.md) | 规则切分；切分合并进抽取 prompt |
 | 知识点抽取：整批题目一次请求，先输出主题分组再输出知识点，temperature 0.2 | 一次请求才能跨题合并；分组字段迫使模型先判断重叠；低 temperature 让结果可复现，见 [决策 005](./decisions/005-知识点抽取实现.md) | 逐题调用；两步调用；默认 temperature |
 | 按业务分包，FSRS 独立为纯 Java 子包 | 功能代码集中、依赖清晰、便于以后拆分；算法与副作用分离，方便单元测试 | 按层分包 |
@@ -206,8 +208,9 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 接口 | 作用 | 请求 | 返回 data | 说明 |
 | --- | --- | --- | --- | --- |
 | `POST /api/sources` | 导入面试题并切分（#15） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 调用模型，耗时几秒到十几秒；原文不超过 30000 字、切分后不超过 30 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`。见决策 011 |
-| `POST /api/drafts` | 抽取知识点，生成草稿（#15） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, status, items: [{id, order, title, summary, type, sourceQuestionIds}]}` | 同步调用模型，耗时 1～3 分钟；抽取失败也返回 200 和草稿，status 为 FAILED、items 为空；材料不存在 404，题号不存在或为空 400。见决策 012 |
-| `GET /api/drafts/{id}` | 查看草稿（#15） | — | 同上 | 不存在或不属于当前用户 404 |
+| `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, status, batches: [{no, status, questionIds}], items: [{id, order, title, summary, type, sourceQuestionIds}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。见决策 012、013 |
+| `GET /api/drafts/{id}` | 查看草稿和抽取进度（#15、#16） | — | 同上 | 不存在或不属于当前用户 404 |
+| `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
 
 ## 待补充
 

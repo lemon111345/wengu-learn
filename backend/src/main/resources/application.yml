@@ -10,6 +10,10 @@ spring:
     placeholders:
       # 默认用户的时区，只在第一次建库时写入 user_settings
       default_timezone: ${WENGU_TIMEZONE:Asia/Shanghai}
+  task:
+    execution:
+      # 定义了抽取线程池（ExtractionExecutorConfig）后，仍然创建 Spring Boot 默认的 applicationTaskExecutor
+      mode: force
   ai:
     openai:
       # 兼容 OpenAI 格式的大模型。三项都只从环境变量读取，配置方式见 README。
