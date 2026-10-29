@@ -6,6 +6,8 @@ import com.wengu.TestcontainersConfiguration;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.BatchView;
+import com.wengu.knowledge.dto.CoveredQuestion;
+import com.wengu.knowledge.dto.CoveredView;
 import com.wengu.knowledge.dto.CreateDraftRequest;
 import com.wengu.knowledge.dto.DraftItemView;
 import com.wengu.knowledge.dto.DraftView;
@@ -13,12 +15,16 @@ import com.wengu.knowledge.dto.ExtractedKnowledgePoint;
 import com.wengu.knowledge.dto.ExtractionQuestion;
 import com.wengu.knowledge.dto.ExtractionResult;
 import com.wengu.knowledge.dto.KnowledgePointType;
+import com.wengu.knowledge.dto.ResolvedCovered;
 import com.wengu.knowledge.entity.BatchStatus;
 import com.wengu.knowledge.entity.DraftStatus;
 import com.wengu.knowledge.entity.ExtractionBatch;
+import com.wengu.knowledge.entity.KnowledgePoint;
+import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.mapper.ExtractionBatchMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftMapper;
+import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.llm.dto.LlmResult;
 import com.wengu.llm.service.LlmOutputParseException;
 import com.wengu.source.dto.ImportQuestionsRequest;
@@ -35,7 +41,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import tools.jackson.databind.json.JsonMapper;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -85,6 +93,12 @@ class ExtractionDraftServiceTest {
     @Autowired
     private ExtractionDraftItemMapper itemMapper;
 
+    @Autowired
+    private KnowledgePointMapper knowledgePointMapper;
+
+    @Autowired
+    private JsonMapper jsonMapper;
+
     @MockitoBean
     private QuestionSplitService splitService;
 
@@ -110,6 +124,7 @@ class ExtractionDraftServiceTest {
         itemMapper.delete(null);
         batchMapper.delete(null);
         draftMapper.delete(null);
+        knowledgePointMapper.delete(null);
         when(splitService.split(anyString())).thenReturn(new LlmResult<>(new SplitResult(List.of(
                 new SplitQuestion("说说 HashMap 的原理？", List.of("为什么容量是 2 的幂？")),
                 new SplitQuestion("什么是 MVCC？", List.of()),
@@ -162,7 +177,7 @@ class ExtractionDraftServiceTest {
         assertThat(view.status()).isEqualTo(DraftStatus.RUNNING);
         assertThat(view.batches()).containsExactly(new BatchView(1, BatchStatus.PENDING, List.of(1, 2, 3)));
         assertThat(view.items()).isEmpty();
-        verify(extractionService, never()).extract(any());
+        verify(extractionService, never()).extract(any(), any());
 
         ExtractionBatch batch = onlyBatch(view);
         assertThat(batch.getAttempts()).isZero();
@@ -171,7 +186,7 @@ class ExtractionDraftServiceTest {
 
     @Test
     void 后台一次成功时条目按顺序保存() {
-        when(extractionService.extract(anyList())).thenReturn(validResult());
+        when(extractionService.extract(anyList(), any())).thenReturn(validResult());
 
         DraftView view = createAndRun(null);
 
@@ -193,7 +208,7 @@ class ExtractionDraftServiceTest {
 
     @Test
     void 第一次校验不通过时重试一次且token累加() {
-        when(extractionService.extract(anyList()))
+        when(extractionService.extract(anyList(), any()))
                 .thenReturn(result(kp(1, "只覆盖了第 1 题", 1)))
                 .thenReturn(validResult());
 
@@ -205,12 +220,12 @@ class ExtractionDraftServiceTest {
         assertThat(batch.getError()).isNull();
         assertThat(batch.getPromptTokens()).isEqualTo(2000);
         assertThat(batch.getCompletionTokens()).isEqualTo(1000);
-        verify(extractionService, times(2)).extract(anyList());
+        verify(extractionService, times(2)).extract(anyList(), any());
     }
 
     @Test
     void 两次都失败时保存失败的批次和原始输出() {
-        when(extractionService.extract(anyList()))
+        when(extractionService.extract(anyList(), any()))
                 .thenThrow(new LlmOutputParseException("返回内容不符合要求的 JSON 结构",
                         new LlmResult<>(null, "不是 JSON", "test-model", "stop", 1000, 5), new RuntimeException()))
                 .thenReturn(result(kp(1, "只覆盖了第 1 题", 1)));
@@ -230,7 +245,7 @@ class ExtractionDraftServiceTest {
 
     @Test
     void 模型调用抛异常时不重试并保存失败的批次() {
-        when(extractionService.extract(anyList())).thenThrow(new IllegalStateException("连接超时"));
+        when(extractionService.extract(anyList(), any())).thenThrow(new IllegalStateException("连接超时"));
 
         DraftView view = createAndRun(null);
 
@@ -240,20 +255,20 @@ class ExtractionDraftServiceTest {
         assertThat(batch.getError()).isEqualTo("IllegalStateException: 连接超时");
         assertThat(batch.getRawOutput()).isNull();
         assertThat(batch.getModel()).isNull();
-        verify(extractionService, times(1)).extract(anyList());
+        verify(extractionService, times(1)).extract(anyList(), any());
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void 只抽取勾选的题且题号保持不变() {
-        when(extractionService.extract(anyList())).thenReturn(result(kp(1, "Redis 为什么快？", 3)));
+        when(extractionService.extract(anyList(), any())).thenReturn(result(kp(1, "Redis 为什么快？", 3)));
 
         DraftView view = createAndRun(List.of(3));
 
         assertThat(view.status()).isEqualTo(DraftStatus.READY);
         assertThat(view.batches().getFirst().questionIds()).containsExactly(3);
         ArgumentCaptor<List<ExtractionQuestion>> captor = ArgumentCaptor.forClass(List.class);
-        verify(extractionService).extract(captor.capture());
+        verify(extractionService).extract(captor.capture(), any());
         assertThat(captor.getValue()).containsExactly(new ExtractionQuestion(3, "Redis 为什么快？"));
     }
 
@@ -308,14 +323,14 @@ class ExtractionDraftServiceTest {
         }
         // 线程池里残留的任务不会再领取已经标为失败的批次
         extractionExecutor.runAll();
-        verify(extractionService, never()).extract(any());
+        verify(extractionService, never()).extract(any(), any());
         // 已经完成的批次不受影响
         assertThat(recovery.failInterrupted()).isZero();
     }
 
     @Test
     void 重试时为失败的批次新增一行且旧行保留() {
-        when(extractionService.extract(anyList()))
+        when(extractionService.extract(anyList(), any()))
                 .thenThrow(new IllegalStateException("连接超时"))
                 .thenReturn(validResult());
         DraftView failed = createAndRun(null);
@@ -344,7 +359,7 @@ class ExtractionDraftServiceTest {
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.CONFLICT));
 
-        when(extractionService.extract(anyList())).thenReturn(validResult());
+        when(extractionService.extract(anyList(), any())).thenReturn(validResult());
         extractionExecutor.runAll();
         assertThatThrownBy(() -> draftService.retry(running.id()))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -374,7 +389,7 @@ class ExtractionDraftServiceTest {
     @SuppressWarnings("unchecked")
     void 超过30题时分批依次执行且条目连续编号() {
         long bigSource = importSource(31);
-        when(extractionService.extract(anyList())).thenAnswer(inv -> onePerQuestion(inv.getArgument(0)));
+        when(extractionService.extract(anyList(), any())).thenAnswer(inv -> onePerQuestion(inv.getArgument(0)));
 
         DraftView created = draftService.create(new CreateDraftRequest(bigSource, null));
         assertThat(created.batches()).containsExactly(
@@ -390,14 +405,14 @@ class ExtractionDraftServiceTest {
         assertThat(view.items()).extracting(item -> item.sourceQuestionIds().getFirst())
                 .isEqualTo(IntStream.rangeClosed(1, 31).boxed().toList());
         ArgumentCaptor<List<ExtractionQuestion>> captor = ArgumentCaptor.forClass(List.class);
-        verify(extractionService, times(2)).extract(captor.capture());
+        verify(extractionService, times(2)).extract(captor.capture(), any());
         assertThat(captor.getAllValues()).extracting(List::size).containsExactly(16, 15);
     }
 
     @Test
     void 某批校验不通过时继续执行下一批() {
         long bigSource = importSource(31);
-        when(extractionService.extract(anyList()))
+        when(extractionService.extract(anyList(), any()))
                 .thenReturn(result(kp(1, "只覆盖了第 1 题", 1)))
                 .thenReturn(result(kp(1, "只覆盖了第 1 题", 1)))
                 .thenAnswer(inv -> onePerQuestion(inv.getArgument(0)));
@@ -416,7 +431,7 @@ class ExtractionDraftServiceTest {
     @Test
     void 某批调用模型出错时后面的批次不再执行() {
         long bigSource = importSource(31);
-        when(extractionService.extract(anyList())).thenThrow(new IllegalStateException("Key 不对"));
+        when(extractionService.extract(anyList(), any())).thenThrow(new IllegalStateException("Key 不对"));
 
         DraftView view = createAndRunFrom(bigSource);
 
@@ -425,10 +440,10 @@ class ExtractionDraftServiceTest {
         assertThat(batches).extracting(ExtractionBatch::getError)
                 .containsExactly("IllegalStateException: Key 不对", ExtractionWorker.SKIPPED);
         assertThat(batches.get(1).getAttempts()).isZero();
-        verify(extractionService, times(1)).extract(anyList());
+        verify(extractionService, times(1)).extract(anyList(), any());
 
         // 用户处理好之后重试，两批都重新执行。原来的桩会抛异常，when(...) 写法会触发它，所以用 doAnswer
-        doAnswer(inv -> onePerQuestion(inv.getArgument(0))).when(extractionService).extract(anyList());
+        doAnswer(inv -> onePerQuestion(inv.getArgument(0))).when(extractionService).extract(anyList(), any());
         draftService.retry(view.id());
         extractionExecutor.runAll();
 
@@ -442,5 +457,97 @@ class ExtractionDraftServiceTest {
         DraftView view = draftService.create(new CreateDraftRequest(source, null));
         extractionExecutor.runAll();
         return draftService.get(view.id());
+    }
+
+    /** 插入一个已确认的知识点，模拟 #17 确认草稿后的数据。 */
+    private KnowledgePoint knowledgePoint(long userId, String title, int sortOrder, KnowledgePointStatus status) {
+        KnowledgePoint kp = new KnowledgePoint();
+        kp.setUserId(userId);
+        kp.setType(KnowledgePointType.CONCEPT);
+        kp.setTitle(title);
+        kp.setSummary("要点");
+        kp.setStatus(status);
+        kp.setSortOrder(sortOrder);
+        kp.setCreatedAt(Instant.now());
+        kp.setUpdatedAt(Instant.now());
+        knowledgePointMapper.insert(kp);
+        return kp;
+    }
+
+    @Test
+    void 去重上下文包含当前用户的知识点和前面批次的条目() {
+        // 故意先插排序靠后的，检查按 sort_order 排列；暂停的知识点也算已有；其他用户的不算
+        KnowledgePoint redis = knowledgePoint(1, "Redis 为什么快？", 2, KnowledgePointStatus.SUSPENDED);
+        KnowledgePoint mvcc = knowledgePoint(1, "什么是 MVCC？", 1, KnowledgePointStatus.ACTIVE);
+        knowledgePoint(2, "其他用户的知识点？", 1, KnowledgePointStatus.ACTIVE);
+        long bigSource = importSource(31);
+        when(extractionService.extract(anyList(), any())).thenAnswer(inv -> onePerQuestion(inv.getArgument(0)));
+
+        DraftView view = createAndRunFrom(bigSource);
+
+        assertThat(view.status()).isEqualTo(DraftStatus.READY);
+        ArgumentCaptor<DedupContext> captor = ArgumentCaptor.forClass(DedupContext.class);
+        verify(extractionService, times(2)).extract(anyList(), captor.capture());
+        DedupContext first = captor.getAllValues().get(0);
+        DedupContext second = captor.getAllValues().get(1);
+        assertThat(first.entries()).containsExactly(
+                new DedupContext.Entry("E1", mvcc.getId(), null, "什么是 MVCC？"),
+                new DedupContext.Entry("E2", redis.getId(), null, "Redis 为什么快？"));
+        // 第 2 批还能看到第 1 批的 16 个条目，按批内顺序排在已有知识点后面
+        assertThat(second.entries()).hasSize(18);
+        assertThat(second.entries().get(2).title()).isEqualTo("第 1 题是什么？");
+        assertThat(second.entries().get(2).draftItemId()).isNotNull();
+        assertThat(second.entries().get(17).title()).isEqualTo("第 16 题是什么？");
+        // 每一批实际用的上下文都存了下来
+        assertThat(batches(view).get(1).getContext()).contains("第 16 题是什么？").contains("什么是 MVCC？");
+    }
+
+    @Test
+    void 被覆盖的题换回id入库并在接口中返回() {
+        KnowledgePoint mvcc = knowledgePoint(1, "什么是 MVCC？", 1, KnowledgePointStatus.ACTIVE);
+        long bigSource = importSource(31);
+        // 第 2 批（第 17～31 题）中，第 17 题被已有知识点 E1 和第 1 批的第一个条目 E2 覆盖
+        when(extractionService.extract(anyList(), any())).thenAnswer(inv -> {
+            List<ExtractionQuestion> questions = inv.getArgument(0);
+            if (questions.getFirst().id() != 17) {
+                return onePerQuestion(questions);
+            }
+            List<ExtractionQuestion> rest = questions.subList(1, questions.size());
+            LlmResult<ExtractionResult> partial = onePerQuestion(rest);
+            return new LlmResult<>(new ExtractionResult(List.of(),
+                    List.of(new CoveredQuestion(17, List.of("E1", "E2"), "考的是同一内容")),
+                    partial.content().knowledgePoints()), "raw", "test-model", "stop", 1000, 500);
+        });
+
+        DraftView view = createAndRunFrom(bigSource);
+
+        assertThat(view.status()).isEqualTo(DraftStatus.READY);
+        assertThat(view.items()).hasSize(30);
+        assertThat(view.covered()).containsExactly(new CoveredView(17, List.of("什么是 MVCC？", "第 1 题是什么？")));
+
+        long firstItemId = view.items().getFirst().id();
+        ResolvedCovered stored = List.of(jsonMapper.readValue(batches(view).get(1).getCovered(), ResolvedCovered[].class))
+                .getFirst();
+        assertThat(stored).isEqualTo(new ResolvedCovered(17, List.of(mvcc.getId()), List.of(firstItemId),
+                List.of("什么是 MVCC？", "第 1 题是什么？"), "考的是同一内容"));
+        // 第 1 批没有覆盖的题，存的是空列表
+        assertThat(batches(view).get(0).getCovered()).isEqualTo("[]");
+    }
+
+    @Test
+    void covered引用不存在的编号时校验不通过并重试() {
+        knowledgePoint(1, "什么是 MVCC？", 1, KnowledgePointStatus.ACTIVE);
+        when(extractionService.extract(anyList(), any()))
+                .thenReturn(new LlmResult<>(new ExtractionResult(List.of(),
+                        List.of(new CoveredQuestion(1, List.of("E9"), "编造的编号")),
+                        List.of(kp(1, "MVCC 是怎么实现的？", 2), kp(2, "Redis 为什么快？", 3))),
+                        "raw", "test-model", "stop", 1000, 500))
+                .thenReturn(validResult());
+
+        DraftView view = createAndRun(null);
+
+        assertThat(view.status()).isEqualTo(DraftStatus.READY);
+        assertThat(view.covered()).isEmpty();
+        assertThat(onlyBatch(view).getAttempts()).isEqualTo(2);
     }
 }

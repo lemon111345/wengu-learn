@@ -97,7 +97,7 @@ flowchart TB
 | message | 会话中的对话消息 | id、user_id、session_id、role、content、created_at |
 | review_log | 每次评分的流水 | id、user_id、kp_id、session_id、rating_user、rating_ai、state_before、is_first_review（是否为该知识点的第一次学习）、reviewed_at |
 | extraction_draft | 一次抽取，用户确认后才生成知识点（V3 添加，V4 精简） | id、user_id、source_id（会话来源由 #31 添加，见决策 008）、created_at；状态由批次推算（RUNNING / READY / FAILED），不存库，见决策 012、013 |
-| extraction_batch | 草稿中的一批，每批调用一次抽取（V4 添加） | id、user_id、draft_id、batch_no（重试时新增一行、批号不变，旧行保留）、status（PENDING / RUNNING / READY / FAILED）、questions（发给模型的题目）、raw_output、error（不返回前端）、attempts、prompt_version、model、prompt_tokens、completion_tokens（多次调用累加）、created_at、started_at、finished_at，见决策 013 |
+| extraction_batch | 草稿中的一批，每批调用一次抽取（V4 添加） | id、user_id、draft_id、batch_no（重试时新增一行、批号不变，旧行保留）、status（PENDING / RUNNING / READY / FAILED）、questions（发给模型的题目）、context（这一批用的去重上下文，V5 添加）、covered（被已有内容覆盖的题，换回了知识点 id 或条目 id，带标题快照，V5 添加，见决策 014）、raw_output、error（不返回前端）、attempts、prompt_version、model、prompt_tokens、completion_tokens（多次调用累加）、created_at、started_at、finished_at，见决策 013 |
 | extraction_draft_item | 草稿中的一个知识点（V3 添加） | id、user_id、draft_id、batch_id（V4 添加）、item_order（批内顺序）、title、summary、type、source_question_ids（如 "1,3,5"，对应 source 中的题号）；勾选状态由 #17 添加 |
 | model_config | 模型配置（M3；M1 用环境变量，见决策 007） | user_id、base_url、model、api_key_encrypted |
 
@@ -209,7 +209,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 接口 | 作用 | 请求 | 返回 data | 说明 |
 | --- | --- | --- | --- | --- |
 | `POST /api/sources` | 导入面试题并切分（#15、#16） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 同步调用模型，只有题目时几秒到几十秒，10 万字带答案的资料最长约 95 秒；原文不超过 100000 字、切分后不超过 200 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`。见决策 011 |
-| `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, status, batches: [{no, status, questionIds}], items: [{id, order, title, summary, type, sourceQuestionIds}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。见决策 012、013 |
+| `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, status, batches: [{no, status, questionIds}], items: [{id, order, title, summary, type, sourceQuestionIds}], covered: [{questionId, titles}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；covered 是被已有知识点或同一草稿中其他批次覆盖的题（决策 014）；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。见决策 012、013 |
 | `GET /api/drafts/{id}` | 查看草稿和抽取进度（#15、#16） | — | 同上 | 不存在或不属于当前用户 404 |
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
 

@@ -25,11 +25,12 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
  * 在后台线程池中执行抽取：按批号顺序处理草稿中排队的批次，每批调用一次模型，结果写回批次和条目（决策 013）。
- * 服务重启时未完成的批次由 {@link ExtractionRecovery} 处理。
+ * 每批都带上去重上下文，已有的内容不再重复抽取（决策 014）。服务重启时未完成的批次由 {@link ExtractionRecovery} 处理。
  * <p>
  * 这里的代码运行在线程池的线程里，不使用 CurrentUser：多用户模式下当前用户来自请求线程，到这里就读不到了。
  * 用户 id 一律取自批次。
@@ -47,6 +48,7 @@ public class ExtractionWorker {
     static final String SKIPPED = "前面一批调用模型出错，这一批没有执行";
 
     private final KnowledgeExtractionService extractionService;
+    private final KnowledgePointService knowledgePointService;
     private final ExtractionBatchMapper batchMapper;
     private final ExtractionDraftItemMapper itemMapper;
     private final TaskExecutor executor;
@@ -54,11 +56,12 @@ public class ExtractionWorker {
     private final JsonMapper jsonMapper;
     private final TransactionTemplate transactionTemplate;
 
-    public ExtractionWorker(KnowledgeExtractionService extractionService, ExtractionBatchMapper batchMapper,
-                            ExtractionDraftItemMapper itemMapper,
+    public ExtractionWorker(KnowledgeExtractionService extractionService, KnowledgePointService knowledgePointService,
+                            ExtractionBatchMapper batchMapper, ExtractionDraftItemMapper itemMapper,
                             @Qualifier("extractionExecutor") TaskExecutor executor, Clock clock,
                             JsonMapper jsonMapper, TransactionTemplate transactionTemplate) {
         this.extractionService = extractionService;
+        this.knowledgePointService = knowledgePointService;
         this.batchMapper = batchMapper;
         this.itemMapper = itemMapper;
         this.executor = executor;
@@ -133,10 +136,13 @@ public class ExtractionWorker {
 
         List<ExtractionQuestion> questions = List.of(
                 jsonMapper.readValue(batch.getQuestions(), ExtractionQuestion[].class));
+        // 执行时才构造上下文，前面刚完成的批次也能用上；失败时也保存，为 #9 保留数据
+        DedupContext context = buildContext(batch);
+        batch.setContext(jsonMapper.writeValueAsString(context.entries()));
         ExtractionResult result;
         boolean callSucceeded = true;
         try {
-            result = extractWithRetry(questions, batch);
+            result = extractWithRetry(questions, context, batch);
         } catch (RuntimeException e) {
             // 模型调用本身出错，重试也没用
             batch.setError(e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -146,6 +152,9 @@ public class ExtractionWorker {
         }
         batch.setStatus(result == null ? BatchStatus.FAILED : BatchStatus.READY);
         batch.setFinishedAt(Instant.now(clock));
+        if (result != null) {
+            batch.setCovered(jsonMapper.writeValueAsString(context.resolve(result.covered())));
+        }
 
         List<ExtractionDraftItem> items = result == null ? List.of() : toItems(result, batch);
         // updateById 只更新非空字段。批次在这之前只写过状态和开始时间，其余字段在库里都是空的，不会留下旧值
@@ -154,6 +163,28 @@ public class ExtractionWorker {
             items.forEach(itemMapper::insert);
         });
         return callSucceeded;
+    }
+
+    /**
+     * 去重上下文（决策 014）：用户已有的知识点，加上同一草稿中其他已成功批次的条目，按批号、批内顺序排列。
+     * 成功的批次不会被重试，它的条目一直有效。
+     */
+    private DedupContext buildContext(ExtractionBatch batch) {
+        Map<Long, Integer> readyBatchNos = batchMapper.selectList(new LambdaQueryWrapper<ExtractionBatch>()
+                        .select(ExtractionBatch::getId, ExtractionBatch::getBatchNo)
+                        .eq(ExtractionBatch::getDraftId, batch.getDraftId())
+                        .eq(ExtractionBatch::getStatus, BatchStatus.READY))
+                .stream()
+                .collect(Collectors.toMap(ExtractionBatch::getId, ExtractionBatch::getBatchNo));
+        List<DedupContext.Existing> items = readyBatchNos.isEmpty() ? List.of()
+                : itemMapper.selectList(new LambdaQueryWrapper<ExtractionDraftItem>()
+                        .in(ExtractionDraftItem::getBatchId, readyBatchNos.keySet()))
+                .stream()
+                .sorted(Comparator.comparing((ExtractionDraftItem item) -> readyBatchNos.get(item.getBatchId()))
+                        .thenComparing(ExtractionDraftItem::getItemOrder))
+                .map(item -> new DedupContext.Existing(item.getId(), item.getTitle()))
+                .toList();
+        return DedupContext.of(knowledgePointService.listTitles(batch.getUserId()), items);
     }
 
     /** 前面一批调用模型出错时，把草稿中还在排队的批次标为失败。 */
@@ -184,13 +215,14 @@ public class ExtractionWorker {
      * <p>
      * 只有输出解析失败或校验不通过时才重试；模型调用本身抛出的异常（网络错误、Key 不对）重试也没用，直接抛给调用方。
      */
-    private ExtractionResult extractWithRetry(List<ExtractionQuestion> questions, ExtractionBatch batch) {
+    private ExtractionResult extractWithRetry(List<ExtractionQuestion> questions, DedupContext context,
+                                              ExtractionBatch batch) {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             batch.setAttempts(attempt);
             try {
-                LlmResult<ExtractionResult> result = extractionService.extract(questions);
+                LlmResult<ExtractionResult> result = extractionService.extract(questions, context);
                 record(batch, result);
-                List<String> problems = ExtractionValidator.validate(questions, result.content());
+                List<String> problems = ExtractionValidator.validate(questions, context, result.content());
                 if (problems.isEmpty()) {
                     batch.setError(null);
                     return result.content();

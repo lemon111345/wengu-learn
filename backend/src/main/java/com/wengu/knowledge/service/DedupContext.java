@@ -1,7 +1,11 @@
 package com.wengu.knowledge.service;
 
+import com.wengu.knowledge.dto.CoveredQuestion;
+import com.wengu.knowledge.dto.ResolvedCovered;
+
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -62,6 +66,32 @@ public record DedupContext(List<Entry> entries) {
     public Optional<Entry> find(String label) {
         String wanted = label == null ? "" : label.strip();
         return entries.stream().filter(e -> e.label().equals(wanted)).findFirst();
+    }
+
+    /**
+     * 把模型给出的编号换回知识点 id 或条目 id，并记下当时的标题。应在校验通过后调用；
+     * 找不到的编号直接跳过，一个编号都没找到的题不保留。
+     */
+    public List<ResolvedCovered> resolve(List<CoveredQuestion> covered) {
+        if (covered == null) {
+            return List.of();
+        }
+        List<ResolvedCovered> resolved = new ArrayList<>();
+        for (CoveredQuestion c : covered) {
+            List<Entry> found = (c.existingIds() == null ? List.<String>of() : c.existingIds()).stream()
+                    .map(this::find)
+                    .flatMap(Optional::stream)
+                    .toList();
+            if (found.isEmpty()) {
+                continue;
+            }
+            resolved.add(new ResolvedCovered(c.questionId(),
+                    found.stream().map(Entry::knowledgePointId).filter(Objects::nonNull).toList(),
+                    found.stream().map(Entry::draftItemId).filter(Objects::nonNull).toList(),
+                    found.stream().map(Entry::title).toList(),
+                    c.reason()));
+        }
+        return resolved;
     }
 
     private static String oneLine(String text) {

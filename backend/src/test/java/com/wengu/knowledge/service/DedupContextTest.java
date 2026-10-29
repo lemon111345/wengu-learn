@@ -1,5 +1,7 @@
 package com.wengu.knowledge.service;
 
+import com.wengu.knowledge.dto.CoveredQuestion;
+import com.wengu.knowledge.dto.ResolvedCovered;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -51,5 +53,22 @@ class DedupContextTest {
     void 没有任何标题时为空() {
         assertThat(DedupContext.of(List.of(), List.of()).isEmpty()).isTrue();
         assertThat(DedupContext.EMPTY.format()).isEmpty();
+    }
+
+    @Test
+    void 把编号换回知识点id和条目id并记下标题() {
+        DedupContext context = DedupContext.of(List.of(existing(11, "什么是 MVCC？")),
+                List.of(existing(301, "HashMap 的扩容机制是怎样的？")));
+
+        List<ResolvedCovered> resolved = context.resolve(List.of(
+                new CoveredQuestion(5, List.of("E2", "E1"), "同一内容"),
+                new CoveredQuestion(6, List.of("E9"), "编号不存在"),
+                new CoveredQuestion(7, List.of("E1", "E9"), "部分编号不存在")));
+
+        assertThat(resolved).containsExactly(
+                new ResolvedCovered(5, List.of(11L), List.of(301L),
+                        List.of("HashMap 的扩容机制是怎样的？", "什么是 MVCC？"), "同一内容"),
+                new ResolvedCovered(7, List.of(11L), List.of(), List.of("什么是 MVCC？"), "部分编号不存在"));
+        assertThat(context.resolve(null)).isEmpty();
     }
 }

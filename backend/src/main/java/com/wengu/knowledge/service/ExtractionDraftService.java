@@ -5,10 +5,12 @@ import com.wengu.common.context.CurrentUser;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.BatchView;
+import com.wengu.knowledge.dto.CoveredView;
 import com.wengu.knowledge.dto.CreateDraftRequest;
 import com.wengu.knowledge.dto.DraftItemView;
 import com.wengu.knowledge.dto.DraftView;
 import com.wengu.knowledge.dto.ExtractionQuestion;
+import com.wengu.knowledge.dto.ResolvedCovered;
 import com.wengu.knowledge.entity.BatchStatus;
 import com.wengu.knowledge.entity.DraftStatus;
 import com.wengu.knowledge.entity.ExtractionBatch;
@@ -231,13 +233,22 @@ public class ExtractionDraftService {
         return text.replaceAll("\\s+", " ").strip();
     }
 
-    /** 条目按批号、批内顺序排列，order 在整份草稿内重新从 1 连续编号。 */
+    /**
+     * 条目按批号、批内顺序排列，order 在整份草稿内重新从 1 连续编号。
+     * covered 只取成功的批次，按批号排列。
+     */
     private DraftView toView(ExtractionDraft draft, List<ExtractionBatch> batches, List<ExtractionDraftItem> items) {
         Map<Long, List<ExtractionDraftItem>> itemsByBatch = items.stream()
                 .collect(Collectors.groupingBy(ExtractionDraftItem::getBatchId));
         List<BatchView> batchViews = new ArrayList<>();
         List<DraftItemView> itemViews = new ArrayList<>();
+        List<CoveredView> coveredViews = new ArrayList<>();
         for (ExtractionBatch batch : batches) {
+            if (batch.getStatus() == BatchStatus.READY && batch.getCovered() != null) {
+                for (ResolvedCovered c : jsonMapper.readValue(batch.getCovered(), ResolvedCovered[].class)) {
+                    coveredViews.add(new CoveredView(c.questionId(), c.titles()));
+                }
+            }
             List<Integer> questionIds = Arrays.stream(
                             jsonMapper.readValue(batch.getQuestions(), ExtractionQuestion[].class))
                     .map(ExtractionQuestion::id)
@@ -249,6 +260,7 @@ public class ExtractionDraftService {
                         .map(Integer::valueOf).toList()));
             }
         }
-        return new DraftView(draft.getId(), draft.getSourceId(), statusOf(batches), batchViews, itemViews);
+        return new DraftView(draft.getId(), draft.getSourceId(), statusOf(batches), batchViews, itemViews,
+                coveredViews);
     }
 }

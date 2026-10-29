@@ -19,6 +19,10 @@ public class ExtractionBatch {
     private BatchStatus status;
     /** 发给模型的题目，{@link com.wengu.knowledge.dto.ExtractionQuestion} 列表的 JSON */
     private String questions;
+    /** 这一批实际用的去重上下文，{@link com.wengu.knowledge.service.DedupContext.Entry} 列表的 JSON（决策 014） */
+    private String context;
+    /** 被已有内容覆盖的题，{@link com.wengu.knowledge.dto.ResolvedCovered} 列表的 JSON；只有成功的批次才有 */
+    private String covered;
     private String rawOutput;
     private String error;
     private Integer attempts;
@@ -76,6 +80,22 @@ public class ExtractionBatch {
 
     public void setQuestions(String questions) {
         this.questions = questions;
+    }
+
+    public String getContext() {
+        return context;
+    }
+
+    public void setContext(String context) {
+        this.context = context;
+    }
+
+    public String getCovered() {
+        return covered;
+    }
+
+    public void setCovered(String covered) {
+        this.covered = covered;
     }
 
     public String getRawOutput() {
