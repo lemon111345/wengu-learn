@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>
  * 不用“检测到 Key 就运行”：全局设置了 Key 时，每次 mvnw test 都会真实调用模型。
  */
-@SpringBootTest(properties = {NoDatabase.PROPERTY, NoDatabase.LAZY_PROPERTY})
+@SpringBootTest(properties = {NoDatabase.PROPERTY, NoDatabase.LAZY_PROPERTY, NoDatabase.NO_RECOVERY_PROPERTY})
 @EnabledIfSystemProperty(named = "llm.live", matches = "true")
 class LlmServiceLiveTest {
 

@@ -44,12 +44,14 @@ class SplitValidatorTest {
                 | 1 | **HashMap** 的 `put` 过程是怎样的？ | 中等 |
                 > 说说 synchronized_锁升级
                 ## 什么是 MVCC？
+                ### SELECT \\* 会导致索引失效吗？
                 """;
 
         assertThat(validate(content,
                 q("HashMap 的 put 过程是怎样的？"),
                 q("说说 synchronized锁升级"),
-                q("什么是 MVCC？"))).isEmpty();
+                q("什么是 MVCC？"),
+                q("SELECT * 会导致索引失效吗？"))).isEmpty();
     }
 
     @Test

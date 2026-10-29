@@ -15,6 +15,8 @@ import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,11 +41,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * <ul>
  *   <li>src/test/resources/split-samples：自己写的样本，每份配一个 .expected.json</li>
  *   <li>data-private/split-samples：从真实网页复制的资料（.md 或 .txt），预期结果可选</li>
- *   <li>data-private/questions/all.md 的前 30 行题目，预期结果取表格的“题目”列</li>
+ *   <li>data-private/questions/all.md 的前 N 行题目，预期结果取表格的“题目”列。N 由 -Dsplit.bankRows 指定，
+ *       可以写多个（如 100,200，每个各成一份样本），默认 30</li>
  * </ul>
- * 结果写入 data-private/experiments/split-时间戳-模型名/。每份样本跑几次由 -Dsplit.runs 指定，默认 3。
+ * 结果写入 data-private/experiments/split-时间戳-模型名/。每份样本跑几次由 -Dsplit.runs 指定，默认 3；
+ * -Dsplit.only 只跑名称以它开头的样本，如 all-md。
  */
-@SpringBootTest(properties = {NoDatabase.PROPERTY, NoDatabase.LAZY_PROPERTY})
+@SpringBootTest(properties = {NoDatabase.PROPERTY, NoDatabase.LAZY_PROPERTY, NoDatabase.NO_RECOVERY_PROPERTY})
 @EnabledIfSystemProperty(named = "llm.experiment", matches = "true")
 class QuestionSplitExperiment {
 
@@ -51,7 +55,6 @@ class QuestionSplitExperiment {
     private static final Path DATA = Path.of("..", "data-private");
     private static final Path PRIVATE_SAMPLES = DATA.resolve("split-samples");
     private static final Path QUESTION_BANK = DATA.resolve("questions/all.md");
-    private static final int QUESTION_BANK_ROWS = 30;
 
     private final JsonMapper json = JsonMapper.builder().enable(SerializationFeature.INDENT_OUTPUT).build();
 
@@ -80,6 +83,7 @@ class QuestionSplitExperiment {
                 meta.put("contentLength", sample.content().length());
                 LlmResult<?> raw;
                 List<SplitQuestion> questions = null;
+                RuntimeException failure = null;
                 try {
                     LlmResult<SplitResult> result = splitService.split(sample.content());
                     raw = result;
@@ -98,6 +102,7 @@ class QuestionSplitExperiment {
                     meta.put("error", e.getMessage());
                 } catch (RuntimeException e) {
                     raw = null;
+                    failure = e;
                     meta.put("error", e.getClass().getSimpleName() + ": " + e.getMessage());
                 }
                 meta.put("durationSeconds", Math.round((System.nanoTime() - start) / 1e8) / 10.0);
@@ -114,6 +119,12 @@ class QuestionSplitExperiment {
                 write(dir.resolve(prefix + "-raw.txt"), raw == null ? "" : raw.rawText());
                 if (questions != null) {
                     write(dir.resolve(prefix + "-result.json"), json.writeValueAsString(questions));
+                }
+                if (failure != null) {
+                    // 异常链要看完整的，只记 message 分不清是超时、断连还是返回内容有问题
+                    StringWriter trace = new StringWriter();
+                    failure.printStackTrace(new PrintWriter(trace));
+                    write(dir.resolve(prefix + "-error.txt"), trace.toString());
                 }
                 outputs.add(questions);
                 summary.add(meta);
@@ -187,9 +198,12 @@ class QuestionSplitExperiment {
             samples.addAll(loadDir(PRIVATE_SAMPLES));
         }
         if (Files.exists(QUESTION_BANK)) {
-            samples.add(questionBankSample());
+            for (String rows : System.getProperty("split.bankRows", "30").split(",")) {
+                samples.add(questionBankSample(Integer.parseInt(rows.strip())));
+            }
         }
-        return samples;
+        String only = System.getProperty("split.only");
+        return only == null ? samples : samples.stream().filter(s -> s.name().startsWith(only)).toList();
     }
 
     private List<Sample> loadDir(Path dir) throws IOException {
@@ -211,15 +225,15 @@ class QuestionSplitExperiment {
         return samples;
     }
 
-    /** 题库是 Markdown 表格：保留表格前的说明和表头，只取前 30 行题目，预期结果取第 2 列。 */
-    private static Sample questionBankSample() throws IOException {
+    /** 题库是 Markdown 表格：保留表格前的说明和表头，只取前 maxRows 行题目，预期结果取第 2 列。 */
+    private static Sample questionBankSample(int maxRows) throws IOException {
         List<String> lines = Files.readAllLines(QUESTION_BANK);
         List<String> kept = new ArrayList<>();
         List<SplitQuestion> expected = new ArrayList<>();
         int rows = 0;
         for (String line : lines) {
             boolean dataRow = line.matches("\\|\\s*\\d+\\s*\\|.*");
-            if (dataRow && rows == QUESTION_BANK_ROWS) {
+            if (dataRow && rows == maxRows) {
                 break;
             }
             kept.add(line);
@@ -228,7 +242,7 @@ class QuestionSplitExperiment {
                 expected.add(new SplitQuestion(line.split("\\|")[2].strip(), List.of()));
             }
         }
-        return new Sample("all-md-first-" + QUESTION_BANK_ROWS, String.join("\n", kept), expected);
+        return new Sample("all-md-first-" + maxRows, String.join("\n", kept), expected);
     }
 
     private static Path outputDir(String model) throws IOException {

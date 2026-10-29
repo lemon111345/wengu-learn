@@ -15,8 +15,6 @@ import com.wengu.llm.service.LlmOutputParseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
@@ -31,6 +29,7 @@ import java.util.stream.Collectors;
 
 /**
  * 在后台线程池中执行抽取：按批号顺序处理草稿中排队的批次，每批调用一次模型，结果写回批次和条目（决策 013）。
+ * 服务重启时未完成的批次由 {@link ExtractionRecovery} 处理。
  * <p>
  * 这里的代码运行在线程池的线程里，不使用 CurrentUser：多用户模式下当前用户来自请求线程，到这里就读不到了。
  * 用户 id 一律取自批次。
@@ -45,7 +44,7 @@ public class ExtractionWorker {
 
     static final String QUEUE_FULL = "任务队列已满";
 
-    static final String INTERRUPTED = "服务重启，任务中断";
+    static final String SKIPPED = "前面一批调用模型出错，这一批没有执行";
 
     private final KnowledgeExtractionService extractionService;
     private final ExtractionBatchMapper batchMapper;
@@ -87,44 +86,39 @@ public class ExtractionWorker {
     }
 
     /**
-     * 服务启动时，把上次运行留下的排队中和执行中的批次标为失败，由用户决定是否重试（决策 013）。
-     * 不自动重跑：重跑要花钱，用户并不知道；如果正是这个任务把进程搞崩了，自动重跑会让应用反复崩溃。
+     * 按批号顺序执行草稿中排队的批次。
      * <p>
-     * 前提是只部署一个实例：多个实例时，这里会把其他实例正在执行的批次也标为失败。
-     *
-     * @return 标为失败的批次数
+     * 某一批输出解析失败或校验不通过时，照常执行下一批；模型调用本身出错（网络错误、Key 不对）时，
+     * 后面的批次大概率也会失败，不再调用，直接标为失败，用户处理好之后一起重试。
      */
-    @EventListener(ApplicationReadyEvent.class)
-    public int failInterrupted() {
-        int count = batchMapper.update(new LambdaUpdateWrapper<ExtractionBatch>()
-                .in(ExtractionBatch::getStatus, BatchStatus.PENDING, BatchStatus.RUNNING)
-                .set(ExtractionBatch::getStatus, BatchStatus.FAILED)
-                .set(ExtractionBatch::getError, INTERRUPTED)
-                .set(ExtractionBatch::getFinishedAt, Instant.now(clock)));
-        if (count > 0) {
-            log.warn("服务重启，{} 个未完成的抽取批次已标为失败", count);
-        }
-        return count;
-    }
-
-    /** 按批号顺序执行草稿中排队的批次。 */
     void run(long draftId) {
         List<ExtractionBatch> pending = batchMapper.selectList(new LambdaQueryWrapper<ExtractionBatch>()
                 .eq(ExtractionBatch::getDraftId, draftId)
                 .eq(ExtractionBatch::getStatus, BatchStatus.PENDING)
                 .orderByAsc(ExtractionBatch::getBatchNo));
         for (ExtractionBatch batch : pending) {
+            boolean callSucceeded;
             try {
-                runBatch(batch);
+                callSucceeded = runBatch(batch);
             } catch (RuntimeException e) {
-                // 走到这里的是写库、解析 JSON 这类意外错误，模型调用的异常在 extractWithRetry 中已经处理
+                // 走到这里的是写库、解析 JSON 这类意外错误，模型调用的异常在 runBatch 中已经处理
                 log.error("抽取批次执行出错: batchId={}", batch.getId(), e);
                 markFailed(batch.getId(), e.getClass().getSimpleName() + ": " + e.getMessage());
+                continue;
+            }
+            if (!callSucceeded) {
+                skipPending(draftId);
+                return;
             }
         }
     }
 
-    private void runBatch(ExtractionBatch batch) {
+    /**
+     * 执行一批，结果写回批次和条目。
+     *
+     * @return 模型调用本身是否正常；为 false 时（网络错误、Key 不对）后面的批次不再执行
+     */
+    private boolean runBatch(ExtractionBatch batch) {
         // 只领取仍在排队的批次：排队期间它可能已被标为失败（例如重启处理）
         Instant startedAt = Instant.now(clock);
         int claimed = batchMapper.update(new LambdaUpdateWrapper<ExtractionBatch>()
@@ -134,12 +128,22 @@ public class ExtractionWorker {
                 .set(ExtractionBatch::getStartedAt, startedAt)
                 .set(ExtractionBatch::getPromptVersion, KnowledgeExtractionService.PROMPT_VERSION));
         if (claimed == 0) {
-            return;
+            return true;
         }
 
         List<ExtractionQuestion> questions = List.of(
                 jsonMapper.readValue(batch.getQuestions(), ExtractionQuestion[].class));
-        ExtractionResult result = extractWithRetry(questions, batch);
+        ExtractionResult result;
+        boolean callSucceeded = true;
+        try {
+            result = extractWithRetry(questions, batch);
+        } catch (RuntimeException e) {
+            // 模型调用本身出错，重试也没用
+            batch.setError(e.getClass().getSimpleName() + ": " + e.getMessage());
+            log.error("知识点抽取调用模型失败: batchId={}", batch.getId(), e);
+            result = null;
+            callSucceeded = false;
+        }
         batch.setStatus(result == null ? BatchStatus.FAILED : BatchStatus.READY);
         batch.setFinishedAt(Instant.now(clock));
 
@@ -149,6 +153,17 @@ public class ExtractionWorker {
             batchMapper.updateById(batch);
             items.forEach(itemMapper::insert);
         });
+        return callSucceeded;
+    }
+
+    /** 前面一批调用模型出错时，把草稿中还在排队的批次标为失败。 */
+    private void skipPending(long draftId) {
+        batchMapper.update(new LambdaUpdateWrapper<ExtractionBatch>()
+                .eq(ExtractionBatch::getDraftId, draftId)
+                .eq(ExtractionBatch::getStatus, BatchStatus.PENDING)
+                .set(ExtractionBatch::getStatus, BatchStatus.FAILED)
+                .set(ExtractionBatch::getError, SKIPPED)
+                .set(ExtractionBatch::getFinishedAt, Instant.now(clock)));
     }
 
     /** 意外出错时尽量把批次标为失败；连这一步也失败时（比如数据库连不上），只能等重启处理。 */
@@ -167,7 +182,7 @@ public class ExtractionWorker {
     /**
      * 调用模型抽取，把每次调用的信息记到 batch 上，返回通过校验的结果；失败时返回 null，原因记在 batch.error。
      * <p>
-     * 只有输出解析失败或校验不通过时才重试；模型调用本身抛出的异常（网络错误、Key 不对）重试也没用。
+     * 只有输出解析失败或校验不通过时才重试；模型调用本身抛出的异常（网络错误、Key 不对）重试也没用，直接抛给调用方。
      */
     private ExtractionResult extractWithRetry(List<ExtractionQuestion> questions, ExtractionBatch batch) {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -186,10 +201,6 @@ public class ExtractionWorker {
                 record(batch, e.getResult());
                 batch.setError(e.getMessage());
                 log.warn("知识点抽取结果无法解析（第 {} 次）: batchId={}, {}", attempt, batch.getId(), e.getMessage());
-            } catch (RuntimeException e) {
-                batch.setError(e.getClass().getSimpleName() + ": " + e.getMessage());
-                log.error("知识点抽取调用模型失败: batchId={}", batch.getId(), e);
-                return null;
             }
         }
         return null;

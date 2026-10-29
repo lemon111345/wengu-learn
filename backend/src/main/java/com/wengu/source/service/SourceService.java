@@ -31,11 +31,17 @@ public class SourceService {
 
     private static final Logger log = LoggerFactory.getLogger(SourceService.class);
 
-    /** 原文长度上限。更长的输入按长度切块留给 #16。 */
-    public static final int MAX_CONTENT_LENGTH = 30_000;
+    /**
+     * 原文长度上限。带答案的 10 万字资料单次切分实验 3 次都成功，耗时 61～94 秒（决策 011）；
+     * 更长的输入不按长度切块，提示用户分批导入。
+     */
+    public static final int MAX_CONTENT_LENGTH = 100_000;
 
-    /** 一次导入的题数上限，和单批抽取的上限一致。 */
-    public static final int MAX_QUESTIONS = 30;
+    /**
+     * 一次导入的题数上限。抽取时按每批约 30 题分批（决策 013），200 题约 7 批，要十几分钟；
+     * 切分实验中 200 题单次调用稳定（决策 011）。
+     */
+    public static final int MAX_QUESTIONS = 200;
 
     /** 第一次的结果解析失败或校验不通过时，再试一次。 */
     private static final int MAX_ATTEMPTS = 2;

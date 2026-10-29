@@ -22,8 +22,11 @@ spring:
       # 默认为空：没有 Key 时应用照常启动，调用模型时才失败。
       # 显式给出值，也避免 Spring AI 隐式读取 OPENAI_API_KEY 环境变量
       api-key: ${WENGU_LLM_API_KEY:}
-      # 单次请求超时。Spring AI 默认 60 秒，知识点抽取等长输出在较强的模型上会超时
+      # 单次请求超时。Spring AI 默认 60 秒，知识点抽取、长资料切分会超时。
+      # 只配在这里不起作用，LlmService 每次请求都显式带上它（见决策 005 修订）
       timeout: ${WENGU_LLM_TIMEOUT:180s}
+      # 关掉 SDK 的自动重试：超时也会被重发，每次重发都要计费，等待时间也成倍增加。要不要重试由业务代码决定
+      max-retries: 0
       chat:
         options:
           model: ${WENGU_LLM_MODEL:deepseek-flash}

@@ -69,8 +69,12 @@ public class ExtractionDraftService {
         this.transactionTemplate = transactionTemplate;
     }
 
+    /** 每批最多的题数。M0 的抽取实验和 prompt v5 都是按 30 题左右验证的（决策 005）。 */
+    static final int BATCH_SIZE = 30;
+
     /**
      * 发起抽取：建草稿和排队中的批次，交给后台执行，立即返回 RUNNING 的草稿。
+     * 超过 {@link #BATCH_SIZE} 题时分成几批，后台按批号顺序执行。
      * <p>
      * 事务提交之后才交给后台，否则后台线程可能读不到刚插入的批次。
      */
@@ -86,12 +90,32 @@ public class ExtractionDraftService {
         draft.setUserId(currentUser.id());
         draft.setSourceId(request.sourceId());
         draft.setCreatedAt(now);
+        List<List<ExtractionQuestion>> batches = partition(questions, BATCH_SIZE);
         transactionTemplate.executeWithoutResult(status -> {
             draftMapper.insert(draft);
-            batchMapper.insert(newBatch(draft, 1, jsonMapper.writeValueAsString(questions), now));
+            for (int i = 0; i < batches.size(); i++) {
+                batchMapper.insert(newBatch(draft, i + 1, jsonMapper.writeValueAsString(batches.get(i)), now));
+            }
         });
         worker.submit(draft.getId());
         return get(draft.getId());
+    }
+
+    /**
+     * 按原文顺序分成每批不超过 maxSize 题，各批题数尽量相等：31 题分成 16 + 15，而不是 30 + 1。
+     * 保持原文顺序，是因为相邻的题通常属于同一主题，分在一批里模型才能合并。
+     */
+    static <T> List<List<T>> partition(List<T> items, int maxSize) {
+        int count = (items.size() + maxSize - 1) / maxSize;
+        List<List<T>> batches = new ArrayList<>();
+        int start = 0;
+        for (int i = 0; i < count; i++) {
+            // 前 items.size() % count 批各多分一题
+            int size = items.size() / count + (i < items.size() % count ? 1 : 0);
+            batches.add(items.subList(start, start + size));
+            start += size;
+        }
+        return batches;
     }
 
     /** 查看草稿。不存在或不属于当前用户时为 NOT_FOUND。 */

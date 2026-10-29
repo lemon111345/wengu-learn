@@ -9,11 +9,13 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -21,25 +23,30 @@ import java.util.List;
  * 以后的降级链和按用户读取模型配置都在这里实现，调用方不用改。
  * <p>
  * 目前使用 application.yml 中的全局配置（来自 WENGU_LLM_* 环境变量）。
+ * <p>
+ * 每次请求都显式带上超时（见 {@link #options}）。SDK 的自动重试在 application.yml 中关掉了，
+ * 要不要重试由调用方决定（决策 005 修订）。
  */
 @Service
 public class LlmService {
 
     private final ChatClient chatClient;
+    private final Duration timeout;
 
     /** ChatClient.Builder 由 Spring AI 根据 spring.ai.openai.* 配置自动创建。 */
-    public LlmService(ChatClient.Builder chatClientBuilder) {
+    public LlmService(ChatClient.Builder chatClientBuilder, @Value("${spring.ai.openai.timeout}") Duration timeout) {
         this.chatClient = chatClientBuilder.build();
+        this.timeout = timeout;
     }
 
     /** 普通调用：等模型生成完毕后一次性返回完整回复。 */
     public String call(String prompt) {
-        return chatClient.prompt().user(prompt).call().content();
+        return chatClient.prompt().user(prompt).options(options(null)).call().content();
     }
 
     /** 流式调用：模型每生成一段就推送一段，供 SSE 逐字输出。 */
     public Flux<String> stream(String prompt) {
-        return chatClient.prompt().user(prompt).stream().content();
+        return chatClient.prompt().user(prompt).options(options(null)).stream().content();
     }
 
     /**
@@ -51,13 +58,28 @@ public class LlmService {
      */
     public Flux<String> stream(String system, List<ChatTurn> history, Double temperature) {
         List<Message> messages = history.stream().map(LlmService::toMessage).toList();
-        ChatClient.ChatClientRequestSpec request = chatClient.prompt()
+        return chatClient.prompt()
                 .system(system)
-                .messages(messages);
+                .messages(messages)
+                .options(options(temperature))
+                .stream()
+                .content();
+    }
+
+    /**
+     * 每次请求的选项，叠加在 application.yml 的默认选项（如 model）之上。
+     * <p>
+     * 超时必须每次都带上：Spring AI 2.0.1 的 OpenAiChatOptions 没设 timeout 时会填入 60 秒，
+     * 而每次请求的选项会覆盖客户端上配置的超时，所以只配 spring.ai.openai.timeout 不起作用。
+     *
+     * @param temperature 为 null 时不设置，使用服务商的默认值
+     */
+    private OpenAiChatOptions.Builder options(Double temperature) {
+        OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder().timeout(timeout);
         if (temperature != null) {
-            request = request.options(ChatOptions.builder().temperature(temperature));
+            builder.temperature(temperature);
         }
-        return request.stream().content();
+        return builder;
     }
 
     private static Message toMessage(ChatTurn turn) {
@@ -86,14 +108,12 @@ public class LlmService {
      */
     public <T> LlmResult<T> call(String system, String user, Class<T> type, Double temperature) {
         BeanOutputConverter<T> converter = new BeanOutputConverter<>(type);
-        ChatClient.ChatClientRequestSpec request = chatClient.prompt()
+        ChatResponse response = chatClient.prompt()
                 .system(system)
-                .user(user + "\n\n" + converter.getFormat());
-        if (temperature != null) {
-            // 传入的选项会叠加在 application.yml 的默认选项（如 model）之上
-            request = request.options(ChatOptions.builder().temperature(temperature));
-        }
-        ChatResponse response = request.call().chatResponse();
+                .user(user + "\n\n" + converter.getFormat())
+                .options(options(temperature))
+                .call()
+                .chatResponse();
         if (response == null || response.getResult() == null) {
             throw new IllegalStateException("模型没有返回结果");
         }

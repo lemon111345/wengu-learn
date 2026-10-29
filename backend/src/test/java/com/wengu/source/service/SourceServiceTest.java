@@ -144,10 +144,10 @@ class SourceServiceTest {
     }
 
     @Test
-    void 超过30题时报错() {
+    void 超过题数上限时报错() {
         List<SplitQuestion> questions = new ArrayList<>();
         StringBuilder content = new StringBuilder();
-        IntStream.rangeClosed(1, 31).forEach(i -> {
+        IntStream.rangeClosed(1, SourceService.MAX_QUESTIONS + 1).forEach(i -> {
             questions.add(q("第 " + i + " 题？"));
             content.append("第 ").append(i).append(" 题？\n");
         });
@@ -155,7 +155,7 @@ class SourceServiceTest {
 
         assertThatThrownBy(() -> sourceService.importQuestions(request(content.toString())))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("识别到 31 道题")
+                .hasMessageContaining("识别到 " + (SourceService.MAX_QUESTIONS + 1) + " 道题")
                 .hasMessageContaining("分成几批");
         assertThat(sourceMapper.selectCount(null)).isZero();
     }
