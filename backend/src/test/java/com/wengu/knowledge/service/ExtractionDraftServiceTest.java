@@ -122,7 +122,7 @@ class ExtractionDraftServiceTest {
     }
 
     private static LlmResult<ExtractionResult> result(ExtractedKnowledgePoint... kps) {
-        return new LlmResult<>(new ExtractionResult(List.of(), List.of(kps)), "raw-" + kps.length,
+        return new LlmResult<>(new ExtractionResult(List.of(), List.of(), List.of(kps)), "raw-" + kps.length,
                 "test-model", "stop", 1000, 500);
     }
 
@@ -223,7 +223,7 @@ class ExtractionDraftServiceTest {
         assertThat(batch.getStatus()).isEqualTo(BatchStatus.FAILED);
         assertThat(batch.getAttempts()).isEqualTo(2);
         assertThat(batch.getRawOutput()).isEqualTo("raw-1");
-        assertThat(batch.getError()).contains("以下题目没有对应的知识点：[2, 3]");
+        assertThat(batch.getError()).contains("以下题目既没有对应的知识点，也没有标为已有：[2, 3]");
         assertThat(batch.getPromptTokens()).isEqualTo(2000);
         assertThat(itemMapper.selectCount(null)).isZero();
     }
