@@ -18,8 +18,11 @@ import java.util.regex.Pattern;
  */
 public final class SplitValidator {
 
-    /** 空白字符和常见的 Markdown 符号。NFKC 之后全角空格已变成普通空格，\p{Z} 再兜住其他 Unicode 空白。 */
-    private static final Pattern IGNORED = Pattern.compile("[\\s\\p{Z}*`#_>]");
+    /**
+     * 空白字符和常见的 Markdown 符号。NFKC 之后全角空格已变成普通空格，\p{Z} 再兜住其他 Unicode 空白。
+     * 反斜杠是 Markdown 的转义符：原文写 {@code SELECT \*}，模型输出 {@code SELECT *}，不算改写。
+     */
+    private static final Pattern IGNORED = Pattern.compile("[\\s\\p{Z}*`#_>\\\\]");
 
     private SplitValidator() {
     }

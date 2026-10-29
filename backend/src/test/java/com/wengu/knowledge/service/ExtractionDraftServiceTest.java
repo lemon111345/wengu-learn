@@ -37,12 +37,15 @@ import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -347,5 +350,97 @@ class ExtractionDraftServiceTest {
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST));
         assertThat(batchMapper.selectCount(null)).isEqualTo(1);
+    }
+
+    /** 导入一份有 count 道题的材料，返回材料 id。 */
+    private long importSource(int count) {
+        List<SplitQuestion> questions = IntStream.rangeClosed(1, count)
+                .mapToObj(i -> new SplitQuestion("第 " + i + " 题是什么？", List.of()))
+                .toList();
+        String content = questions.stream().map(SplitQuestion::text).collect(Collectors.joining("\n"));
+        when(splitService.split(anyString())).thenReturn(new LlmResult<>(new SplitResult(questions), "{...}",
+                "test-model", "stop", 10, 10));
+        return sourceService.importQuestions(new ImportQuestionsRequest(count + " 道题", content)).id();
+    }
+
+    /** 每道题一个知识点的合格结果。 */
+    private static LlmResult<ExtractionResult> onePerQuestion(List<ExtractionQuestion> questions) {
+        return result(IntStream.range(0, questions.size())
+                .mapToObj(i -> kp(i + 1, questions.get(i).text(), questions.get(i).id()))
+                .toArray(ExtractedKnowledgePoint[]::new));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void 超过30题时分批依次执行且条目连续编号() {
+        long bigSource = importSource(31);
+        when(extractionService.extract(anyList())).thenAnswer(inv -> onePerQuestion(inv.getArgument(0)));
+
+        DraftView created = draftService.create(new CreateDraftRequest(bigSource, null));
+        assertThat(created.batches()).containsExactly(
+                new BatchView(1, BatchStatus.PENDING, IntStream.rangeClosed(1, 16).boxed().toList()),
+                new BatchView(2, BatchStatus.PENDING, IntStream.rangeClosed(17, 31).boxed().toList()));
+
+        extractionExecutor.runAll();
+        DraftView view = draftService.get(created.id());
+
+        assertThat(view.status()).isEqualTo(DraftStatus.READY);
+        assertThat(view.items()).extracting(DraftItemView::order)
+                .isEqualTo(IntStream.rangeClosed(1, 31).boxed().toList());
+        assertThat(view.items()).extracting(item -> item.sourceQuestionIds().getFirst())
+                .isEqualTo(IntStream.rangeClosed(1, 31).boxed().toList());
+        ArgumentCaptor<List<ExtractionQuestion>> captor = ArgumentCaptor.forClass(List.class);
+        verify(extractionService, times(2)).extract(captor.capture());
+        assertThat(captor.getAllValues()).extracting(List::size).containsExactly(16, 15);
+    }
+
+    @Test
+    void 某批校验不通过时继续执行下一批() {
+        long bigSource = importSource(31);
+        when(extractionService.extract(anyList()))
+                .thenReturn(result(kp(1, "只覆盖了第 1 题", 1)))
+                .thenReturn(result(kp(1, "只覆盖了第 1 题", 1)))
+                .thenAnswer(inv -> onePerQuestion(inv.getArgument(0)));
+
+        DraftView view = createAndRunFrom(bigSource);
+
+        assertThat(view.status()).isEqualTo(DraftStatus.FAILED);
+        assertThat(view.batches()).extracting(BatchView::status)
+                .containsExactly(BatchStatus.FAILED, BatchStatus.READY);
+        // 成功批次的条目照常返回，从 1 开始编号
+        assertThat(view.items()).hasSize(15);
+        assertThat(view.items().getFirst().order()).isEqualTo(1);
+        assertThat(view.items().getFirst().sourceQuestionIds()).containsExactly(17);
+    }
+
+    @Test
+    void 某批调用模型出错时后面的批次不再执行() {
+        long bigSource = importSource(31);
+        when(extractionService.extract(anyList())).thenThrow(new IllegalStateException("Key 不对"));
+
+        DraftView view = createAndRunFrom(bigSource);
+
+        assertThat(view.status()).isEqualTo(DraftStatus.FAILED);
+        List<ExtractionBatch> batches = batches(view);
+        assertThat(batches).extracting(ExtractionBatch::getError)
+                .containsExactly("IllegalStateException: Key 不对", ExtractionWorker.SKIPPED);
+        assertThat(batches.get(1).getAttempts()).isZero();
+        verify(extractionService, times(1)).extract(anyList());
+
+        // 用户处理好之后重试，两批都重新执行。原来的桩会抛异常，when(...) 写法会触发它，所以用 doAnswer
+        doAnswer(inv -> onePerQuestion(inv.getArgument(0))).when(extractionService).extract(anyList());
+        draftService.retry(view.id());
+        extractionExecutor.runAll();
+
+        DraftView retried = draftService.get(view.id());
+        assertThat(retried.status()).isEqualTo(DraftStatus.READY);
+        assertThat(retried.items()).hasSize(31);
+        assertThat(batches(view)).hasSize(4);
+    }
+
+    private DraftView createAndRunFrom(long source) {
+        DraftView view = draftService.create(new CreateDraftRequest(source, null));
+        extractionExecutor.runAll();
+        return draftService.get(view.id());
     }
 }

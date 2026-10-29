@@ -6,11 +6,12 @@ import com.wengu.source.dto.SourceQuestion;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** 发起抽取前的两步纯计算：按勾选筛题，转成抽取 prompt 的输入。 */
+/** 发起抽取前的纯计算：按勾选筛题，转成抽取 prompt 的输入，分批。 */
 class DraftQuestionsTest {
 
     private static final List<SourceQuestion> ALL = List.of(
@@ -58,5 +59,36 @@ class DraftQuestionsTest {
 
         assertThat(ExtractionDraftService.toExtractionQuestion(q).text())
                 .isEqualTo("JVM 的内存区域 是怎么划分的？（追问：堆和栈 有什么区别？）");
+    }
+
+    private static List<Integer> sizes(int count) {
+        List<Integer> items = IntStream.rangeClosed(1, count).boxed().toList();
+        return ExtractionDraftService.partition(items, 30).stream().map(List::size).toList();
+    }
+
+    @Test
+    void 不超过一批时不拆() {
+        assertThat(sizes(1)).containsExactly(1);
+        assertThat(sizes(30)).containsExactly(30);
+    }
+
+    @Test
+    void 超过一批时各批题数尽量相等() {
+        assertThat(sizes(31)).containsExactly(16, 15);
+        assertThat(sizes(60)).containsExactly(30, 30);
+        assertThat(sizes(61)).containsExactly(21, 20, 20);
+        assertThat(sizes(200)).containsExactly(29, 29, 29, 29, 28, 28, 28);
+    }
+
+    @Test
+    void 分批保持原文顺序() {
+        List<Integer> items = IntStream.rangeClosed(1, 31).boxed().toList();
+
+        List<List<Integer>> batches = ExtractionDraftService.partition(items, 30);
+
+        assertThat(batches.get(0)).first().isEqualTo(1);
+        assertThat(batches.get(0)).last().isEqualTo(16);
+        assertThat(batches.get(1)).first().isEqualTo(17);
+        assertThat(batches.stream().flatMap(List::stream).toList()).isEqualTo(items);
     }
 }

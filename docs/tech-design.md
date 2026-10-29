@@ -207,7 +207,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 
 | 接口 | 作用 | 请求 | 返回 data | 说明 |
 | --- | --- | --- | --- | --- |
-| `POST /api/sources` | 导入面试题并切分（#15） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 调用模型，耗时几秒到十几秒；原文不超过 30000 字、切分后不超过 30 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`。见决策 011 |
+| `POST /api/sources` | 导入面试题并切分（#15、#16） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 同步调用模型，只有题目时几秒到几十秒，10 万字带答案的资料最长约 95 秒；原文不超过 100000 字、切分后不超过 200 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`。见决策 011 |
 | `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, status, batches: [{no, status, questionIds}], items: [{id, order, title, summary, type, sourceQuestionIds}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。见决策 012、013 |
 | `GET /api/drafts/{id}` | 查看草稿和抽取进度（#15、#16） | — | 同上 | 不存在或不属于当前用户 404 |
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
