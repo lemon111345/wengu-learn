@@ -1,10 +1,12 @@
 package com.wengu.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.wengu.common.context.CurrentUser;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.BatchView;
+import com.wengu.knowledge.dto.ConfirmDraftRequest;
 import com.wengu.knowledge.dto.CoveredView;
 import com.wengu.knowledge.dto.CreateDraftRequest;
 import com.wengu.knowledge.dto.DraftItemView;
@@ -16,6 +18,7 @@ import com.wengu.knowledge.entity.DraftStatus;
 import com.wengu.knowledge.entity.ExtractionBatch;
 import com.wengu.knowledge.entity.ExtractionDraft;
 import com.wengu.knowledge.entity.ExtractionDraftItem;
+import com.wengu.knowledge.entity.ItemDecision;
 import com.wengu.knowledge.mapper.ExtractionBatchMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftMapper;
@@ -29,6 +32,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -38,9 +42,10 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
- * 从导入的材料中抽取知识点，结果存成草稿，等用户确认（#17）。表结构见决策 012，异步与分批见决策 013。
+ * 从导入的材料中抽取知识点，结果存成草稿，用户确认后生成知识点。表结构见决策 012，异步与分批见决策 013，
+ * 确认见决策 015。
  * <p>
- * 这里只处理请求：建草稿和批次、查询、重试。调用模型由 {@link ExtractionWorker} 在后台执行，
+ * 这里只处理请求：建草稿和批次、查询、重试、确认。调用模型由 {@link ExtractionWorker} 在后台执行，
  * 前端轮询 {@link #get} 查看进度。
  */
 @Service
@@ -48,6 +53,7 @@ public class ExtractionDraftService {
 
     private final SourceService sourceService;
     private final ExtractionWorker worker;
+    private final KnowledgePointService knowledgePointService;
     private final ExtractionDraftMapper draftMapper;
     private final ExtractionBatchMapper batchMapper;
     private final ExtractionDraftItemMapper itemMapper;
@@ -57,11 +63,13 @@ public class ExtractionDraftService {
     private final TransactionTemplate transactionTemplate;
 
     public ExtractionDraftService(SourceService sourceService, ExtractionWorker worker,
+                                  KnowledgePointService knowledgePointService,
                                   ExtractionDraftMapper draftMapper, ExtractionBatchMapper batchMapper,
                                   ExtractionDraftItemMapper itemMapper, CurrentUser currentUser, Clock clock,
                                   JsonMapper jsonMapper, TransactionTemplate transactionTemplate) {
         this.sourceService = sourceService;
         this.worker = worker;
+        this.knowledgePointService = knowledgePointService;
         this.draftMapper = draftMapper;
         this.batchMapper = batchMapper;
         this.itemMapper = itemMapper;
@@ -124,15 +132,7 @@ public class ExtractionDraftService {
     public DraftView get(long draftId) {
         ExtractionDraft draft = find(draftId);
         List<ExtractionBatch> batches = latestBatches(draftId);
-        List<Long> readyIds = batches.stream()
-                .filter(b -> b.getStatus() == BatchStatus.READY)
-                .map(ExtractionBatch::getId)
-                .toList();
-        List<ExtractionDraftItem> items = readyIds.isEmpty() ? List.of()
-                : itemMapper.selectList(new LambdaQueryWrapper<ExtractionDraftItem>()
-                .in(ExtractionDraftItem::getBatchId, readyIds)
-                .orderByAsc(ExtractionDraftItem::getItemOrder));
-        return toView(draft, batches, items);
+        return toView(draft, batches, orderedItems(batches));
     }
 
     /**
@@ -146,9 +146,9 @@ public class ExtractionDraftService {
         ExtractionDraft draft = find(draftId);
         Instant now = Instant.now(clock);
         transactionTemplate.executeWithoutResult(status -> {
-            draftMapper.selectOne(new LambdaQueryWrapper<ExtractionDraft>()
-                    .eq(ExtractionDraft::getId, draftId)
-                    .last("FOR UPDATE"));
+            if (lock(draftId).getConfirmedAt() != null) {
+                throw new BusinessException(ErrorCode.CONFLICT, "草稿已经确认，不能再重试");
+            }
             List<ExtractionBatch> batches = latestBatches(draftId);
             if (statusOf(batches) == DraftStatus.RUNNING) {
                 throw new BusinessException(ErrorCode.CONFLICT, "草稿正在抽取中，请等待完成");
@@ -161,6 +161,98 @@ public class ExtractionDraftService {
         });
         worker.submit(draftId);
         return get(draftId);
+    }
+
+    /**
+     * 确认草稿（决策 015）：勾选的条目按草稿中的顺序生成知识点，关联到这份材料，参与调度的类型初始化 card_state；
+     * covered 中引用的已有知识点也关联到这份材料；每个条目记下 ACCEPTED 或 REJECTED。全部在一个事务中完成。
+     * <p>
+     * 只有所有批次都成功（READY）的草稿才能确认：有批次失败时先重试，否则失败批次中的题会悄悄地没有被抽取。
+     * 全部取消勾选也可以确认，等于“这份草稿处理完了，一个都不要”。
+     *
+     * @throws BusinessException 已经确认过、或者还不是 READY 时为 CONFLICT；取消的条目不属于这份草稿时为 BAD_REQUEST
+     */
+    public DraftView confirm(long draftId, ConfirmDraftRequest request) {
+        ExtractionDraft draft = find(draftId);
+        Set<Long> rejected = request == null || request.rejectedItemIds() == null ? Set.of()
+                : new HashSet<>(request.rejectedItemIds());
+        Instant now = Instant.now(clock);
+        transactionTemplate.executeWithoutResult(status -> {
+            if (lock(draftId).getConfirmedAt() != null) {
+                throw new BusinessException(ErrorCode.CONFLICT, "草稿已经确认过");
+            }
+            List<ExtractionBatch> batches = latestBatches(draftId);
+            if (statusOf(batches) != DraftStatus.READY) {
+                throw new BusinessException(ErrorCode.CONFLICT, "草稿还没有全部抽取成功，有失败的批次请先重试");
+            }
+            List<ExtractionDraftItem> items = orderedItems(batches);
+            Set<Long> unknown = new TreeSet<>(rejected);
+            items.forEach(item -> unknown.remove(item.getId()));
+            if (!unknown.isEmpty()) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "条目不存在：" + unknown);
+            }
+
+            List<ExtractionDraftItem> accepted = items.stream().filter(item -> !rejected.contains(item.getId())).toList();
+            knowledgePointService.create(draft.getUserId(), draft.getSourceId(), accepted.stream()
+                    .map(item -> new KnowledgePointService.NewKnowledgePoint(
+                            item.getType(), item.getTitle(), item.getSummary(), item.getId()))
+                    .toList());
+            if (draft.getSourceId() != null) {
+                knowledgePointService.linkToSource(draft.getUserId(), draft.getSourceId(), coveredKnowledgePoints(batches));
+            }
+            markDecision(accepted.stream().map(ExtractionDraftItem::getId).toList(), ItemDecision.ACCEPTED);
+            markDecision(List.copyOf(rejected), ItemDecision.REJECTED);
+            draftMapper.update(new LambdaUpdateWrapper<ExtractionDraft>()
+                    .eq(ExtractionDraft::getId, draftId)
+                    .set(ExtractionDraft::getConfirmedAt, now));
+        });
+        return get(draftId);
+    }
+
+    /** 锁住草稿这一行：同一份草稿的重试、确认请求依次执行。 */
+    private ExtractionDraft lock(long draftId) {
+        return draftMapper.selectOne(new LambdaQueryWrapper<ExtractionDraft>()
+                .eq(ExtractionDraft::getId, draftId)
+                .last("FOR UPDATE"));
+    }
+
+    /** 成功批次的条目，按批号、批内顺序排列，就是草稿中显示的顺序。 */
+    private List<ExtractionDraftItem> orderedItems(List<ExtractionBatch> batches) {
+        List<Long> readyIds = batches.stream()
+                .filter(b -> b.getStatus() == BatchStatus.READY)
+                .map(ExtractionBatch::getId)
+                .toList();
+        if (readyIds.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, List<ExtractionDraftItem>> byBatch = itemMapper.selectList(new LambdaQueryWrapper<ExtractionDraftItem>()
+                        .in(ExtractionDraftItem::getBatchId, readyIds)
+                        .orderByAsc(ExtractionDraftItem::getItemOrder))
+                .stream()
+                .collect(Collectors.groupingBy(ExtractionDraftItem::getBatchId));
+        return readyIds.stream().flatMap(id -> byBatch.getOrDefault(id, List.of()).stream()).toList();
+    }
+
+    /** 成功批次的 covered 中引用的已有知识点。引用同一草稿中其他条目的，条目本身会生成知识点，不用另外关联。 */
+    private Set<Long> coveredKnowledgePoints(List<ExtractionBatch> batches) {
+        Set<Long> ids = new LinkedHashSet<>();
+        for (ExtractionBatch batch : batches) {
+            if (batch.getStatus() == BatchStatus.READY && batch.getCovered() != null) {
+                for (ResolvedCovered c : jsonMapper.readValue(batch.getCovered(), ResolvedCovered[].class)) {
+                    ids.addAll(c.knowledgePointIds());
+                }
+            }
+        }
+        return ids;
+    }
+
+    private void markDecision(List<Long> itemIds, ItemDecision decision) {
+        if (itemIds.isEmpty()) {
+            return;
+        }
+        itemMapper.update(new LambdaUpdateWrapper<ExtractionDraftItem>()
+                .in(ExtractionDraftItem::getId, itemIds)
+                .set(ExtractionDraftItem::getDecision, decision));
     }
 
     private ExtractionDraft find(long draftId) {
@@ -234,14 +326,11 @@ public class ExtractionDraftService {
     }
 
     /**
-     * 条目按批号、批内顺序排列，order 在整份草稿内重新从 1 连续编号。
-     * covered 只取成功的批次，按批号排列。
+     * items 已按批号、批内顺序排好（{@link #orderedItems}），order 在整份草稿内重新从 1 连续编号。
+     * covered 只取成功的批次，按批号排列。确认之后状态为 CONFIRMED，否则由批次推算。
      */
     private DraftView toView(ExtractionDraft draft, List<ExtractionBatch> batches, List<ExtractionDraftItem> items) {
-        Map<Long, List<ExtractionDraftItem>> itemsByBatch = items.stream()
-                .collect(Collectors.groupingBy(ExtractionDraftItem::getBatchId));
         List<BatchView> batchViews = new ArrayList<>();
-        List<DraftItemView> itemViews = new ArrayList<>();
         List<CoveredView> coveredViews = new ArrayList<>();
         for (ExtractionBatch batch : batches) {
             if (batch.getStatus() == BatchStatus.READY && batch.getCovered() != null) {
@@ -254,13 +343,14 @@ public class ExtractionDraftService {
                     .map(ExtractionQuestion::id)
                     .toList();
             batchViews.add(new BatchView(batch.getBatchNo(), batch.getStatus(), questionIds));
-            for (ExtractionDraftItem item : itemsByBatch.getOrDefault(batch.getId(), List.of())) {
-                itemViews.add(new DraftItemView(item.getId(), itemViews.size() + 1, item.getTitle(),
-                        item.getSummary(), item.getType(), Arrays.stream(item.getSourceQuestionIds().split(","))
-                        .map(Integer::valueOf).toList()));
-            }
         }
-        return new DraftView(draft.getId(), draft.getSourceId(), statusOf(batches), batchViews, itemViews,
-                coveredViews);
+        List<DraftItemView> itemViews = new ArrayList<>();
+        for (ExtractionDraftItem item : items) {
+            itemViews.add(new DraftItemView(item.getId(), itemViews.size() + 1, item.getTitle(), item.getSummary(),
+                    item.getType(), Arrays.stream(item.getSourceQuestionIds().split(",")).map(Integer::valueOf).toList(),
+                    item.getDecision()));
+        }
+        DraftStatus status = draft.getConfirmedAt() != null ? DraftStatus.CONFIRMED : statusOf(batches);
+        return new DraftView(draft.getId(), draft.getSourceId(), status, batchViews, itemViews, coveredViews);
     }
 }

@@ -3,9 +3,11 @@ package com.wengu.knowledge.entity;
 import java.util.Collection;
 
 /**
- * 草稿状态，由各批的状态推算，不存库（决策 013）。确认后的状态由 #17 添加。
+ * 草稿状态，不存库：确认之前由各批的状态推算（决策 013），确认之后看 confirmed_at（决策 015）。
  */
 public enum DraftStatus {
+    /** 用户已确认，勾选的条目生成了知识点。不能再重试或确认 */
+    CONFIRMED,
     /** 还有批次在排队或执行中 */
     RUNNING,
     /** 所有批次都抽取成功，等待用户确认 */

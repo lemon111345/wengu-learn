@@ -1,6 +1,7 @@
 package com.wengu.knowledge.controller;
 
 import com.wengu.common.result.Result;
+import com.wengu.knowledge.dto.ConfirmDraftRequest;
 import com.wengu.knowledge.dto.CreateDraftRequest;
 import com.wengu.knowledge.dto.DraftView;
 import com.wengu.knowledge.service.ExtractionDraftService;
@@ -36,5 +37,11 @@ public class DraftController {
     @PostMapping("/{id}/retry")
     public Result<DraftView> retry(@PathVariable long id) {
         return Result.ok(draftService.retry(id));
+    }
+
+    /** 确认草稿：勾选的条目生成知识点。不传 rejectedItemIds 时全部接受。 */
+    @PostMapping("/{id}/confirm")
+    public Result<DraftView> confirm(@PathVariable long id, @RequestBody(required = false) ConfirmDraftRequest request) {
+        return Result.ok(draftService.confirm(id, request));
     }
 }

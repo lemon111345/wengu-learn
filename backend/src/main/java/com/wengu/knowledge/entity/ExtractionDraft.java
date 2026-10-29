@@ -16,6 +16,8 @@ public class ExtractionDraft {
     private Long userId;
     private Long sourceId;
     private Instant createdAt;
+    /** 确认时间，为空表示还没确认（决策 015） */
+    private Instant confirmedAt;
 
     public Long getId() {
         return id;
@@ -47,5 +49,13 @@ public class ExtractionDraft {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Instant getConfirmedAt() {
+        return confirmedAt;
+    }
+
+    public void setConfirmedAt(Instant confirmedAt) {
+        this.confirmedAt = confirmedAt;
     }
 }

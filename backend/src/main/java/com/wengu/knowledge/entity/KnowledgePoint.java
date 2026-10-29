@@ -19,6 +19,8 @@ public class KnowledgePoint {
     private KnowledgePointStatus status;
     /** 新知识按 sort_order、id 派发 */
     private Integer sortOrder;
+    /** 来自哪个草稿条目（#9 对比用）；合并或手动新建的知识点为空 */
+    private Long draftItemId;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -76,6 +78,14 @@ public class KnowledgePoint {
 
     public void setSortOrder(Integer sortOrder) {
         this.sortOrder = sortOrder;
+    }
+
+    public Long getDraftItemId() {
+        return draftItemId;
+    }
+
+    public void setDraftItemId(Long draftItemId) {
+        this.draftItemId = draftItemId;
     }
 
     public Instant getCreatedAt() {

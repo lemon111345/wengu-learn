@@ -20,6 +20,8 @@ public class ExtractionDraftItem {
     private KnowledgePointType type;
     /** 来源题号，逗号分隔，如 "1,3,5" */
     private String sourceQuestionIds;
+    /** 确认时的处理；为空表示草稿还没确认（决策 015） */
+    private ItemDecision decision;
 
     public Long getId() {
         return id;
@@ -91,5 +93,13 @@ public class ExtractionDraftItem {
 
     public void setSourceQuestionIds(String sourceQuestionIds) {
         this.sourceQuestionIds = sourceQuestionIds;
+    }
+
+    public ItemDecision getDecision() {
+        return decision;
+    }
+
+    public void setDecision(ItemDecision decision) {
+        this.decision = decision;
     }
 }
