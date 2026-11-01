@@ -30,7 +30,7 @@ Redis 在接口入口处做限流；调用大模型和 FSRS 调度都在 Service
 | 后端框架 | Spring Boot 4，Java 21，Maven | 作者最熟悉，也贴合 Java 后端面试；Spring AI 2.x 要求 Spring Boot 4 |
 | 持久层 | MyBatis-Plus + MySQL 8.4，Flyway 管理表结构 | 熟悉；MVP 不需要向量检索；表结构随代码版本化，见 [决策 009](./decisions/009-数据库迁移与表结构约定.md) |
 | 测试数据库 | Testcontainers（MySQL 8.4） | 迁移脚本和时区处理要在真实的 MySQL 上测，H2 不可靠 |
-| 安全 | Spring Security | 始终启用，只有多用户模式，见 [决策 017](./decisions/017-只保留多用户模式.md)；登录凭证的存放方式由“账号与登录” issue 确定 |
+| 安全 | Spring Security | 始终启用，只有多用户模式，见 [决策 017](./decisions/017-只保留多用户模式.md)；凭证为服务端 Session，见 [决策 022](./decisions/022-登录凭证与认证.md) |
 | 缓存 / 计数 | Redis | 只用于 AI 接口限流、线上免费额度计数，不做过早缓存 |
 | 大模型接入 | Spring AI 2.0.1（OpenAI starter） | Spring 官方项目，用法与其他 starter 一致；兼容 OpenAI 格式与 Ollama，见 [决策 004](./decisions/004-大模型接入.md) |
 | 流式输出 | SSE | 单向推送，比 WebSocket 简单 |
@@ -63,7 +63,7 @@ com.wengu
 - 依赖方向单向，不允许循环依赖，完整关系见下图和 [决策 002](./decisions/002-模块依赖边界.md)
 - review 只通过 kp_id 工作，不依赖 knowledge；知识点创建时由 knowledge 调用 review 初始化调度状态，结束评分时由 chat 调用 review 更新调度状态、写评分流水
 - llm 是底层模块，管理 model_config，不依赖任何业务模块
-- 当前用户 id 由 common 提供（从登录信息读取），各模块不为此依赖 user
+- 当前用户 id 由 common 提供（从登录信息读取），各模块不为此依赖 user。只在 Controller 中读取，传给 Service：登录信息只在请求线程上，后台线程和 SSE 的异步线程读不到（决策 022）
 
 ```mermaid
 flowchart TB
@@ -83,12 +83,12 @@ flowchart TB
 
 ## 数据模型
 
-所有业务表都带 user_id。V1 插入的默认用户（id 为 1）在只保留多用户模式后不再使用，处理方式见 [决策 017](./decisions/017-只保留多用户模式.md)。时间统一用 `DATETIME(3)` 存 UTC，枚举存名称，不建外键，约定见 [决策 009](./decisions/009-数据库迁移与表结构约定.md)。下表是 V1 建出的表，后续 issue 需要的字段由各自的迁移脚本添加。
+所有业务表都带 user_id。V1 插入的默认用户（id 为 1）在只保留多用户模式后不再使用：V7 删除没有业务数据的默认用户，有数据的由 `tools/migrate-default-user.sql` 手动转给新注册的账号，见 [决策 017](./decisions/017-只保留多用户模式.md)。时间统一用 `DATETIME(3)` 存 UTC，枚举存名称，不建外键，约定见 [决策 009](./decisions/009-数据库迁移与表结构约定.md)。下表是 V1 建出的表，后续 issue 需要的字段由各自的迁移脚本添加。
 
 | 表 | 作用 | 关键字段 |
 | --- | --- | --- |
-| user | 用户 | id、username、password_hash |
-| user_settings | 用户设置 | user_id、daily_new_limit（每天新学数量，默认 3）、timezone（默认取环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点） |
+| user | 用户 | id、username（唯一，按数据库排序规则比较，不区分大小写）、password_hash（bcrypt，带 `{bcrypt}` 前缀，见决策 022） |
+| user_settings | 用户设置 | user_id、daily_new_limit（每天新学数量，默认 3）、timezone（注册时取浏览器时区，读不到或不合法时用环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点） |
 | source | 导入的学习材料 | id、user_id、type（题目 / 源码 / 文档 / 截图）、name、content（用户粘贴的原文，包括答案）、questions（切分出的题目 JSON，V2 添加，见决策 011） |
 | knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（ACTIVE / SUSPENDED）、sort_order（新知识按 sort_order、id 派发；确认草稿时接在已有知识点之后）、draft_item_id（来自哪个草稿条目，V6 添加，见决策 015） |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id、user_id |
@@ -150,6 +150,7 @@ flowchart TB
 | 状态表与流水表分离 | card_state 存“现在”，review_log 存“全部历史”，供统计和 FSRS 参数优化 | 只更新状态，不留历史 |
 | 评分以用户确认为准，同时记录 AI 建议 | 用户最了解自己；保留差异以后可评估 AI 准确度 | 完全由 AI 评分 |
 | 只有多用户模式，不设管理员，注册开关放环境变量 | 一种模式只有一条路径，界面、测试、文档不用覆盖两种情况；管理员在 M1 没有专属功能，见 [决策 017](./decisions/017-只保留多用户模式.md) | 单用户 / 多用户用配置切换；维护两个分支；第一个注册的用户为管理员 |
+| 登录凭证是服务端 Session（HttpOnly Cookie），保留 CSRF 保护，令牌放在前端可读的 Cookie 中；登录接口自己写，Session 中只存用户 id 和用户名 | SSE 的 EventSource 自动带上 Cookie；退出登录立即生效；不多一个签名密钥，不引入 JWT 库。代价是重启后要重新登录，见 [决策 022](./decisions/022-登录凭证与认证.md) | Cookie 或请求头中的 JWT；关闭 CSRF 只靠 SameSite；配置 UserDetailsService 走标准认证链 |
 | 候选知识点先“整理成题目”，再走现有的抽取和确认流程 | 粒度、类型、去重的规则只在一处维护；对话 → 题目、题目 → 知识点分开，每步都能单独检查，见 [决策 019](./decisions/019-候选知识点的提炼方式.md) | 新写一个从对话直接抽知识点的 prompt；边聊边整理 |
 | 连续学习从 M1 起记录事实：评分后的到期日、“当天完成” | 计划不存库，过去的任务事后算不回来；只记已发生的事，不存计划快照，见 [决策 020](./decisions/020-连续学习的口径.md) | 建表保存每天的计划快照；M2 再开始记录 |
 | Flyway 管理表结构，字段随 issue 增量添加 | 空库启动即建好表，每次改动有记录；实现前不预先猜字段，见 [决策 009](./decisions/009-数据库迁移与表结构约定.md) | 手写 SQL 手动执行；V1 一次建好所有字段 |
@@ -213,6 +214,8 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 
 所有接口返回统一格式 `{code, message, data}`（决策 001）。每个 issue 完成后把自己的接口补到这里。
 
+除了标“不需要登录”的，所有接口都要求登录，没有登录时返回 401 `UNAUTHORIZED`。POST、PATCH 等修改类请求要带 CSRF 令牌：从 Cookie `XSRF-TOKEN` 中读出，放进请求头 `X-XSRF-TOKEN`，缺失或不对时返回 403 `FORBIDDEN`。见决策 022。
+
 | 接口 | 作用 | 请求 | 返回 data | 说明 |
 | --- | --- | --- | --- | --- |
 | `POST /api/sources` | 导入面试题并切分（#15、#16） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 同步调用模型，只有题目时几秒到几十秒，10 万字带答案的资料最长约 95 秒；原文不超过 100000 字、切分后不超过 200 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`。见决策 011 |
@@ -223,6 +226,12 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `GET /api/plan/today` | 今天的计划（#18） | — | `{date, dailyNewLimit, newLearnedToday, reviews: [{kpId, title, type}], newItems: [...]}` | 实时计算：先复习后新学，各自按学习顺序；新知识最多“每天新学数 − 今天已学数”个；date 是学习日（按时区和 day_start_hour）。见决策 016 |
 | `GET /api/settings` | 读取用户设置（#18） | — | `{timezone, dayStartHour, dailyNewLimit}` | |
 | `PATCH /api/settings` | 修改用户设置（#18） | 只传要改的字段，如 `{dailyNewLimit: 5}` | 同上 | timezone 为合法时区，dayStartHour 0～23，dailyNewLimit 0～50，否则 400；修改后立即生效。见决策 016 |
+| `GET /api/auth/registration` | 注册是否开放（#46），不需要登录 | — | `{open}` | 由 `WENGU_ALLOW_REGISTRATION` 控制，默认开放 |
+| `POST /api/auth/register` | 注册，并直接登录（#46），不需要登录 | `{username, password, timezone?}` | `{id, username}` | 用户名 2～32 个字符（中文、字母、数字、下划线、连字符），密码 8～64 个字符且不超过 72 字节，否则 400；用户名已被使用（不区分大小写）409 `USERNAME_TAKEN`；注册关闭 403 `REGISTRATION_CLOSED`。timezone 是浏览器时区，没有或不合法时用 `WENGU_TIMEZONE`；同时写入默认设置。见决策 017、022 |
+| `POST /api/auth/login` | 登录（#46），不需要登录 | `{username, password}` | `{id, username}` | 用户不存在和密码错误都返回 401 `LOGIN_FAILED`；登录后更换 Session id |
+| `POST /api/auth/logout` | 退出登录（#46），不需要登录 | — | — | Session 失效；没有登录时也返回成功 |
+| `GET /api/auth/me` | 当前用户（#46） | — | `{id, username}` | 前端打开页面时调用，没有登录 401 |
+| `POST /api/auth/password` | 修改密码（#46） | `{oldPassword, newPassword}` | — | 当前密码不对或新密码不合规 400（不用 401，以免前端当作没登录）；当前设备的登录保留，其他设备不失效 |
 
 ## 前端设计带来的需求（待各 issue 实现）
 
@@ -230,15 +239,13 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 
 **通用：**
 
-- Spring Security 始终启用；当前用户 id 从登录信息读取（决策 017）
 - 前端显示的日期一律使用接口返回的学习日，不使用浏览器的当前日期。凌晨 1 点打开时，浏览器已经是第二天，学习日还是前一天
 
 **数据模型：**
 
 | 表 | 需要的内容 | 来源 |
 | --- | --- | --- |
-| user | 注册、登录、修改密码；迁移脚本只删除没有业务数据的默认用户 | 决策 017 |
-| user_settings | 注册时写入，时区取浏览器时区，读不到时用 `WENGU_TIMEZONE`；老师的称呼 | 决策 017；ui.md 5.10 |
+| user_settings | 老师的称呼 | ui.md 5.10 |
 | study_session | 会话类型（学习知识点 / 接着问 / 从一个问题开始，后者不关联知识点，kp_id 可为空）；有效时长（决策 008 第 6 条）；是否跳过了讲解 | 决策 018 |
 | knowledge_point | 软删除；要点的修改记录。来源草稿条目已有（V6 的 draft_item_id），“恢复 AI 版本”的原文从它取 | ui.md 5.9 |
 | extraction_draft / extraction_draft_item | 候选知识点的草稿：来源是学习会话；勾选与取消复用条目的 decision 字段（决策 015） | 决策 019 |
@@ -249,7 +256,6 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 
 | 需要的接口 | 内容 | 页面 |
 | --- | --- | --- |
-| 账号 | 注册、登录、退出登录、当前用户、修改密码；查询是否开放注册（不需要登录） | 注册与登录、设置 |
 | 每日计划补充 | 今天已完成的条目（今天学习日范围内的 review_log，含评分、是否新学）；今天已学的分钟数 | 今天 |
 | 接下来 7 天要复习的 | 每天到期的数量，按学习日分组 | 今天 |
 | 草稿列表 | 待确认的草稿，含推算出的状态和条目数，包括候选知识点的草稿 | 今天、导入资料 |

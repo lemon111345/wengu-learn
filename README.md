@@ -12,7 +12,7 @@
 docker compose up -d         # 在仓库根目录启动本地开发用的 MySQL 8.4（宿主机端口 3307）
 cd backend
 .\mvnw.cmd test              # 运行测试（测试会用 Testcontainers 另起一个 MySQL，需要 Docker 在运行）
-.\mvnw.cmd spring-boot:run   # 启动后端，健康检查：http://localhost:8080/api/health
+.\mvnw.cmd spring-boot:run   # 启动后端，健康检查：http://localhost:8080/api/health（不需要登录）
 ```
 
 后端启动时由 Flyway 自动建表（`backend/src/main/resources/db/migration`）。数据库连接默认对应 `compose.yaml`，需要时用环境变量覆盖：
@@ -21,7 +21,26 @@ cd backend
 | --- | --- | --- |
 | `WENGU_DB_URL` | JDBC 地址，需带 `connectionTimeZone=UTC` | `jdbc:mysql://localhost:3307/wengu?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true` |
 | `WENGU_DB_USERNAME` / `WENGU_DB_PASSWORD` | 数据库账号 | `wengu` / `wengu` |
-| `WENGU_TIMEZONE` | 默认用户的时区，只在第一次建库时写入 | `Asia/Shanghai` |
+| `WENGU_TIMEZONE` | 注册时读不到浏览器时区（或不合法）时使用的时区，以后可以在设置中修改 | `Asia/Shanghai` |
+| `WENGU_ALLOW_REGISTRATION` | 是否开放注册 | `true` |
+
+### 账号
+
+所有人都要注册登录后使用，没有管理员。自己部署时：
+
+1. 保持 `WENGU_ALLOW_REGISTRATION` 为默认的 `true`，启动后注册自己的账号
+2. 不打算让别人注册的话，把它设为 `false` 后重启。已有的账号照常登录，注册页显示“暂未开放注册”
+
+登录状态保存在后端的内存中，30 天不使用才会失效；**后端重启后需要重新登录**。
+
+忘记密码目前只能直接改数据库：把 `user` 表中这个账号的 `password_hash` 换成新密码的 bcrypt 哈希（带 `{bcrypt}` 前缀）。
+
+### 从只有默认用户的旧版本升级
+
+#46 之前的版本没有注册登录，所有数据都属于迁移脚本插入的默认用户（id 为 1，用户名 `default`）。升级时：
+
+- 默认用户没有数据：迁移脚本会自动删掉它，不用处理
+- 默认用户有数据：迁移脚本不动它。注册自己的账号后，用 [`tools/migrate-default-user.sql`](tools/migrate-default-user.sql) 把数据转过去，用法见脚本开头的说明。**执行前先备份数据库**
 
 ### 配置大模型
 
