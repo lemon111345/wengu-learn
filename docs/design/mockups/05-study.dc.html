@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>温故 学习（第三版）</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&amp;family=Noto+Serif+SC:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6FB2}a:hover{color:#16507F}
+</style>
+</helmet>
+<div style="font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #1C1D21; background: #FFFFFF; min-height: 1150px; display: flex; flex-direction: column">
+<header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px 24px; padding: 10px 32px; border-bottom: 1px solid #E4E6EA">
+<a href="B-Today-v3.dc.html" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #5F636B; text-decoration: none; font-size: 15px">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5"></path></svg>
+今天
+</a>
+<div style="display: flex; align-items: center; gap: 12px">
+<div style="display: flex; gap: 4px; width: 220px" role="img" aria-label="今天第 9 个，共 11 个">
+<sc-for list="{{segments}}" as="g" hint-placeholder-count="11">
+<span style="flex: 1; height: 6px; border-radius: 3px; background: {{g.bg}}"></span>
+</sc-for>
+</div>
+<span style="font-size: 14px; color: #5F636B">9 / 11</span>
+</div>
+<span style="font-size: 14px; color: #5F636B">本次 12 分钟</span>
+</header>
+<main style="flex: 1; width: 100%; max-width: 760px; margin: 0 auto; padding: 40px 32px 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px">
+<section style="display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; gap: 8px">
+<span style="font-size: 13px; color: #5F636B; background: #EEF0F3; padding: 3px 10px; border-radius: 999px">新学</span>
+<span style="font-size: 13px; color: #5F636B; background: #EEF0F3; padding: 3px 10px; border-radius: 999px">原理机制</span>
+</div>
+<h1 style="margin: 0; font-family: 'Noto Serif SC', 'Songti SC', 'SimSun', serif; font-size: 30px; font-weight: 700; line-height: 1.4">HashMap 的扩容机制是怎样的？</h1>
+<div style="display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap">
+<button type="button" style="display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 1px solid #D5D8DD; border-radius: 8px; background: #FFFFFF; font: inherit; font-size: 14px; color: #1C1D21; cursor: pointer">这个我会，直接完整作答</button>
+<span style="font-size: 13px; color: #5F636B">跳过讲解，讲完直接评分；没讲全的地方，老师会点出来</span>
+</div>
+</section>
+<section style="display: flex; flex-direction: column; gap: 24px; font-size: 16px; line-height: 1.85">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5F636B">老师</span>
+<p style="margin: 0">先别看资料，凭你的印象说说：HashMap 什么时候需要扩容？扩容的时候要做哪些事？</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px; background: #F6F7F9; border-radius: 10px; padding: 14px 18px">
+<span style="font-size: 13px; color: #5F636B">你</span>
+<p style="margin: 0">元素太多的时候吧。扩容就是建一个更大的数组，把原来的元素重新放进去。</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5F636B">老师</span>
+<p style="margin: 0">方向是对的，再说具体一点。元素个数超过阈值时触发扩容，阈值等于容量乘以负载因子，默认是 16 × 0.75 = 12。扩容时容量翻倍，再把旧数组里的节点迁移到新数组。</p>
+<p style="margin: 10px 0 0">迁移时，JDK 1.8 不需要给每个节点重新算一遍下标。容量总是 2 的幂，翻倍之后，一个节点要么留在原来的位置，要么移到“原下标 + 旧容量”的位置。程序靠什么判断一个节点该留下还是该挪走？</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px; background: #F6F7F9; border-radius: 10px; padding: 14px 18px">
+<span style="font-size: 13px; color: #5F636B">你</span>
+<p style="margin: 0">看 hash 和旧容量做与运算的结果，是 0 就留在原位，不是 0 就移到原下标加旧容量的位置。</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5F636B">老师</span>
+<p style="margin: 0">对，就是这个判断。再往下想一步：同一个桶里的节点按这个规则分成两组以后，它们在新数组里的先后<span style="display: inline-block; width: 2px; height: 1.1em; margin-left: 2px; vertical-align: -0.15em; background: #1F6FB2"></span></p>
+</div>
+</section>
+</main>
+<footer style="border-top: 1px solid #E4E6EA">
+<div style="max-width: 760px; margin: 0 auto; padding: 16px 32px 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px">
+<label for="answer-v3" style="font-size: 13px; color: #5F636B">你的回答</label>
+<textarea id="answer-v3" rows="3" placeholder="老师说完后再回答" style="font: inherit; font-size: 16px; line-height: 1.7; padding: 12px 14px; border: 1px solid #D5D8DD; border-radius: 10px; resize: vertical; color: #1C1D21"></textarea>
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap">
+<span style="font-size: 13px; color: #5F636B">老师正在回复</span>
+<button type="button" style="display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 18px; border: none; border-radius: 8px; background: #E7F0F9; color: #1F6FB2; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer">发送<kbd style="font: inherit; font-size: 12px; font-weight: 400; padding: 1px 6px; border: 1px solid #C6D9EE; border-radius: 4px">Ctrl Enter</kbd></button>
+</div>
+</div>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1150}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = '#1F6FB2';
+    const segments = Array.from({ length: 11 }, (_, i) => ({ bg: i < 8 ? accent : (i === 8 ? '#A9CBEA' : '#EEF0F3') }));
+    const labels = ['摸底', '讲解', '检验', '追问', '完整作答', '收尾'];
+    const current = 3;
+    const stages = labels.map((label, i) => ({
+      label,
+      color: i <= current ? accent : '#5F636B',
+      weight: i === current ? 700 : 400,
+      dotBg: i < current ? accent : '#FFFFFF',
+      dotBorder: i <= current ? accent : '#B4B9C0'
+    }));
+    return { segments, stages };
+  }
+}
+</script>
+</body>
+</html>

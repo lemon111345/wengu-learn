@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>温故 注册与登录</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&amp;family=Noto+Serif+SC:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6FB2}a:hover{color:#16507F}
+</style>
+</helmet>
+<div style="font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #1C1D21; background: #FFFFFF; min-height: 900px; display: flex; flex-wrap: wrap">
+<section style="flex: 1 1 520px; box-sizing: border-box; padding: 56px 64px; background: #F6F7F9; display: flex; flex-direction: column; gap: 48px">
+<span style="font-family: 'Noto Serif SC', 'Songti SC', serif; font-size: 28px; font-weight: 700; letter-spacing: 6px">温故</span>
+<div style="display: flex; flex-direction: column; gap: 28px; max-width: 520px; margin: auto 0">
+<h2 style="margin: 0; font-family: 'Noto Serif SC', 'Songti SC', serif; font-size: 36px; font-weight: 700; line-height: 1.45">把面试题拆成知识点，<br>每天学懂几个，到时间再回来。</h2>
+<div style="display: flex; flex-direction: column; gap: 14px; padding: 24px; background: #FFFFFF; border: 1px solid #E4E6EA; border-radius: 14px">
+<span style="font-size: 13px; color: #5F636B">新学，原理机制</span>
+<span style="font-family: 'Noto Serif SC', 'Songti SC', serif; font-size: 19px; font-weight: 700">HashMap 的扩容机制是怎样的？</span>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{ratings}}" as="r" hint-placeholder-count="4">
+<span style="display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 4px; border: 1px solid {{r.border}}; box-shadow: {{r.shadow}}; border-radius: 8px; background: {{r.bg}}; font-size: 14px; font-weight: 700">{{r.label}}<span style="font-size: 12px; font-weight: 400; color: #5F636B">{{r.interval}}</span></span>
+</sc-for>
+</div>
+<span style="font-family: 'Noto Serif SC', 'Songti SC', serif; font-size: 30px; font-weight: 700; color: #1F6FB2">11月7日再见</span>
+</div>
+</div>
+</section>
+<main style="flex: 1 1 440px; box-sizing: border-box; padding: 56px 48px; display: flex; align-items: center; justify-content: center">
+<div style="width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 22px">
+<h1 style="margin: 0; font-size: 26px; font-weight: 700">{{heading}}</h1>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<label for="u" style="font-size: 14px; font-weight: 700">用户名</label>
+<input id="u" type="text" autocomplete="username" style="min-height: 44px; padding: 0 12px; border: 1px solid #D5D8DD; border-radius: 8px; font: inherit; font-size: 15px; color: #1C1D21">
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<label for="p" style="font-size: 14px; font-weight: 700">密码</label>
+<input id="p" type="password" autocomplete="{{pwAuto}}" style="min-height: 44px; padding: 0 12px; border: 1px solid #D5D8DD; border-radius: 8px; font: inherit; font-size: 15px; color: #1C1D21">
+<sc-if value="{{isRegister}}" hint-placeholder-val="{{true}}">
+<span style="font-size: 13px; color: #5F636B">至少 8 位</span>
+</sc-if>
+</div>
+<sc-if value="{{isRegister}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<label for="p2" style="font-size: 14px; font-weight: 700">确认密码</label>
+<input id="p2" type="password" autocomplete="new-password" style="min-height: 44px; padding: 0 12px; border: 1px solid #D5D8DD; border-radius: 8px; font: inherit; font-size: 15px; color: #1C1D21">
+</div>
+</sc-if>
+<a href="{{next}}" style="display: inline-flex; align-items: center; justify-content: center; min-height: 48px; margin-top: 4px; border-radius: 8px; background: #E7F0F9; color: #1F6FB2; font-size: 16px; font-weight: 700; text-decoration: none">{{cta}}</a>
+<sc-if value="{{isRegister}}" hint-placeholder-val="{{true}}">
+<p style="margin: 0; font-size: 13px; line-height: 1.7; color: #5F636B">注册即表示同意<a href="#" style="text-decoration: none">《用户协议》</a>和<a href="#" style="text-decoration: none">《隐私政策》</a></p>
+</sc-if>
+<p style="margin: 0; padding-top: 18px; border-top: 1px solid #E4E6EA; font-size: 14px; color: #5F636B">{{switchText}}<button type="button" onClick="{{switchPage}}" style="min-height: 44px; padding: 0 4px; border: none; background: transparent; font: inherit; font-size: 14px; font-weight: 700; color: #1F6FB2; cursor: pointer">{{switchCta}}</button></p>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"page":{"editor":"enum","options":["注册","登录"],"default":"注册"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {};
+  }
+  renderVals() {
+    const fromProp = (this.props.page ?? '注册') === '注册';
+    const isRegister = this.state.reg !== undefined ? this.state.reg : fromProp;
+    const opts = [['忘了', '明天'], ['困难', '3 天后'], ['良好', '8 天后'], ['简单', '15 天后']];
+    const ratings = opts.map(([label, interval], i) => ({
+      label, interval,
+      border: i === 2 ? '#1F6FB2' : '#E4E6EA',
+      shadow: i === 2 ? 'inset 0 0 0 1px #1F6FB2' : 'none',
+      bg: i === 2 ? '#E7F0F9' : '#FFFFFF'
+    }));
+    return {
+      ratings,
+      isRegister,
+      heading: isRegister ? '注册' : '登录',
+      cta: isRegister ? '注册并开始' : '登录',
+      pwAuto: isRegister ? 'new-password' : 'current-password',
+      next: isRegister ? 'Today-Empty.dc.html' : 'B-Today-v3.dc.html',
+      switchText: isRegister ? '已有账号？' : '还没有账号？',
+      switchCta: isRegister ? '登录' : '注册',
+      switchPage: () => this.setState({ reg: !isRegister })
+    };
+  }
+}
+</script>
+</body>
+</html>

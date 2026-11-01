@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>温故 今天（第三版）</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&amp;family=Noto+Serif+SC:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6FB2}a:hover{color:#16507F}
+</style>
+</helmet>
+<div style="font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; color: {{t.ink}}; background: {{t.ground}}; min-height: 1300px; display: flex; flex-wrap: wrap">
+<nav aria-label="主导航" style="flex: 1 1 232px; max-width: 248px; box-sizing: border-box; padding: 22px 16px; background: {{t.side}}; border-right: 1px solid {{t.line}}; display: flex; flex-direction: column; gap: 28px">
+<span style="font-family: {{titleFont}}; font-size: 24px; font-weight: 700; letter-spacing: 5px; padding: 0 12px">温故</span>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<sc-for list="{{nav}}" as="n" hint-placeholder-count="5">
+<a href="#" style="display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; border-radius: 8px; background: {{n.bg}}; color: {{n.color}}; font-size: 15px; font-weight: {{n.weight}}; text-decoration: none">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{n.icon}}"></path></svg>
+{{n.label}}
+</a>
+</sc-for>
+</div>
+<div style="margin-top: auto; display: flex; flex-direction: column; gap: 8px">
+<sc-if value="{{menuOpen}}" hint-placeholder-val="{{false}}">
+<div role="menu" style="display: flex; flex-direction: column; padding: 6px; background: {{t.ground}}; border: 1px solid {{t.line}}; border-radius: 10px; box-shadow: 0 8px 24px rgba(28,29,33,0.08)">
+<sc-for list="{{menuItems}}" as="mi" hint-placeholder-count="4">
+<a href="#" role="menuitem" style="display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 6px; color: {{mi.color}}; font-size: 14px; text-decoration: none">{{mi.label}}<span style="font-size: 12px; color: {{t.muted}}">{{mi.hint}}</span></a>
+</sc-for>
+</div>
+</sc-if>
+<button type="button" onClick="{{toggleMenu}}" aria-expanded="{{menuExpanded}}" aria-haspopup="menu" style="display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 10px; border: 1px solid {{acctBorder}}; border-radius: 10px; background: {{acctBg}}; font: inherit; color: {{t.ink}}; cursor: pointer; text-align: left">
+<sc-if value="{{isMulti}}" hint-placeholder-val="{{false}}">
+<span aria-hidden="true" style="width: 34px; height: 34px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: {{t.accentSoft}}; color: {{t.navText}}; font-size: 15px; font-weight: 700">张</span>
+</sc-if>
+<sc-if value="{{isSingle}}" hint-placeholder-val="{{true}}">
+<span aria-hidden="true" style="width: 34px; height: 34px; flex: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: {{t.tagBg}}"><span style="width: 9px; height: 9px; border-radius: 50%; background: #2B8A3E"></span></span>
+</sc-if>
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px">
+<span style="font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{acctTitle}}</span>
+<span style="font-size: 12px; color: {{t.muted}}">{{acctSub}}</span>
+</span>
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="{{t.muted}}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4-3 4 3M4 10l4 3 4-3"></path></svg>
+</button>
+</div>
+</nav>
+<div style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column">
+<header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px 40px; border-bottom: 1px solid {{t.line}}">
+<span style="font-size: 15px; color: {{t.muted}}">10月30日 周五</span>
+<button type="button" style="display: flex; align-items: center; gap: 12px; min-height: 44px; min-width: 260px; padding: 0 12px; border: 1px solid {{t.line}}; border-radius: 8px; background: {{t.ground}}; font: inherit; font-size: 14px; color: {{t.muted}}; cursor: pointer">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4-4"></path></svg>
+<span style="flex: 1; text-align: left">搜索知识点</span>
+<kbd style="font: inherit; font-size: 12px; padding: 1px 7px; border: 1px solid {{t.line}}; border-bottom-width: 2px; border-radius: 4px">Ctrl K</kbd>
+</button>
+</header>
+<div style="width: 100%; max-width: 1400px; margin: 0 auto; padding: 32px 40px 72px; box-sizing: border-box; display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start">
+<main style="flex: 999 1 620px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<section style="display: flex; flex-wrap: wrap; gap: 28px; padding: 28px; border: 1px solid {{t.line}}; border-radius: 14px">
+<div style="flex: 1 1 280px; display: flex; flex-direction: column; justify-content: space-between; gap: 18px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h1 style="margin: 0; font-family: {{titleFont}}; font-size: 34px; font-weight: 700; line-height: 1.3">还剩 3 个新知识</h1>
+<p style="margin: 0; font-size: 15px; color: {{t.muted}}">复习 8 个已完成，今天已学 38 分钟</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; gap: 5px" role="img" aria-label="今天共 11 个，已完成 8 个">
+<sc-for list="{{segments}}" as="g" hint-placeholder-count="11">
+<span style="flex: 1; height: 10px; border-radius: 5px; background: {{g.bg}}"></span>
+</sc-for>
+</div>
+<span style="font-size: 13px; color: {{t.muted}}">8 / 11</span>
+</div>
+</div>
+<div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 12px; padding: 22px; background: {{t.side}}; border-radius: 10px">
+<span style="font-size: 13px; color: {{t.muted}}">下一个</span>
+<span style="font-size: 19px; font-weight: 700; line-height: 1.5">HashMap 的扩容机制是怎样的？</span>
+<div style="display: flex; gap: 8px; flex-wrap: wrap">
+<span style="font-size: 13px; color: {{t.muted}}; background: {{t.tagBg}}; padding: 3px 10px; border-radius: 999px">新学</span>
+<span style="font-size: 13px; color: {{t.muted}}; background: {{t.tagBg}}; padding: 3px 10px; border-radius: 999px">原理机制</span>
+</div>
+<a href="B-Study.dc.html" style="align-self: flex-start; display: inline-flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 22px; margin-top: 4px; background: {{btn.bg}}; color: {{btn.color}}; border-radius: 8px; font-size: 16px; font-weight: 700; text-decoration: none">继续学习<kbd style="font: inherit; font-size: 12px; font-weight: 400; padding: 1px 7px; border: 1px solid {{btn.line}}; border-radius: 4px">Enter</kbd></a>
+</div>
+</section>
+<section style="display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; padding: 8px 8px 8px 20px; border: 1px solid {{t.line}}; border-radius: 14px">
+<label for="ask-start" style="font-size: 15px; font-weight: 700; white-space: nowrap">从一个问题开始</label>
+<input id="ask-start" type="text" placeholder="比如：面试被问到 G1 和 CMS 有什么区别，没答上来" style="flex: 1 1 240px; min-width: 0; min-height: 44px; padding: 0 10px; border: none; border-radius: 8px; background: transparent; font: inherit; font-size: 15px; color: {{t.ink}}">
+<button type="button" style="min-height: 44px; padding: 0 18px; border: none; border-radius: 8px; background: {{btn.bg}}; color: {{btn.color}}; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer">开始学</button>
+</section>
+<section style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; padding: 14px 22px; background: {{t.signalSoft}}; border-radius: 12px">
+<div style="display: flex; align-items: center; gap: 12px; font-size: 15px">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: {{t.signal}}; flex: none"></span>
+<span>有 1 份导入结果等你确认，共 23 个知识点；学习时还记下了 2 个候选知识点</span>
+</div>
+<a href="#" style="display: inline-flex; align-items: center; min-height: 44px; font-size: 15px; font-weight: 700; color: {{t.signal}}; text-decoration: none">去确认</a>
+</section>
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+<section style="flex: 1 1 320px; display: flex; flex-direction: column; padding: 6px 24px 16px; border: 1px solid {{t.line}}; border-radius: 14px">
+<h2 style="margin: 18px 0 4px; font-size: 16px; font-weight: 700">新学 <span style="font-weight: 400; color: {{t.muted}}">0 / 3</span></h2>
+<sc-for list="{{news}}" as="item" hint-placeholder-count="3">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 12px 0; border-bottom: 1px solid {{t.line}}">
+<span style="font-size: 15px; font-weight: {{item.weight}}">{{item.title}}</span>
+<span style="font-size: 13px; color: {{t.muted}}; background: {{t.tagBg}}; padding: 2px 9px; border-radius: 999px">{{item.type}}</span>
+</div>
+</sc-for>
+</section>
+<section style="flex: 1.4 1 400px; display: flex; flex-direction: column; padding: 6px 24px 16px; border: 1px solid {{t.line}}; border-radius: 14px">
+<h2 style="margin: 18px 0 4px; font-size: 16px; font-weight: 700">复习 <span style="font-weight: 400; color: {{t.muted}}">8 / 8</span></h2>
+<sc-for list="{{reviews}}" as="item" hint-placeholder-count="8">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 12px 0; border-bottom: 1px solid {{t.line}}">
+<span style="font-size: 15px; color: {{t.muted}}">{{item.title}}</span>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 14px; min-width: 52px">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: {{item.dot}}"></span>
+{{item.rating}}
+</span>
+</div>
+</sc-for>
+</section>
+</div>
+</main>
+<aside style="flex: 1 1 320px; max-width: 400px; display: flex; flex-direction: column; gap: 20px">
+<section style="display: flex; flex-direction: column; gap: 14px; padding: 22px; border: 1px solid {{t.line}}; border-radius: 14px">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 700">学习时长</h2>
+<div role="group" aria-label="按周或按月查看" style="display: flex; gap: 2px; padding: 2px; background: {{t.tagBg}}; border-radius: 8px">
+<sc-for list="{{tabs}}" as="tb" hint-placeholder-count="2">
+<button type="button" onClick="{{tb.pick}}" aria-pressed="{{tb.pressed}}" style="min-height: 44px; min-width: 52px; padding: 0 14px; border: none; border-radius: 6px; background: {{tb.bg}}; color: {{tb.color}}; font: inherit; font-size: 14px; font-weight: {{tb.weight}}; cursor: pointer">{{tb.label}}</button>
+</sc-for>
+</div>
+</div>
+<sc-if value="{{isMonth}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<button type="button" aria-label="上个月" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: {{t.muted}}; cursor: pointer"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5"></path></svg></button>
+<span style="font-size: 15px; font-weight: 700">2026年10月</span>
+<button type="button" aria-label="下个月" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: {{t.muted}}; cursor: pointer"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"></path></svg></button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px">
+<sc-for list="{{weekdays}}" as="wd" hint-placeholder-count="7">
+<span style="text-align: center; font-size: 12px; color: {{t.muted}}; padding-bottom: 2px">{{wd.label}}</span>
+</sc-for>
+<sc-for list="{{cells}}" as="c" hint-placeholder-count="35">
+<span title="{{c.tip}}" style="aspect-ratio: 1; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; background: {{c.bg}}; color: {{c.color}}; box-shadow: {{c.ring}}">{{c.n}}</span>
+</sc-for>
+</div>
+<div style="display: flex; justify-content: flex-end; align-items: center; gap: 4px; font-size: 12px; color: {{t.muted}}">
+<span style="margin-right: 4px">少</span>
+<sc-for list="{{legend}}" as="lg" hint-placeholder-count="5">
+<span style="width: 12px; height: 12px; border-radius: 3px; background: {{lg.bg}}"></span>
+</sc-for>
+<span style="margin-left: 4px">多</span>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{isWeek}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<button type="button" aria-label="上一周" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: {{t.muted}}; cursor: pointer"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5"></path></svg></button>
+<span style="font-size: 15px; font-weight: 700">10月26日 至 11月1日</span>
+<button type="button" aria-label="下一周" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: {{t.muted}}; cursor: pointer"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"></path></svg></button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: end; height: 190px">
+<sc-for list="{{weekBars}}" as="b" hint-placeholder-count="7">
+<div style="display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; height: 100%">
+<span style="font-size: 12px">{{b.text}}</span>
+<div style="width: 100%; max-width: 24px; height: {{b.h}}; background: {{b.bg}}; border-radius: 4px"></div>
+<span style="font-size: 12px; color: {{t.muted}}">{{b.label}}</span>
+</div>
+</sc-for>
+</div>
+<p style="margin: 0; font-size: 12px; color: {{t.muted}}; text-align: right">单位：分钟</p>
+</div>
+</sc-if>
+<div style="display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid {{t.line}}; font-size: 14px">
+<div style="display: flex; justify-content: space-between"><span style="color: {{t.muted}}">本周</span><span>{{sumWeek}}</span></div>
+<div style="display: flex; justify-content: space-between"><span style="color: {{t.muted}}">本月</span><span>{{sumMonth}}</span></div>
+<div style="display: flex; justify-content: space-between"><span style="color: {{t.muted}}">连续学习</span><span style="font-weight: 700; color: {{t.markText}}">6 天</span></div>
+</div>
+</section>
+<section style="display: flex; flex-direction: column; gap: 14px; padding: 22px; border: 1px solid {{t.line}}; border-radius: 14px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 700">接下来 7 天要复习的</h2>
+<div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: end; height: 150px">
+<sc-for list="{{days}}" as="d" hint-placeholder-count="7">
+<div style="display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; height: 100%">
+<span style="font-size: 13px">{{d.count}}</span>
+<div style="width: 100%; max-width: 22px; height: {{d.h}}; background: {{d.bg}}; border-radius: 4px"></div>
+<span style="font-size: 12px; color: {{t.muted}}">{{d.label}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; border-top: 1px solid {{t.line}}">
+<span style="font-size: 15px">每天新学</span>
+<div style="display: flex; align-items: center; gap: 10px">
+<button type="button" aria-label="减少一个" style="width: 44px; height: 44px; border: 1px solid {{t.line}}; border-radius: 8px; background: {{t.ground}}; font: inherit; font-size: 20px; color: {{t.ink}}; cursor: pointer">−</button>
+<span style="font-size: 22px; font-weight: 700; min-width: 28px; text-align: center">3</span>
+<button type="button" aria-label="增加一个" style="width: 44px; height: 44px; border: 1px solid {{t.line}}; border-radius: 8px; background: {{t.ground}}; font: inherit; font-size: 20px; color: {{t.ink}}; cursor: pointer">+</button>
+</div>
+</div>
+</section>
+<section style="display: flex; flex-direction: column; gap: 14px; padding: 22px; border: 1px solid {{t.line}}; border-radius: 14px">
+<div style="display: flex; justify-content: space-between; align-items: baseline">
+<h2 style="margin: 0; font-size: 16px; font-weight: 700">知识库</h2>
+<span style="font-size: 14px; color: {{t.muted}}">86 个知识点</span>
+</div>
+<div style="display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px" role="img" aria-label="牢固 9，熟悉 14，一般 12，生疏 6，待学 39">
+<sc-for list="{{kb}}" as="k" hint-placeholder-count="5">
+<span style="width: {{k.w}}; background: {{k.bg}}"></span>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px">
+<sc-for list="{{kb}}" as="k" hint-placeholder-count="5">
+<span style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{k.bg}}"></span>{{k.label}} {{k.n}}</span>
+</sc-for>
+</div>
+<p style="margin: 0; font-size: 14px; color: {{t.muted}}">另有暂停 2 个，不参与复习 4 个</p>
+<p style="margin: 0; padding-top: 14px; border-top: 1px solid {{t.line}}; font-size: 14px; line-height: 1.7">按每天新学 3 个，还要 <strong style="font-weight: 700">13 天</strong>学完</p>
+</section>
+</aside>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;石青&quot;,&quot;墨绿&quot;,&quot;划重点&quot;],&quot;default&quot;:&quot;石青&quot;},&quot;primary&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;墨黑&quot;,&quot;浅底&quot;,&quot;实心主色&quot;],&quot;default&quot;:&quot;浅底&quot;},&quot;mode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;单用户&quot;,&quot;多用户&quot;],&quot;default&quot;:&quot;单用户&quot;},&quot;serifTitles&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true},&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:1300}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: '月', menu: false };
+  }
+  renderVals() {
+    const themes = {
+      '石青': { ground: '#FFFFFF', side: '#F6F7F9', ink: '#1C1D21', muted: '#5F636B', line: '#E4E6EA', tagBg: '#EEF0F3', accent: '#1F6FB2', onAccent: '#FFFFFF', onAccentLine: 'rgba(255,255,255,0.45)', accentSoft: '#E7F0F9', navText: '#1F6FB2', mark: '#1F6FB2', markText: '#1F6FB2', heat: ['#DCEAF7', '#A9CBEA', '#5C97CF', '#1F6FB2'], heatTop: '#FFFFFF', ramp: ['#D9480F', '#E8A100', '#7FB0DD', '#1F6FB2'], signal: '#C2410C', signalSoft: '#FDF0E8' },
+      '墨绿': { ground: '#FFFFFF', side: '#F5F7F6', ink: '#1B1F1D', muted: '#5C635F', line: '#E2E6E4', tagBg: '#EDF1EF', accent: '#0B7A5B', onAccent: '#FFFFFF', onAccentLine: 'rgba(255,255,255,0.45)', accentSoft: '#E3F2EC', navText: '#0B7A5B', mark: '#0B7A5B', markText: '#0B7A5B', heat: ['#D6EEE5', '#9FD4C1', '#4FA88A', '#0B7A5B'], heatTop: '#FFFFFF', ramp: ['#D9480F', '#E8A100', '#6DBDA3', '#0B7A5B'], signal: '#C2410C', signalSoft: '#FDF0E8' },
+      '划重点': { ground: '#FFFFFF', side: '#F7F7F6', ink: '#1C1D21', muted: '#5F636B', line: '#E6E6E4', tagBg: '#F0F0EE', accent: '#1C1D21', onAccent: '#FFFFFF', onAccentLine: 'rgba(255,255,255,0.4)', accentSoft: '#FFF2B8', navText: '#1C1D21', mark: '#F2B705', markText: '#1C1D21', heat: ['#FFF3BF', '#FFE066', '#FCC419', '#F08C00'], heatTop: '#1C1D21', ramp: ['#D9480F', '#F2B705', '#8A8E96', '#1C1D21'], signal: '#C2410C', signalSoft: '#FDF0E8' }
+    };
+    const t = themes[this.props.theme] ?? themes['石青'];
+    const btnStyles = {
+      '墨黑': { bg: t.ink, color: '#FFFFFF', line: 'rgba(255,255,255,0.4)' },
+      '浅底': { bg: t.accentSoft, color: t.navText, line: t.line },
+      '实心主色': { bg: t.accent, color: t.onAccent, line: t.onAccentLine }
+    };
+    const btn = btnStyles[this.props.primary] ?? btnStyles['浅底'];
+    const isMulti = this.props.mode === '多用户';
+    const menuOpen = this.state.menu;
+    const menuItems = (isMulti
+      ? [['个人资料', ''], ['模型与 API Key', ''], ['快捷键', '?'], ['退出登录', '']]
+      : [['模型连接', '查看'], ['快捷键', '?'], ['关于温故', 'GitHub']]
+    ).map(([label, hint]) => ({ label, hint, color: label === '退出登录' ? t.signal : t.ink }));
+    const sans = "'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif";
+    const serif = "'Noto Serif SC', 'Songti SC', 'SimSun', serif";
+    const titleFont = (this.props.serifTitles ?? true) ? serif : sans;
+    const icons = {
+      today: 'M4 6h16v14H4zM4 10h16M9 3v4M15 3v4',
+      book: 'M5 4h10a4 4 0 0 1 4 4v12H9a4 4 0 0 1-4-4zM5 16a4 4 0 0 1 4-4h10',
+      inbox: 'M4 13l2.5-7h11l2.5 7v6H4zM4 13h5l1 2h4l1-2h5',
+      chart: 'M4 20h16M7 16v-5M12 16V7M17 16v-8',
+      sliders: 'M5 6h14M5 12h14M5 18h14M9 4v4M15 10v4M11 16v4'
+    };
+    const nav = [['今天', 'today'], ['知识库', 'book'], ['导入资料', 'inbox'], ['统计', 'chart'], ['设置', 'sliders']].map(([label, key], i) => ({
+      label,
+      icon: icons[key],
+      bg: i === 0 ? t.accentSoft : 'transparent',
+      color: i === 0 ? t.navText : t.ink,
+      weight: i === 0 ? 700 : 400
+    }));
+    const segments = Array.from({ length: 11 }, (_, i) => ({ bg: i < 8 ? t.mark : (i === 8 ? t.heat[1] : t.tagBg) }));
+    const news = [
+      { title: 'HashMap 的扩容机制是怎样的？', type: '原理机制' },
+      { title: 'Spring Boot 的启动流程是怎样的？', type: '原理机制' },
+      { title: 'MVCC 是怎么实现的？', type: '原理机制' }
+    ].map((x, i) => ({ ...x, weight: i === 0 ? 700 : 400 }));
+    const ratingColor = { '忘了': t.ramp[0], '困难': t.ramp[1], '良好': t.ramp[2], '简单': t.ramp[3] };
+    const reviews = [
+      ['HashMap 的 put 流程是怎样的？', '良好'],
+      ['Redis 的持久化方式有哪些？', '良好'],
+      ['volatile 能保证原子性吗？', '简单'],
+      ['什么是回表，怎么避免？', '良好'],
+      ['synchronized 和 ReentrantLock 有什么区别？', '困难'],
+      ['线上 CPU 飙高怎么排查？', '良好'],
+      ['TCP 为什么是四次挥手？', '忘了'],
+      ['什么是缓存击穿，怎么解决？', '良好']
+    ].map(([title, rating]) => ({ title, rating, dot: ratingColor[rating] }));
+    const levelBg = [t.tagBg, t.heat[0], t.heat[1], t.heat[2], t.heat[3]];
+    const levelOf = (m) => (m === 0 ? 0 : m <= 20 ? 1 : m <= 40 ? 2 : m <= 60 ? 3 : 4);
+    const fmt = (m) => (m >= 60 ? Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分' : m + ' 分钟');
+    const mins = [0, 25, 40, 0, 35, 50, 20, 0, 45, 60, 75, 30, 0, 55, 40, 20, 0, 65, 45, 30, 50, 0, 35, 0, 40, 55, 48, 62, 52, 38];
+    const today = 30;
+    const blank = { n: '', bg: 'transparent', color: t.ink, ring: 'none', tip: '' };
+    const cells = [blank, blank, blank];
+    for (let d = 1; d <= 31; d++) {
+      if (d > today) {
+        cells.push({ n: d, bg: 'transparent', color: t.muted, ring: 'inset 0 0 0 1px ' + t.line, tip: '' });
+        continue;
+      }
+      const m = mins[d - 1];
+      const L = levelOf(m);
+      cells.push({
+        n: d,
+        bg: levelBg[L],
+        color: L === 4 ? t.heatTop : t.ink,
+        ring: d === today ? '0 0 0 2px ' + t.ground + ', 0 0 0 4px ' + t.ink : 'none',
+        tip: '10月' + d + '日，' + (m ? fmt(m) : '没有学习')
+      });
+    }
+    cells.push(blank);
+    const weekdays = ['一', '二', '三', '四', '五', '六', '日'].map((label) => ({ label }));
+    const legend = levelBg.map((bg) => ({ bg }));
+    const wk = [55, 48, 62, 52, 38, null, null];
+    const weekBars = wk.map((m, i) => ({
+      label: weekdays[i].label,
+      text: m === null ? '' : m,
+      h: m === null ? '0px' : Math.round(m / 80 * 140) + 'px',
+      bg: i === 4 ? t.mark : t.heat[1]
+    }));
+    const tab = this.state.tab;
+    const tabs = ['周', '月'].map((label) => {
+      const on = tab === label;
+      return {
+        label,
+        pressed: on ? 'true' : 'false',
+        bg: on ? t.ground : 'transparent',
+        color: on ? t.ink : t.muted,
+        weight: on ? 700 : 400,
+        pick: () => this.setState({ tab: label })
+      };
+    });
+    const sumWeek = fmt(wk.reduce((a, m) => a + (m ?? 0), 0));
+    const sumMonth = fmt(mins.reduce((a, m) => a + m, 0));
+    const raw = [['六', 5], ['日', 9], ['一', 4], ['二', 12], ['三', 6], ['四', 3], ['五', 7]];
+    const days = raw.map(([label, count]) => ({
+      label: '周' + label,
+      count,
+      h: Math.round(count / 12 * 96) + 'px',
+      bg: count === 12 ? t.mark : t.heat[1]
+    }));
+    const kbRaw = [['牢固', 9, t.ramp[3]], ['熟悉', 14, t.ramp[2]], ['一般', 12, t.ramp[1]], ['生疏', 6, t.ramp[0]], ['待学', 39, '#C9CDD3']];
+    const kb = kbRaw.map(([label, n, bg]) => ({ label, n, bg, w: (n / 80 * 100).toFixed(2) + '%' }));
+    return { t, btn, isMulti, isSingle: !isMulti, menuOpen, menuExpanded: menuOpen ? 'true' : 'false', menuItems, toggleMenu: () => this.setState({ menu: !this.state.menu }), acctTitle: isMulti ? '张同学' : 'deepseek-flash', acctSub: isMulti ? '今日免费额度 32 / 50' : '模型已连接', acctBg: menuOpen ? t.ground : 'transparent', acctBorder: menuOpen ? t.line : 'transparent', titleFont, nav, segments, news, reviews, tabs, isMonth: tab === '月', isWeek: tab === '周', weekdays, cells, legend, weekBars, sumWeek, sumMonth, days, kb };
+  }
+}
+</script>
+</body>
+</html>

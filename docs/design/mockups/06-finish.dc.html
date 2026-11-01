@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>温故 收尾与评分（第三版）</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&amp;family=Noto+Serif+SC:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6FB2}a:hover{color:#16507F}
+</style>
+</helmet>
+<div style="font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #1C1D21; background: #FFFFFF; min-height: 1450px; display: flex; flex-direction: column">
+<header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px 24px; padding: 10px 32px; border-bottom: 1px solid #E4E6EA">
+<a href="B-Today-v3.dc.html" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #5F636B; text-decoration: none; font-size: 15px">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5"></path></svg>
+今天
+</a>
+<div style="display: flex; align-items: center; gap: 12px">
+<div style="display: flex; gap: 4px; width: 220px" role="img" aria-label="今天第 9 个，共 11 个">
+<sc-for list="{{segments}}" as="g" hint-placeholder-count="11">
+<span style="flex: 1; height: 6px; border-radius: 3px; background: {{g.bg}}"></span>
+</sc-for>
+</div>
+<span style="font-size: 14px; color: #5F636B">9 / 11</span>
+</div>
+<span style="font-size: 14px; color: #5F636B">本次 21 分钟</span>
+</header>
+<main style="width: 100%; max-width: 760px; margin: 0 auto; padding: 40px 32px 80px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px">
+<section style="display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; gap: 8px">
+<span style="font-size: 13px; color: #5F636B; background: #EEF0F3; padding: 3px 10px; border-radius: 999px">新学</span>
+<span style="font-size: 13px; color: #5F636B; background: #EEF0F3; padding: 3px 10px; border-radius: 999px">原理机制</span>
+</div>
+<h1 style="margin: 0; font-family: 'Noto Serif SC', 'Songti SC', 'SimSun', serif; font-size: 30px; font-weight: 700; line-height: 1.4">HashMap 的扩容机制是怎样的？</h1>
+</section>
+<section style="display: flex; flex-direction: column; gap: 24px; font-size: 16px; line-height: 1.85">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5F636B">老师</span>
+<p style="margin: 0">最后，不看前面的对话，把“HashMap 的扩容机制是怎样的？”完整讲一遍。</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px; background: #F6F7F9; border-radius: 10px; padding: 14px 18px">
+<span style="font-size: 13px; color: #5F636B">你的完整作答</span>
+<p style="margin: 0">元素个数超过阈值时触发扩容，阈值是容量乘以负载因子，默认 12。扩容时容量翻倍，再把旧数组的节点迁移过去。迁移时不用重新算下标，看 hash 和旧容量做与运算：结果是 0 就留在原位，不是 0 就移到原下标加旧容量的位置。</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5F636B">老师</span>
+<p style="margin: 0">触发条件、容量翻倍和迁移规则都讲到了。还差一点：迁移一个桶时，节点会按这个规则拆成两条链表，分别放到两个位置，并且保持原来的顺序。</p>
+</div>
+</section>
+<section style="display: flex; flex-direction: column; gap: 18px; padding: 26px; border: 1px solid #E4E6EA; border-radius: 14px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 700">这次学得怎么样？</h2>
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 16px 18px; background: #F6F7F9; border-radius: 10px; font-size: 15px; line-height: 1.75">
+<p style="margin: 0"><strong style="font-weight: 700">AI 建议：良好。</strong>完整作答讲清了触发条件、容量翻倍和迁移规则。</p>
+<p style="margin: 0; color: #5F636B">没掌握的：迁移时拆成两条链表并保持顺序。下次复习会重点问这里。</p>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{ratings}}" as="r" hint-placeholder-count="4">
+<button type="button" onClick="{{r.pick}}" aria-pressed="{{r.pressed}}" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 92px; padding: 12px 6px; border: 1px solid {{r.border}}; box-shadow: {{r.shadow}}; border-radius: 10px; background: {{r.bg}}; font: inherit; color: #1C1D21; cursor: pointer">
+<kbd style="position: absolute; top: 8px; left: 8px; font: inherit; font-size: 11px; color: #5F636B; padding: 0 5px; border: 1px solid #D5D8DD; border-radius: 4px">{{r.key}}</kbd>
+<span style="display: flex; align-items: center; gap: 7px; font-size: 17px; font-weight: 700"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{r.dot}}"></span>{{r.label}}</span>
+<span style="font-size: 14px; color: #5F636B">{{r.interval}}</span>
+<sc-if value="{{r.suggested}}" hint-placeholder-val="{{false}}">
+<span style="font-size: 12px; color: #1F6FB2; font-weight: 700">AI 建议</span>
+</sc-if>
+</button>
+</sc-for>
+</div>
+<sc-if value="{{notPicked}}" hint-placeholder-val="{{false}}">
+<p style="margin: 0; font-size: 14px; color: #5F636B">按 1～4 选择，评分后会算出下次复习的日期</p>
+</sc-if>
+</section>
+<sc-if value="{{hasPicked}}" hint-placeholder-val="{{true}}">
+<section style="display: flex; flex-direction: column; gap: 28px">
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 4px 2px">
+<p style="margin: 0; font-family: 'Noto Serif SC', 'Songti SC', 'SimSun', serif; font-size: 44px; font-weight: 700; line-height: 1.3; color: #1F6FB2">{{resultDate}}再见</p>
+<p style="margin: 0; font-size: 15px; line-height: 1.75; color: #5F636B">到时会换个角度问，重点问这次没掌握的地方。</p>
+</div>
+<fieldset style="margin: 0; padding: 20px 22px; border: 1px solid #E4E6EA; border-radius: 14px; display: flex; flex-direction: column; gap: 10px">
+<legend style="padding: 0 6px; font-size: 16px; font-weight: 700">这次聊到的，要不要加入知识库？</legend>
+<p style="margin: 0; font-size: 13px; line-height: 1.7; color: #5F636B">包括评分时发现的缺口和接着问里聊到的内容，已经去掉重复。不确认也没关系，会保留在今天页的“等你确认”里。</p>
+<sc-for list="{{candidates}}" as="c" hint-placeholder-count="2">
+<label style="display: flex; align-items: center; gap: 12px; min-height: 44px; font-size: 15px; cursor: pointer">
+<input type="checkbox" checked="{{c.on}}" onChange="{{c.toggle}}" style="width: 18px; height: 18px; accent-color: #1F6FB2">
+{{c.title}}
+</label>
+</sc-for>
+<button type="button" style="align-self: flex-start; min-height: 44px; padding: 0 18px; border: 1px solid #D5D8DD; border-radius: 8px; background: #FFFFFF; font: inherit; font-size: 15px; color: #1C1D21; cursor: pointer">加入知识库</button>
+</fieldset>
+<div style="display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap">
+<a href="FollowUp-v3.dc.html" style="display: inline-flex; align-items: center; min-height: 48px; padding: 0 22px; border: 1px solid #D5D8DD; border-radius: 8px; background: #FFFFFF; font-size: 16px; color: #1C1D21; text-decoration: none">接着问</a>
+<a href="Study-v3.dc.html" style="display: inline-flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 22px; background: #E7F0F9; color: #1F6FB2; border-radius: 8px; font-size: 16px; font-weight: 700; text-decoration: none">下一个<kbd style="font: inherit; font-size: 12px; font-weight: 400; padding: 1px 7px; border: 1px solid #C6D9EE; border-radius: 4px">Enter</kbd></a>
+</div>
+</section>
+</sc-if>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"stage":{"editor":"enum","options":["评分前","评分后"],"default":"评分后"},"$preview":{"width":1440,"height":1450}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { cand: [true, false] };
+  }
+  renderVals() {
+    const accent = '#1F6FB2';
+    const segments = Array.from({ length: 11 }, (_, i) => ({ bg: i < 8 ? accent : (i === 8 ? '#A9CBEA' : '#EEF0F3') }));
+    const labels = ['摸底', '讲解', '检验', '追问', '完整作答', '收尾'];
+    const current = 5;
+    const stages = labels.map((label, i) => ({
+      label,
+      color: i <= current ? accent : '#5F636B',
+      weight: i === current ? 700 : 400,
+      dotBg: i < current ? accent : '#FFFFFF',
+      dotBorder: i <= current ? accent : '#B4B9C0'
+    }));
+    const stagePicked = (this.props.stage ?? '评分后') === '评分后' ? 2 : null;
+    const picked = this.state.picked !== undefined ? this.state.picked : stagePicked;
+    const opts = [
+      { label: '忘了', interval: '明天', date: '10月31日', dot: '#D9480F' },
+      { label: '困难', interval: '3 天后', date: '11月2日', dot: '#E8A100' },
+      { label: '良好', interval: '8 天后', date: '11月7日', dot: '#7FB0DD' },
+      { label: '简单', interval: '15 天后', date: '11月14日', dot: accent }
+    ];
+    const ratings = opts.map((o, i) => {
+      const on = picked === i;
+      return {
+        ...o,
+        key: String(i + 1),
+        suggested: i === 2,
+        pressed: on ? 'true' : 'false',
+        border: on ? accent : '#E4E6EA',
+        shadow: on ? 'inset 0 0 0 1px ' + accent : 'none',
+        bg: on ? '#E7F0F9' : '#FFFFFF',
+        pick: () => this.setState({ picked: i })
+      };
+    });
+    const titles = ['为什么 HashMap 的容量必须是 2 的幂？', 'JDK 1.7 的 HashMap 扩容为什么可能出现死循环？'];
+    const candidates = titles.map((title, i) => ({
+      title,
+      on: this.state.cand[i],
+      toggle: () => {
+        const next = this.state.cand.slice();
+        next[i] = !next[i];
+        this.setState({ cand: next });
+      }
+    }));
+    const hasPicked = picked !== null && picked !== undefined;
+    return { segments, stages, ratings, candidates, hasPicked, notPicked: !hasPicked, resultDate: hasPicked ? opts[picked].date : '' };
+  }
+}
+</script>
+</body>
+</html>
