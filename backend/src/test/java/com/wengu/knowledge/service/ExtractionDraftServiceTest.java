@@ -68,6 +68,9 @@ import static org.mockito.Mockito.when;
 @Import(TestcontainersConfiguration.class)
 class ExtractionDraftServiceTest {
 
+    /** 测试中的当前用户。 */
+    private static final long USER_ID = 1L;
+
     private static final String CONTENT = """
             1. 说说 HashMap 的原理？
             追问：为什么容量是 2 的幂？
@@ -129,7 +132,7 @@ class ExtractionDraftServiceTest {
                 new SplitQuestion("说说 HashMap 的原理？", List.of("为什么容量是 2 的幂？")),
                 new SplitQuestion("什么是 MVCC？", List.of()),
                 new SplitQuestion("Redis 为什么快？", List.of()))), "{...}", "test-model", "stop", 10, 10));
-        sourceId = sourceService.importQuestions(new ImportQuestionsRequest("Java 基础", CONTENT)).id();
+        sourceId = sourceService.importQuestions(USER_ID, new ImportQuestionsRequest("Java 基础", CONTENT)).id();
     }
 
     private static ExtractedKnowledgePoint kp(int order, String title, Integer... ids) {
@@ -152,9 +155,9 @@ class ExtractionDraftServiceTest {
 
     /** 发起抽取，并让后台任务执行完。 */
     private DraftView createAndRun(List<Integer> questionIds) {
-        DraftView view = draftService.create(new CreateDraftRequest(sourceId, questionIds));
+        DraftView view = draftService.create(USER_ID, new CreateDraftRequest(sourceId, questionIds));
         extractionExecutor.runAll();
-        return draftService.get(view.id());
+        return draftService.get(USER_ID, view.id());
     }
 
     /** 草稿的所有批次，包括重试前的旧行，按 id 排列。 */
@@ -172,7 +175,7 @@ class ExtractionDraftServiceTest {
 
     @Test
     void 发起后立即返回排队中的草稿且不调用模型() {
-        DraftView view = draftService.create(new CreateDraftRequest(sourceId, null));
+        DraftView view = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null));
 
         assertThat(view.status()).isEqualTo(DraftStatus.RUNNING);
         assertThat(view.batches()).containsExactly(new BatchView(1, BatchStatus.PENDING, List.of(1, 2, 3)));
@@ -274,7 +277,7 @@ class ExtractionDraftServiceTest {
 
     @Test
     void 勾选的题号不存在时报错且不建草稿() {
-        assertThatThrownBy(() -> draftService.create(new CreateDraftRequest(sourceId, List.of(9))))
+        assertThatThrownBy(() -> draftService.create(USER_ID, new CreateDraftRequest(sourceId, List.of(9))))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST));
         assertThat(draftMapper.selectCount(null)).isZero();
@@ -283,13 +286,13 @@ class ExtractionDraftServiceTest {
 
     @Test
     void 材料或草稿不存在时报404() {
-        assertThatThrownBy(() -> draftService.create(new CreateDraftRequest(sourceId + 100, null)))
+        assertThatThrownBy(() -> draftService.create(USER_ID, new CreateDraftRequest(sourceId + 100, null)))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND));
-        assertThatThrownBy(() -> draftService.get(Long.MAX_VALUE))
+        assertThatThrownBy(() -> draftService.get(USER_ID, Long.MAX_VALUE))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND));
-        assertThatThrownBy(() -> draftService.retry(Long.MAX_VALUE))
+        assertThatThrownBy(() -> draftService.retry(USER_ID, Long.MAX_VALUE))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND));
     }
@@ -298,7 +301,7 @@ class ExtractionDraftServiceTest {
     void 队列已满时批次直接失败() {
         extractionExecutor.setFull(true);
 
-        DraftView view = draftService.create(new CreateDraftRequest(sourceId, null));
+        DraftView view = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null));
 
         assertThat(view.status()).isEqualTo(DraftStatus.FAILED);
         assertThat(onlyBatch(view).getError()).isEqualTo(ExtractionWorker.QUEUE_FULL);
@@ -306,8 +309,8 @@ class ExtractionDraftServiceTest {
 
     @Test
     void 重启时排队中和执行中的批次标为失败且之后不再执行() {
-        DraftView pending = draftService.create(new CreateDraftRequest(sourceId, null));
-        DraftView running = draftService.create(new CreateDraftRequest(sourceId, null));
+        DraftView pending = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null));
+        DraftView running = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null));
         // 模拟上次运行时第二份草稿正在调用模型
         batchMapper.update(new LambdaUpdateWrapper<ExtractionBatch>()
                 .eq(ExtractionBatch::getDraftId, running.id())
@@ -316,7 +319,7 @@ class ExtractionDraftServiceTest {
         assertThat(recovery.failInterrupted()).isEqualTo(2);
 
         for (DraftView view : List.of(pending, running)) {
-            assertThat(draftService.get(view.id()).status()).isEqualTo(DraftStatus.FAILED);
+            assertThat(draftService.get(USER_ID, view.id()).status()).isEqualTo(DraftStatus.FAILED);
             ExtractionBatch batch = onlyBatch(view);
             assertThat(batch.getError()).isEqualTo(ExtractionRecovery.INTERRUPTED);
             assertThat(batch.getFinishedAt()).isNotNull();
@@ -336,12 +339,12 @@ class ExtractionDraftServiceTest {
         DraftView failed = createAndRun(null);
         assertThat(failed.status()).isEqualTo(DraftStatus.FAILED);
 
-        DraftView retrying = draftService.retry(failed.id());
+        DraftView retrying = draftService.retry(USER_ID, failed.id());
         assertThat(retrying.status()).isEqualTo(DraftStatus.RUNNING);
         assertThat(retrying.batches()).containsExactly(new BatchView(1, BatchStatus.PENDING, List.of(1, 2, 3)));
 
         extractionExecutor.runAll();
-        DraftView view = draftService.get(failed.id());
+        DraftView view = draftService.get(USER_ID, failed.id());
         assertThat(view.status()).isEqualTo(DraftStatus.READY);
         assertThat(view.items()).hasSize(4);
 
@@ -354,14 +357,14 @@ class ExtractionDraftServiceTest {
 
     @Test
     void 抽取中或没有失败的批次时不能重试() {
-        DraftView running = draftService.create(new CreateDraftRequest(sourceId, null));
-        assertThatThrownBy(() -> draftService.retry(running.id()))
+        DraftView running = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null));
+        assertThatThrownBy(() -> draftService.retry(USER_ID, running.id()))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.CONFLICT));
 
         when(extractionService.extract(anyList(), any())).thenReturn(validResult());
         extractionExecutor.runAll();
-        assertThatThrownBy(() -> draftService.retry(running.id()))
+        assertThatThrownBy(() -> draftService.retry(USER_ID, running.id()))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST));
         assertThat(batchMapper.selectCount(null)).isEqualTo(1);
@@ -375,7 +378,7 @@ class ExtractionDraftServiceTest {
         String content = questions.stream().map(SplitQuestion::text).collect(Collectors.joining("\n"));
         when(splitService.split(anyString())).thenReturn(new LlmResult<>(new SplitResult(questions), "{...}",
                 "test-model", "stop", 10, 10));
-        return sourceService.importQuestions(new ImportQuestionsRequest(count + " 道题", content)).id();
+        return sourceService.importQuestions(USER_ID, new ImportQuestionsRequest(count + " 道题", content)).id();
     }
 
     /** 每道题一个知识点的合格结果。 */
@@ -391,13 +394,13 @@ class ExtractionDraftServiceTest {
         long bigSource = importSource(31);
         when(extractionService.extract(anyList(), any())).thenAnswer(inv -> onePerQuestion(inv.getArgument(0)));
 
-        DraftView created = draftService.create(new CreateDraftRequest(bigSource, null));
+        DraftView created = draftService.create(USER_ID, new CreateDraftRequest(bigSource, null));
         assertThat(created.batches()).containsExactly(
                 new BatchView(1, BatchStatus.PENDING, IntStream.rangeClosed(1, 16).boxed().toList()),
                 new BatchView(2, BatchStatus.PENDING, IntStream.rangeClosed(17, 31).boxed().toList()));
 
         extractionExecutor.runAll();
-        DraftView view = draftService.get(created.id());
+        DraftView view = draftService.get(USER_ID, created.id());
 
         assertThat(view.status()).isEqualTo(DraftStatus.READY);
         assertThat(view.items()).extracting(DraftItemView::order)
@@ -444,19 +447,19 @@ class ExtractionDraftServiceTest {
 
         // 用户处理好之后重试，两批都重新执行。原来的桩会抛异常，when(...) 写法会触发它，所以用 doAnswer
         doAnswer(inv -> onePerQuestion(inv.getArgument(0))).when(extractionService).extract(anyList(), any());
-        draftService.retry(view.id());
+        draftService.retry(USER_ID, view.id());
         extractionExecutor.runAll();
 
-        DraftView retried = draftService.get(view.id());
+        DraftView retried = draftService.get(USER_ID, view.id());
         assertThat(retried.status()).isEqualTo(DraftStatus.READY);
         assertThat(retried.items()).hasSize(31);
         assertThat(batches(view)).hasSize(4);
     }
 
     private DraftView createAndRunFrom(long source) {
-        DraftView view = draftService.create(new CreateDraftRequest(source, null));
+        DraftView view = draftService.create(USER_ID, new CreateDraftRequest(source, null));
         extractionExecutor.runAll();
-        return draftService.get(view.id());
+        return draftService.get(USER_ID, view.id());
     }
 
     /** 插入一个已确认的知识点，模拟 #17 确认草稿后的数据。 */

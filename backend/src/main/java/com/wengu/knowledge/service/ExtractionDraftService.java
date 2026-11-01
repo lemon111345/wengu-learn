@@ -2,7 +2,6 @@ package com.wengu.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.wengu.common.context.CurrentUser;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.BatchView;
@@ -57,7 +56,6 @@ public class ExtractionDraftService {
     private final ExtractionDraftMapper draftMapper;
     private final ExtractionBatchMapper batchMapper;
     private final ExtractionDraftItemMapper itemMapper;
-    private final CurrentUser currentUser;
     private final Clock clock;
     private final JsonMapper jsonMapper;
     private final TransactionTemplate transactionTemplate;
@@ -65,7 +63,7 @@ public class ExtractionDraftService {
     public ExtractionDraftService(SourceService sourceService, ExtractionWorker worker,
                                   KnowledgePointService knowledgePointService,
                                   ExtractionDraftMapper draftMapper, ExtractionBatchMapper batchMapper,
-                                  ExtractionDraftItemMapper itemMapper, CurrentUser currentUser, Clock clock,
+                                  ExtractionDraftItemMapper itemMapper, Clock clock,
                                   JsonMapper jsonMapper, TransactionTemplate transactionTemplate) {
         this.sourceService = sourceService;
         this.worker = worker;
@@ -73,7 +71,6 @@ public class ExtractionDraftService {
         this.draftMapper = draftMapper;
         this.batchMapper = batchMapper;
         this.itemMapper = itemMapper;
-        this.currentUser = currentUser;
         this.clock = clock;
         this.jsonMapper = jsonMapper;
         this.transactionTemplate = transactionTemplate;
@@ -88,16 +85,17 @@ public class ExtractionDraftService {
      * <p>
      * 事务提交之后才交给后台，否则后台线程可能读不到刚插入的批次。
      */
-    public DraftView create(CreateDraftRequest request) {
+    public DraftView create(long userId, CreateDraftRequest request) {
         if (request.sourceId() == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "缺少 sourceId");
         }
-        List<SourceQuestion> selected = select(sourceService.getQuestions(request.sourceId()), request.questionIds());
+        List<SourceQuestion> selected = select(sourceService.getQuestions(userId, request.sourceId()),
+                request.questionIds());
         List<ExtractionQuestion> questions = selected.stream().map(ExtractionDraftService::toExtractionQuestion).toList();
         Instant now = Instant.now(clock);
 
         ExtractionDraft draft = new ExtractionDraft();
-        draft.setUserId(currentUser.id());
+        draft.setUserId(userId);
         draft.setSourceId(request.sourceId());
         draft.setCreatedAt(now);
         List<List<ExtractionQuestion>> batches = partition(questions, BATCH_SIZE);
@@ -108,7 +106,7 @@ public class ExtractionDraftService {
             }
         });
         worker.submit(draft.getId());
-        return get(draft.getId());
+        return get(userId, draft.getId());
     }
 
     /**
@@ -128,9 +126,9 @@ public class ExtractionDraftService {
         return batches;
     }
 
-    /** 查看草稿。不存在或不属于当前用户时为 NOT_FOUND。 */
-    public DraftView get(long draftId) {
-        ExtractionDraft draft = find(draftId);
+    /** 查看草稿。不存在或不属于这个用户时为 NOT_FOUND。 */
+    public DraftView get(long userId, long draftId) {
+        ExtractionDraft draft = find(userId, draftId);
         List<ExtractionBatch> batches = latestBatches(draftId);
         return toView(draft, batches, orderedItems(batches));
     }
@@ -142,8 +140,8 @@ public class ExtractionDraftService {
      *
      * @throws BusinessException 草稿还在抽取中时为 CONFLICT；没有失败的批次时为 BAD_REQUEST
      */
-    public DraftView retry(long draftId) {
-        ExtractionDraft draft = find(draftId);
+    public DraftView retry(long userId, long draftId) {
+        ExtractionDraft draft = find(userId, draftId);
         Instant now = Instant.now(clock);
         transactionTemplate.executeWithoutResult(status -> {
             if (lock(draftId).getConfirmedAt() != null) {
@@ -160,7 +158,7 @@ public class ExtractionDraftService {
             failed.forEach(b -> batchMapper.insert(newBatch(draft, b.getBatchNo(), b.getQuestions(), now)));
         });
         worker.submit(draftId);
-        return get(draftId);
+        return get(userId, draftId);
     }
 
     /**
@@ -172,8 +170,8 @@ public class ExtractionDraftService {
      *
      * @throws BusinessException 已经确认过、或者还不是 READY 时为 CONFLICT；取消的条目不属于这份草稿时为 BAD_REQUEST
      */
-    public DraftView confirm(long draftId, ConfirmDraftRequest request) {
-        ExtractionDraft draft = find(draftId);
+    public DraftView confirm(long userId, long draftId, ConfirmDraftRequest request) {
+        ExtractionDraft draft = find(userId, draftId);
         Set<Long> rejected = request == null || request.rejectedItemIds() == null ? Set.of()
                 : new HashSet<>(request.rejectedItemIds());
         Instant now = Instant.now(clock);
@@ -206,7 +204,7 @@ public class ExtractionDraftService {
                     .eq(ExtractionDraft::getId, draftId)
                     .set(ExtractionDraft::getConfirmedAt, now));
         });
-        return get(draftId);
+        return get(userId, draftId);
     }
 
     /** 锁住草稿这一行：同一份草稿的重试、确认请求依次执行。 */
@@ -255,9 +253,9 @@ public class ExtractionDraftService {
                 .set(ExtractionDraftItem::getDecision, decision));
     }
 
-    private ExtractionDraft find(long draftId) {
+    private ExtractionDraft find(long userId, long draftId) {
         ExtractionDraft draft = draftMapper.selectById(draftId);
-        if (draft == null || draft.getUserId() != currentUser.id()) {
+        if (draft == null || draft.getUserId() != userId) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "草稿不存在");
         }
         return draft;
