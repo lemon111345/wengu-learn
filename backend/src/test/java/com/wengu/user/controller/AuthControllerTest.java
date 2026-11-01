@@ -12,6 +12,8 @@ import com.wengu.review.mapper.CardStateMapper;
 import com.wengu.user.dto.ChangePasswordRequest;
 import com.wengu.user.dto.LoginRequest;
 import com.wengu.user.dto.RegisterRequest;
+import com.wengu.user.entity.User;
+import com.wengu.user.mapper.UserMapper;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -62,6 +64,9 @@ class AuthControllerTest {
 
     @Autowired
     private CardStateMapper cardStateMapper;
+
+    @Autowired
+    private UserMapper userMapper;
 
     @Test
     void 注册开放时不需要登录就能查到() throws Exception {
@@ -168,8 +173,15 @@ class AuthControllerTest {
     }
 
     @Test
-    void 没有密码的默认用户登录不上() throws Exception {
-        login("default", "")
+    void 没有密码的用户登录不上() throws Exception {
+        // 和有数据的库里保留下来的默认用户一样（决策 017）：password_hash 为空
+        String username = newUsername();
+        User user = new User();
+        user.setUsername(username);
+        user.setCreatedAt(Instant.now());
+        userMapper.insert(user);
+
+        login(username, "")
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("LOGIN_FAILED"));
     }

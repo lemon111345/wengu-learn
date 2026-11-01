@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -21,14 +22,22 @@ class UserSettingsServiceTest {
     @Autowired
     private UserSettingsService settingsService;
 
-    /** 测试共用一个数据库，每个测试前把默认用户的设置恢复成 V1 中的默认值。 */
+    @Autowired
+    private JdbcTemplate jdbc;
+
+    /**
+     * 测试共用一个数据库，每个测试前把用户 1 的设置恢复成默认值。
+     * 空库上 V7 删掉了默认用户和它的设置（决策 017），没有时先插入一行。
+     */
     @BeforeEach
     void restoreDefaults() {
+        jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
+                + " VALUES (1, 3, 'Asia/Shanghai', 4)");
         settingsService.update(1, new UpdateSettingsRequest("Asia/Shanghai", 4, 3));
     }
 
     @Test
-    void 读取默认用户的设置() {
+    void 读取用户的设置() {
         assertThat(settingsService.get(1)).isEqualTo(new SettingsView("Asia/Shanghai", 4, 3));
     }
 

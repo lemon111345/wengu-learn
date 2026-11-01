@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.convention.TestBean;
 
 import java.time.Clock;
@@ -71,9 +72,15 @@ class PlanServiceTest {
     @Autowired
     private ReviewLogMapper reviewLogMapper;
 
+    @Autowired
+    private JdbcTemplate jdbc;
+
     @BeforeEach
     void reset() {
         ((MutableClock) clock).set(NOW);
+        // 空库上 V7 删掉了默认用户和它的设置（决策 017），用户 1 没有设置时先插入一行
+        jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
+                + " VALUES (1, 3, 'Asia/Shanghai', 4)");
         settingsService.update(1, new UpdateSettingsRequest("Asia/Shanghai", 4, 3));
         reviewLogMapper.delete(null);
         cardStateMapper.delete(null);

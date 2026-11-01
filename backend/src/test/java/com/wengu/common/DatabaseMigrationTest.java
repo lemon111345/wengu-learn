@@ -11,11 +11,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** 迁移脚本在空库上执行的结果。启动时 Flyway 已经执行过一次 V1。 */
+/** 迁移脚本在空库上执行的结果。启动时 Flyway 已经执行过全部迁移。 */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
 class DatabaseMigrationTest {
@@ -35,16 +34,13 @@ class DatabaseMigrationTest {
                 "card_state", "study_session", "message", "review_log");
     }
 
+    /** V1 插入的默认用户在空库上没有业务数据，V7 把它和它的设置删掉了（决策 017）。 */
     @Test
-    void V1插入了默认用户和默认设置() {
-        Map<String, Object> settings = jdbc.queryForMap(
-                "SELECT u.username, s.daily_new_limit, s.timezone, s.day_start_hour"
-                        + " FROM `user` u JOIN user_settings s ON s.user_id = u.id WHERE u.id = 1");
-
-        assertThat(settings).containsEntry("username", "default")
-                .containsEntry("daily_new_limit", 3)
-                .containsEntry("timezone", "Asia/Shanghai");
-        assertThat(((Number) settings.get("day_start_hour")).intValue()).isEqualTo(4);
+    void 空库上没有默认用户() {
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM `user` WHERE username = 'default'", Integer.class))
+                .isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_settings WHERE user_id = 1", Integer.class))
+                .isZero();
     }
 
     @Test
