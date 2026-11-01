@@ -62,9 +62,21 @@
 			<version>3.5.17</version>
 		</dependency>
 
+		<!-- 注册登录，凭证放在服务端 Session 中，见 docs/decisions/022-登录凭证与认证.md -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!-- MockMvc 中模拟登录用户、带上 CSRF 令牌 -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 

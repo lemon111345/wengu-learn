@@ -8,8 +8,8 @@ spring:
     password: ${WENGU_DB_PASSWORD:wengu}
   flyway:
     placeholders:
-      # 默认用户的时区，只在第一次建库时写入 user_settings
-      default_timezone: ${WENGU_TIMEZONE:Asia/Shanghai}
+      # V1 插入默认用户时用的时区。V1 已经执行过的库不再用到它；空库仍然从 V1 开始执行，所以要保留
+      default_timezone: ${wengu.default-timezone}
   task:
     execution:
       # 定义了抽取线程池（ExtractionExecutorConfig）后，仍然创建 Spring Boot 默认的 applicationTaskExecutor
@@ -31,5 +31,19 @@ spring:
         options:
           model: ${WENGU_LLM_MODEL:deepseek-flash}
 
+wengu:
+  auth:
+    # 是否开放注册（决策 017）。默认开放，否则自部署的人注册不了第一个账号；注册完自己后可以关掉
+    allow-registration: ${WENGU_ALLOW_REGISTRATION:true}
+  # 注册时读不到浏览器时区，或者它不合法时使用
+  default-timezone: ${WENGU_TIMEZONE:Asia/Shanghai}
+
 server:
   port: 8080
+  servlet:
+    session:
+      # 登录凭证是服务端 Session（决策 022）。默认 30 分钟不操作就失效，每天打开都要重新登录，改为 30 天
+      timeout: 30d
+      cookie:
+        # 跨站的页面发起的 POST 不带这个 Cookie，和 CSRF 令牌一起防伪造请求
+        same-site: lax

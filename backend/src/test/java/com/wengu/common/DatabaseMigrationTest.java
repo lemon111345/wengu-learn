@@ -1,7 +1,6 @@
 package com.wengu.common;
 
 import com.wengu.TestcontainersConfiguration;
-import com.wengu.common.context.CurrentUser;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,9 +26,6 @@ class DatabaseMigrationTest {
     @Autowired
     private Flyway flyway;
 
-    @Autowired
-    private CurrentUser currentUser;
-
     @Test
     void 空库启动后建出全部表() {
         List<String> tables = jdbc.queryForList(
@@ -40,10 +36,10 @@ class DatabaseMigrationTest {
     }
 
     @Test
-    void 当前用户就是插入的默认用户并带有默认设置() {
+    void V1插入了默认用户和默认设置() {
         Map<String, Object> settings = jdbc.queryForMap(
                 "SELECT u.username, s.daily_new_limit, s.timezone, s.day_start_hour"
-                        + " FROM `user` u JOIN user_settings s ON s.user_id = u.id WHERE u.id = ?", currentUser.id());
+                        + " FROM `user` u JOIN user_settings s ON s.user_id = u.id WHERE u.id = 1");
 
         assertThat(settings).containsEntry("username", "default")
                 .containsEntry("daily_new_limit", 3)
