@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>温故 接着问</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&amp;family=Noto+Serif+SC:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1F6FB2}a:hover{color:#16507F}
+</style>
+</helmet>
+<div style="font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #1C1D21; background: #FFFFFF; min-height: 1300px; display: flex; flex-direction: column">
+<header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px 24px; padding: 10px 32px; border-bottom: 1px solid #E4E6EA">
+<a href="B-Today-v3.dc.html" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #5F636B; text-decoration: none; font-size: 15px">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5"></path></svg>
+今天
+</a>
+<div style="display: flex; align-items: center; gap: 12px">
+<div style="display: flex; gap: 4px; width: 220px" role="img" aria-label="今天已完成 9 个，共 11 个">
+<sc-for list="{{segments}}" as="g" hint-placeholder-count="11">
+<span style="flex: 1; height: 6px; border-radius: 3px; background: {{g.bg}}"></span>
+</sc-for>
+</div>
+<span style="font-size: 14px; color: #5F636B">9 / 11</span>
+</div>
+<span style="font-size: 14px; color: #5F636B">本次 29 分钟</span>
+</header>
+<div style="flex: 1; width: 100%; max-width: 760px; margin: 0 auto; padding: 36px 32px 0; box-sizing: border-box">
+<main style="display: flex; flex-direction: column; gap: 26px">
+<section style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 20px; padding: 16px 20px; background: #F6F7F9; border-radius: 12px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-family: 'Noto Serif SC', 'Songti SC', 'SimSun', serif; font-size: 19px; font-weight: 700">HashMap 的扩容机制是怎样的？</span>
+<span style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #5F636B"><span style="width: 8px; height: 8px; border-radius: 50%; background: #7FB0DD"></span>已评分：良好，11月7日再见</span>
+</div>
+<button type="button" onClick="{{togglePrev}}" aria-expanded="{{prevExpanded}}" aria-controls="prev-dialog" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 4px; border: none; background: transparent; font: inherit; font-size: 14px; color: #1F6FB2; cursor: pointer">{{prevLabel}}<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform: {{prevRotate}}"><path d="M4 6l4 4 4-4"></path></svg></button>
+<sc-if value="{{showPrev}}" hint-placeholder-val="{{false}}">
+<div id="prev-dialog" style="flex-basis: 100%; display: flex; flex-direction: column; gap: 14px; padding-top: 14px; border-top: 1px solid #E4E6EA; font-size: 15px; line-height: 1.8; color: #3A3D44">
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #5F636B">老师</span><p style="margin: 0">元素个数超过阈值时触发扩容，阈值等于容量乘以负载因子，默认是 16 × 0.75 = 12。扩容时容量翻倍，再把旧数组里的节点迁移到新数组……</p></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #5F636B">你的完整作答</span><p style="margin: 0">元素个数超过阈值时触发扩容，阈值是容量乘以负载因子，默认 12。扩容时容量翻倍……</p></div>
+<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #5F636B">老师</span><p style="margin: 0">触发条件、容量翻倍和迁移规则都讲到了。还差一点：迁移一个桶时，节点会拆成两条链表，并且保持原来的顺序。</p></div>
+<span style="font-size: 13px; color: #5F636B">中间的 6 轮对话已折叠</span>
+</div>
+</sc-if>
+</section>
+<section style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-family: 'Noto Serif SC', 'Songti SC', 'SimSun', serif; font-size: 26px; font-weight: 700">接着问</h1>
+<p style="margin: 0; font-size: 15px; line-height: 1.7; color: #5F636B">想问什么都可以，问到弄懂为止，不影响评分。老师只回答，不出题。返回后，聊到的新知识会整理出来，在评分页确认要不要加入复习。</p>
+</section>
+<section style="display: flex; flex-direction: column; gap: 24px; font-size: 16px; line-height: 1.85">
+<div style="display: flex; flex-direction: column; gap: 4px; background: #F6F7F9; border-radius: 10px; padding: 14px 18px">
+<span style="font-size: 13px; color: #5F636B">你</span>
+<p style="margin: 0">为什么容量一定要是 2 的幂？直接取模不行吗？</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5F636B">老师</span>
+<p style="margin: 0">取模也能算出下标，只是慢一些。容量是 2 的幂时，hash % n 和 hash &amp; (n − 1) 的结果相同，位运算比取模快。</p>
+<p style="margin: 10px 0 0">刚才讲的迁移规则也依赖这一点：容量翻倍只多出一个二进制位，所以只看 hash 和旧容量做与运算的那一位，就能决定节点去哪。你传入的初始容量不是 2 的幂时，HashMap 会自动调成大于等于它的最小的 2 的幂。</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px; background: #F6F7F9; border-radius: 10px; padding: 14px 18px">
+<span style="font-size: 13px; color: #5F636B">你</span>
+<p style="margin: 0">那 JDK 1.7 扩容为什么会出现死循环？</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5F636B">老师</span>
+<p style="margin: 0">JDK 1.7 迁移链表时用头插法，节点在新链表里的顺序会反过来。两个线程同时扩容时，一个线程已经反转了顺序，另一个线程还按旧顺序处理，可能让两个节点互相指向，形成环。之后再遍历这个桶，就会一直绕圈。</p>
+<p style="margin: 10px 0 0">JDK 1.8 改成尾插法并保持原有顺序，不会再成环。但 HashMap 本身依然不是线程安全的，多线程下要用 ConcurrentHashMap。</p>
+</div>
+</section>
+</main>
+</div>
+<footer style="margin-top: 32px; border-top: 1px solid #E4E6EA">
+<div style="max-width: 760px; margin: 0 auto; padding: 16px 32px 24px; box-sizing: border-box">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<label for="follow-input" style="font-size: 13px; color: #5F636B">继续问</label>
+<textarea id="follow-input" rows="3" placeholder="比如：ConcurrentHashMap 扩容时是怎么做的？" style="font: inherit; font-size: 16px; line-height: 1.7; padding: 12px 14px; border: 1px solid #D5D8DD; border-radius: 10px; resize: vertical; color: #1C1D21"></textarea>
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap">
+<a href="Finish-v3.dc.html" style="display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 16px; border: 1px solid #D5D8DD; border-radius: 8px; color: #1C1D21; font-size: 15px; text-decoration: none"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3L5 8l5 5"></path></svg>返回评分页<kbd style="font: inherit; font-size: 12px; padding: 1px 6px; border: 1px solid #D5D8DD; border-radius: 4px; color: #5F636B">Esc</kbd></a>
+<button type="button" style="display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 18px; border: none; border-radius: 8px; background: #E7F0F9; color: #1F6FB2; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer">发送<kbd style="font: inherit; font-size: 12px; font-weight: 400; padding: 1px 6px; border: 1px solid #C6D9EE; border-radius: 4px">Ctrl Enter</kbd></button>
+</div>
+</div>
+</div>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { cand: [true, true, false], prev: false };
+  }
+  renderVals() {
+    const accent = '#1F6FB2';
+    const segments = Array.from({ length: 11 }, (_, i) => ({ bg: i < 9 ? accent : '#EEF0F3' }));
+    const items = [
+      { title: '为什么 HashMap 的容量必须是 2 的幂？', disabled: false },
+      { title: 'JDK 1.7 的 HashMap 扩容为什么可能出现死循环？', disabled: false },
+      { title: 'ConcurrentHashMap 是怎么保证线程安全的？', disabled: true }
+    ];
+    const candidates = items.map((it, i) => ({
+      title: it.title,
+      disabled: it.disabled,
+      on: it.disabled ? false : this.state.cand[i],
+      color: it.disabled ? '#5F636B' : '#1C1D21',
+      toggle: () => {
+        if (it.disabled) return;
+        const next = this.state.cand.slice();
+        next[i] = !next[i];
+        this.setState({ cand: next });
+      }
+    }));
+    const checkedCount = candidates.filter((c) => c.on).length;
+    const showPrev = this.state.prev;
+    return {
+      segments,
+      candidates,
+      checkedCount,
+      showPrev,
+      prevExpanded: showPrev ? 'true' : 'false',
+      prevLabel: showPrev ? '收起' : '展开刚才的对话',
+      prevRotate: showPrev ? 'rotate(180deg)' : 'none',
+      togglePrev: () => this.setState({ prev: !this.state.prev })
+    };
+  }
+}
+</script>
+</body>
+</html>
