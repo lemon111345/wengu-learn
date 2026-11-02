@@ -74,6 +74,7 @@ flowchart TB
     chat --> knowledge
     chat --> llm
     chat --> review
+    chat --> user
     knowledge --> source
     knowledge --> llm
     knowledge --> review
@@ -122,7 +123,9 @@ frontend/src
 | card_state | 调度状态（每次复习都更新） | kp_id、user_id（冗余）、state（学习中 / 复习 / 重学）、step（学习步或重学步序号，复习状态为空）、due、stability、difficulty、last_review（为空表示新知识） |
 | study_session | 一次学习会话，也是自动计时的来源 | id、user_id、type（STUDY / FOLLOW_UP / QUESTION）、kp_id（从一个问题开始时为空）、parent_session_id（接着问指向原来的学习会话，V9 添加）、started_at、ended_at（学习结束或回答到上限时写入）、skipped_explanation、active_seconds（两次活动之间最多算 10 分钟）、last_active_at、prompt_version（V8 添加），见决策 025 |
 | message | 会话中的对话消息 | id、user_id、session_id、role、content（不含标记）、marker（RESTATE / END）、model_note（附在学生消息后、只给模型看的提示）、created_at（V8 添加 marker、model_note）。学习对话的第一条消息（知识点信息）不存，每次现拼，见决策 025 |
-| review_log | 每次评分的流水 | id、user_id、kp_id、session_id、rating_user、rating_ai、state_before、is_first_review（是否为该知识点的第一次学习）、reviewed_at |
+| review_log | 每次评分的流水 | id、user_id、kp_id、session_id（唯一，一次学习只评一次分）、rating_user、rating_ai（AI 建议还没生成时为空）、state_before、is_first_review（是否为该知识点的第一次学习）、due_after（评分后的下次到期时间，V10 添加，决策 020）、reviewed_at |
+| rating_suggestion | AI 评分建议，每个学习会话一条（V10） | session_id（主键）、user_id、rating、analysis、weak_points（JSON，#21 用）、out_of_scope_gaps（JSON，#31 用）、model、prompt_version、prompt_tokens、completion_tokens、created_at，见决策 026 |
+| study_day_completion | “当天完成”的记录（V10） | id、user_id、study_date（学习日）、completed_at；(user_id, study_date) 唯一。计划变空且今天学过时写入，是事实不是计划快照，见决策 020、026 |
 | extraction_draft | 一次抽取，用户确认后才生成知识点（V3 添加，V4 精简） | id、user_id、source_id（会话来源由 #31 添加，见决策 008）、created_at、confirmed_at（V6 添加）；状态不存库：确认后为 CONFIRMED，之前由批次推算（RUNNING / READY / FAILED），见决策 012、013、015 |
 | extraction_batch | 草稿中的一批，每批调用一次抽取（V4 添加） | id、user_id、draft_id、batch_no（重试时新增一行、批号不变，旧行保留）、status（PENDING / RUNNING / READY / FAILED）、questions（发给模型的题目）、context（这一批用的去重上下文，V5 添加）、covered（被已有内容覆盖的题，换回了知识点 id 或条目 id，带标题快照，V5 添加，见决策 014）、raw_output、error（不返回前端）、attempts、prompt_version、model、prompt_tokens、completion_tokens（多次调用累加）、created_at、started_at、finished_at，见决策 013 |
 | extraction_draft_item | 草稿中的一个知识点（V3 添加） | id、user_id、draft_id、batch_id（V4 添加）、item_order（批内顺序）、title、summary、type、source_question_ids（如 "1,3,5"，对应 source 中的题号）、decision（确认时的处理：ACCEPTED / REJECTED，V6 添加，见决策 015） |
@@ -178,6 +181,7 @@ frontend/src
 | 评分以用户确认为准，同时记录 AI 建议 | 用户最了解自己；保留差异以后可评估 AI 准确度 | 完全由 AI 评分 |
 | 只有多用户模式，不设管理员，注册开关放环境变量 | 一种模式只有一条路径，界面、测试、文档不用覆盖两种情况；管理员在 M1 没有专属功能，见 [决策 017](./decisions/017-只保留多用户模式.md) | 单用户 / 多用户用配置切换；维护两个分支；第一个注册的用户为管理员 |
 | 登录凭证是服务端 Session（HttpOnly Cookie），保留 CSRF 保护，令牌放在前端可读的 Cookie 中；登录接口自己写，Session 中只存用户 id 和用户名 | SSE 的 EventSource 自动带上 Cookie；退出登录立即生效；不多一个签名密钥，不引入 JWT 库。代价是重启后要重新登录，见 [决策 022](./decisions/022-登录凭证与认证.md) | Cookie 或请求头中的 JWT；关闭 CSRF 只靠 SameSite；配置 UserDetailsService 走标准认证链 |
+| 评分：AI 建议同步生成、每个会话一次，评分不等它；fuzz 的随机数由知识点和上次复习时间决定；“当天完成”在算今天的计划时写入 | 评分页打开时才需要建议；预览和实际评分的日期一致，前端可以先显示“X月X日再见”；评分在 chat，chat 调 plan 会形成循环，见 [决策 026](./decisions/026-评分与调度.md) | 后台生成建议加轮询；关掉 fuzz；评分后立刻写“当天完成” |
 | 学习对话用 POST 返回 SSE，前端用 fetch 读流；回复生成和浏览器连接分开，断开后照样存库；标记从流中去掉、记在消息上；有效时长两次活动之间最多算 10 分钟 | EventSource 只能发 GET，带不上回答和 CSRF 令牌；刷新后能看到完整的回复；认真写的长回答不会被整段扣掉，见 [决策 025](./decisions/025-学习会话与流式对话.md) | EventSource；断开时取消生成；超过阈值整段不计时 |
 | 前端少用依赖：fetch 封装请求、模块级 ref 保存当前用户、CSS 变量做主题，宋体字体随前端打包 | 要做的事几十行代码就够；作者从零学前端，依赖越少越好读；Windows 默认没有标题用的宋体，Google Fonts 国内常连不上，见 [决策 023](./decisions/023-前端骨架.md) | axios；Pinia；Element Plus 的 SCSS 主题；Google Fonts |
 | 候选知识点先“整理成题目”，再走现有的抽取和确认流程 | 粒度、类型、去重的规则只在一处维护；对话 → 题目、题目 → 知识点分开，每步都能单独检查，见 [决策 019](./decisions/019-候选知识点的提炼方式.md) | 新写一个从对话直接抽知识点的 prompt；边聊边整理 |
@@ -262,6 +266,9 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `POST /api/sessions/{id}/messages` | 学生回答，老师流式回复（#19） | `{content}` | 同上 | 内容为空或超过 5000 字 400；没轮到学生、会话已结束、正在生成时 409。第 7 次回答后要求完整作答，第 8 次后收尾，会话结束 |
 | `POST /api/sessions/{id}/skip-explanation` | “这个我会，直接完整作答”（#19） | — | 同上 | 对话中显示一条学生消息“这个我会，直接完整作答。”，会话记录 skippedExplanation；已经在完整作答时、接着问的会话 409 |
 | `POST /api/sessions/{id}/follow-up` | 进入接着问（#19） | — | 接着问的会话，格式同 `POST /api/sessions` | id 是学习会话；学习还没结束 409，不是学习会话 400。每个学习会话最多一个接着问会话，有就返回、没有就新建；到达上限已结束的也返回（ended 为 true）。之后用 messages、reply、GET 这几个通用接口；学生先问，没有开场白，不能用 reply 开场。第 30 次回答之后再发消息 409。见决策 025 |
+| `POST /api/sessions/{id}/rating-suggestion` | AI 评分建议（#20） | — | `{rating, analysis, weakPoints, outOfScopeGaps}` | 学完后调用；第一次调用模型（十几到二十几秒）并存库，之后直接返回。不是学习会话 400，还没学完 409，模型出错或结果不可用 502 `RATING_SUGGESTION_FAILED`。评分不依赖它。见决策 026 |
+| `GET /api/sessions/{id}/rating-preview` | 评分预览（#20） | — | `[{rating, date, days}]`，按 AGAIN、HARD、GOOD、EASY 排列 | date 是下次复习的学习日，days 是距今天几个学习日；不保存。不是学习会话 400，还没学完或已经评过分 409 |
+| `POST /api/sessions/{id}/rating` | 确认评分（#20） | `{rating}` | `{rating, date, days}` | 更新 card_state、写 review_log（AI 建议已生成时记下 rating_ai）；日期和预览一致（fuzz 的随机数固定）。评分为空 400，不是学习会话 400，还没学完或已经评过分 409。见决策 026 |
 | `GET /api/settings` | 读取用户设置（#18） | — | `{timezone, dayStartHour, dailyNewLimit}` | |
 | `PATCH /api/settings` | 修改用户设置（#18） | 只传要改的字段，如 `{dailyNewLimit: 5}` | 同上 | timezone 为合法时区，dayStartHour 0～23，dailyNewLimit 0～50，否则 400；修改后立即生效。见决策 016 |
 | `GET /api/auth/registration` | 注册是否开放（#46），不需要登录 | — | `{open}` | 由 `WENGU_ALLOW_REGISTRATION` 控制，默认开放 |
@@ -286,8 +293,6 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | user_settings | 老师的称呼 | ui.md 5.10 |
 | knowledge_point | 软删除；要点的修改记录。来源草稿条目已有（V6 的 draft_item_id），“恢复 AI 版本”的原文从它取 | ui.md 5.9 |
 | extraction_draft / extraction_draft_item | 候选知识点的草稿：来源是学习会话；勾选与取消复用条目的 decision 字段（决策 015） | 决策 019 |
-| review_log | 评分后的下次到期日 | 决策 020 |
-| 新表 | “当天完成”的记录：哪个用户、哪个学习日 | 决策 020 |
 
 **接口：**
 
@@ -295,7 +300,6 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | --- | --- | --- |
 | 草稿列表补充 | 候选知识点的草稿（#31） | 今天、导入资料 |
 | 草稿详情补充 | 没拆出知识点的题及原文：各批次存着发给模型的题目，减去条目引用的和 covered 中的 | 确认知识点 |
-| 评分预览 | 四种评分分别算出下次复习的学习日，不保存 | 收尾与评分 |
 | 模型状态 | 模型名、最近一次调用的结果和时间；不返回服务地址和 Key，不为此真实调用模型 | 设置、账户区的红点 |
 | 知识库列表 | 按掌握程度和类型筛选（同时生效）；各掌握程度的数量随类型筛选变化；排序：默认学习顺序，可按掌握程度、下次复习 | 知识库 |
 | 知识点详情 | 掌握程度、下次复习、要点是否改过、学习记录、来源 | 知识库 |
