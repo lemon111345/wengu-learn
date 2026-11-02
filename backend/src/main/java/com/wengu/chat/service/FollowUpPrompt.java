@@ -7,7 +7,6 @@ import com.wengu.llm.dto.ChatTurn;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * 接着问的 prompt 和发给模型的消息（决策 008 第 4 条、决策 025）。除了读取 prompt 文件，都是纯函数。
@@ -45,9 +44,7 @@ final class FollowUpPrompt {
 
     /** 拼在第一个问题前面的上下文：知识点信息和刚才的学习对话（已去掉标记）。 */
     static String context(StudyMaterial material, List<Message> studyMessages) {
-        String dialogue = studyMessages.stream()
-                .map(m -> (m.getRole() == MessageRole.ASSISTANT ? "【老师】" : "【学生】") + "\n" + m.getContent())
-                .collect(Collectors.joining("\n\n"));
+        String dialogue = LearningChatPrompt.transcript(studyMessages);
         return """
                 知识点标题：%s
                 类型：%s（%s）

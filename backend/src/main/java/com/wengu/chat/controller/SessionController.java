@@ -1,9 +1,11 @@
 package com.wengu.chat.controller;
 
+import com.wengu.chat.dto.RatingSuggestionView;
 import com.wengu.chat.dto.SendMessageRequest;
 import com.wengu.chat.dto.SessionView;
 import com.wengu.chat.dto.StartSessionRequest;
 import com.wengu.chat.service.ChatService;
+import com.wengu.chat.service.RatingSuggestionService;
 import com.wengu.chat.service.StudySessionService;
 import com.wengu.common.context.CurrentUser;
 import com.wengu.common.result.Result;
@@ -23,11 +25,14 @@ public class SessionController {
 
     private final StudySessionService sessionService;
     private final ChatService chatService;
+    private final RatingSuggestionService ratingSuggestionService;
     private final CurrentUser currentUser;
 
-    public SessionController(StudySessionService sessionService, ChatService chatService, CurrentUser currentUser) {
+    public SessionController(StudySessionService sessionService, ChatService chatService,
+                             RatingSuggestionService ratingSuggestionService, CurrentUser currentUser) {
         this.sessionService = sessionService;
         this.chatService = chatService;
+        this.ratingSuggestionService = ratingSuggestionService;
         this.currentUser = currentUser;
     }
 
@@ -44,6 +49,15 @@ public class SessionController {
     @PostMapping("/{id}/follow-up")
     public Result<SessionView> followUp(@PathVariable long id) {
         return Result.ok(sessionService.startFollowUp(currentUser.id(), id));
+    }
+
+    /**
+     * AI 评分建议：学完后前端调用，第一次会调用模型（十几到二十几秒），之后直接返回存好的结果。
+     * 评分不依赖它，用户可以先评分。
+     */
+    @PostMapping("/{id}/rating-suggestion")
+    public Result<RatingSuggestionView> ratingSuggestion(@PathVariable long id) {
+        return Result.ok(ratingSuggestionService.suggest(currentUser.id(), id));
     }
 
     /** 会话和全部消息，刷新后恢复用。 */
