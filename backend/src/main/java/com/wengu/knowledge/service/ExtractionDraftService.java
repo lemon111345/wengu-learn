@@ -9,6 +9,7 @@ import com.wengu.knowledge.dto.ConfirmDraftRequest;
 import com.wengu.knowledge.dto.CoveredView;
 import com.wengu.knowledge.dto.CreateDraftRequest;
 import com.wengu.knowledge.dto.DraftItemView;
+import com.wengu.knowledge.dto.DraftSummary;
 import com.wengu.knowledge.dto.DraftView;
 import com.wengu.knowledge.dto.ExtractionQuestion;
 import com.wengu.knowledge.dto.ResolvedCovered;
@@ -31,6 +32,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -131,6 +133,70 @@ public class ExtractionDraftService {
         ExtractionDraft draft = find(userId, draftId);
         List<ExtractionBatch> batches = latestBatches(draftId);
         return toView(draft, batches, orderedItems(batches));
+    }
+
+    /** 已确认的草稿最多返回几份，供导入页的“最近导入”。M1 不做分页。 */
+    static final int CONFIRMED_LIMIT = 10;
+
+    /**
+     * 用户的草稿列表，新的在前：未确认的全部返回，已确认的只返回最近 {@link #CONFIRMED_LIMIT} 份。
+     * 未确认的不限数量：只取最近几份的话，一份旧的“等你确认”会被挤出列表，今天页就再也看不到它（#48）。
+     * <p>
+     * 一共五次查询：未确认的草稿、已确认的草稿、这些草稿的全部批次（用来推算状态）、成功批次中的条目、材料名称。
+     */
+    public List<DraftSummary> list(long userId) {
+        List<ExtractionDraft> drafts = new ArrayList<>(draftMapper.selectList(new LambdaQueryWrapper<ExtractionDraft>()
+                .eq(ExtractionDraft::getUserId, userId)
+                .isNull(ExtractionDraft::getConfirmedAt)));
+        drafts.addAll(draftMapper.selectList(new LambdaQueryWrapper<ExtractionDraft>()
+                .eq(ExtractionDraft::getUserId, userId)
+                .isNotNull(ExtractionDraft::getConfirmedAt)
+                .orderByDesc(ExtractionDraft::getId)
+                .last("LIMIT " + CONFIRMED_LIMIT)));
+        if (drafts.isEmpty()) {
+            return List.of();
+        }
+        drafts.sort(Comparator.comparing(ExtractionDraft::getId).reversed());
+
+        List<Long> draftIds = drafts.stream().map(ExtractionDraft::getId).toList();
+        Map<Long, List<ExtractionBatch>> latestByDraft = batchMapper.selectList(
+                        new LambdaQueryWrapper<ExtractionBatch>()
+                                .in(ExtractionBatch::getDraftId, draftIds)
+                                .orderByAsc(ExtractionBatch::getBatchNo)
+                                .orderByAsc(ExtractionBatch::getId))
+                .stream()
+                .collect(Collectors.groupingBy(ExtractionBatch::getDraftId,
+                        Collectors.collectingAndThen(Collectors.toList(), ExtractionDraftService::latestPerBatchNo)));
+        Map<Long, Long> itemCounts = itemCountsOfReadyBatches(latestByDraft);
+        Map<Long, String> sourceNames = sourceService.getNames(userId,
+                drafts.stream().map(ExtractionDraft::getSourceId).collect(Collectors.toSet()));
+
+        return drafts.stream().map(draft -> {
+            List<ExtractionBatch> batches = latestByDraft.getOrDefault(draft.getId(), List.of());
+            DraftStatus status = draft.getConfirmedAt() != null ? DraftStatus.CONFIRMED : statusOf(batches);
+            int itemCount = batches.stream()
+                    .mapToInt(b -> Math.toIntExact(itemCounts.getOrDefault(b.getId(), 0L)))
+                    .sum();
+            return new DraftSummary(draft.getId(), draft.getSourceId(), sourceNames.get(draft.getSourceId()),
+                    status, itemCount, draft.getCreatedAt());
+        }).toList();
+    }
+
+    /** 每个成功批次中的条目数，按批次 id 分组。和详情一样只算成功的批次（见 orderedItems）。 */
+    private Map<Long, Long> itemCountsOfReadyBatches(Map<Long, List<ExtractionBatch>> latestByDraft) {
+        List<Long> readyIds = latestByDraft.values().stream()
+                .flatMap(List::stream)
+                .filter(b -> b.getStatus() == BatchStatus.READY)
+                .map(ExtractionBatch::getId)
+                .toList();
+        if (readyIds.isEmpty()) {
+            return Map.of();
+        }
+        return itemMapper.selectList(new LambdaQueryWrapper<ExtractionDraftItem>()
+                        .select(ExtractionDraftItem::getBatchId)
+                        .in(ExtractionDraftItem::getBatchId, readyIds))
+                .stream()
+                .collect(Collectors.groupingBy(ExtractionDraftItem::getBatchId, Collectors.counting()));
     }
 
     /**
@@ -275,10 +341,14 @@ public class ExtractionDraftService {
 
     /** 每个批号取最新的一行（重试会新增行），按批号排列。 */
     private List<ExtractionBatch> latestBatches(long draftId) {
-        List<ExtractionBatch> all = batchMapper.selectList(new LambdaQueryWrapper<ExtractionBatch>()
+        return latestPerBatchNo(batchMapper.selectList(new LambdaQueryWrapper<ExtractionBatch>()
                 .eq(ExtractionBatch::getDraftId, draftId)
                 .orderByAsc(ExtractionBatch::getBatchNo)
-                .orderByAsc(ExtractionBatch::getId));
+                .orderByAsc(ExtractionBatch::getId)));
+    }
+
+    /** all 须按批号、id 排好；同一批号后出现的行覆盖先出现的，结果就是每批最新的一行。 */
+    private static List<ExtractionBatch> latestPerBatchNo(List<ExtractionBatch> all) {
         Map<Integer, ExtractionBatch> latest = new LinkedHashMap<>();
         all.forEach(b -> latest.put(b.getBatchNo(), b));
         return List.copyOf(latest.values());

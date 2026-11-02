@@ -152,7 +152,7 @@ frontend/src
 4. 剩余新知识名额 = daily_new_limit − 第 3 步的数量，小于 0 时取 0。
 5. 新知识候选：review 查 card_state 中 last_review 为空的 kp_id。
 6. 过滤与排序：plan 把第 2、5 步的 kp_id 交给 knowledge，在内存中排除暂停的知识点、按排序字段排序；新知识取前“剩余名额”个。
-7. 返回：到期复习列表 + 新知识列表，先复习后新学。
+7. 返回：到期复习列表 + 新知识列表，先复习后新学。另附今天已完成的条目（今天范围内的 review_log，同一知识点取最后一次，暂停的也显示）和接下来 7 个学习日每天到期的复习数（从明天起，不算暂停的），见 [决策 024](./decisions/024-今天页的补充数据.md)。
 
 第 3 步是防止重复派发的关键：如果不扣除今天已学的新知识，用户下午再打开页面时会被重新分配一批新知识，每日上限就失效了。
 
@@ -180,6 +180,7 @@ frontend/src
 | 前端少用依赖：fetch 封装请求、模块级 ref 保存当前用户、CSS 变量做主题，宋体字体随前端打包 | 要做的事几十行代码就够；作者从零学前端，依赖越少越好读；Windows 默认没有标题用的宋体，Google Fonts 国内常连不上，见 [决策 023](./decisions/023-前端骨架.md) | axios；Pinia；Element Plus 的 SCSS 主题；Google Fonts |
 | 候选知识点先“整理成题目”，再走现有的抽取和确认流程 | 粒度、类型、去重的规则只在一处维护；对话 → 题目、题目 → 知识点分开，每步都能单独检查，见 [决策 019](./decisions/019-候选知识点的提炼方式.md) | 新写一个从对话直接抽知识点的 prompt；边聊边整理 |
 | 连续学习从 M1 起记录事实：评分后的到期日、“当天完成” | 计划不存库，过去的任务事后算不回来；只记已发生的事，不存计划快照，见 [决策 020](./decisions/020-连续学习的口径.md) | 建表保存每天的计划快照；M2 再开始记录 |
+| 今天页的补充数据放进每日计划接口：已完成的条目来自当天流水（暂停的也显示），接下来 7 天从明天起按学习日划分；草稿列表返回全部未确认的和最近 10 份已确认的 | 一次请求拿全今天页的数据，用同一个“现在”；今天到期和过期的已在复习列表里；旧的“等你确认”不会被挤出列表，见 [决策 024](./decisions/024-今天页的补充数据.md) | 另开接口；7 天包括今天；草稿列表只取最近 20 份 |
 | Flyway 管理表结构，字段随 issue 增量添加 | 空库启动即建好表，每次改动有记录；实现前不预先猜字段，见 [决策 009](./decisions/009-数据库迁移与表结构约定.md) | 手写 SQL 手动执行；V1 一次建好所有字段 |
 | “现在”从注入的 Clock 获取 | 测试中可以换成固定时间，覆盖“今天”的边界 | 直接调用 Instant.now() |
 | Redis 只用于限流和额度计数 | 这些场景需要高频读写计数器；每日计划无需缓存 | 缓存每日计划（过早优化） |
@@ -247,10 +248,11 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | --- | --- | --- | --- | --- |
 | `POST /api/sources` | 导入面试题并切分（#15、#16） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 同步调用模型，只有题目时几秒到几十秒，10 万字带答案的资料最长约 95 秒；原文不超过 100000 字、切分后不超过 200 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`。见决策 011 |
 | `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, status, batches: [{no, status, questionIds}], items: [{id, order, title, summary, type, sourceQuestionIds, decision}], covered: [{questionId, titles}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；covered 是被已有知识点或同一草稿中其他批次覆盖的题（决策 014）；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。见决策 012、013 |
+| `GET /api/drafts` | 草稿列表（#48） | — | `[{id, sourceId, sourceName, status, itemCount, createdAt}]` | 未确认的全部返回，已确认的只返回最近 10 份，新的在前，不分页；status 和详情的算法相同；itemCount 是成功批次中的条目数。见决策 024 |
 | `GET /api/drafts/{id}` | 查看草稿和抽取进度（#15、#16） | — | 同上 | 不存在或不属于当前用户 404 |
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中或已确认 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
 | `POST /api/drafts/{id}/confirm` | 确认草稿，生成知识点（#17） | `{rejectedItemIds?}`，取消勾选的条目 id，不传则全部接受 | 同上，status 为 CONFIRMED，每个条目的 decision 为 ACCEPTED 或 REJECTED | 一个事务中生成知识点（sort_order 接在已有之后）、关联材料、初始化 card_state（SYSTEM_DESIGN、EXPERIENCE 不初始化）；covered 引用的已有知识点也关联到这份材料。草稿不是 READY 或已确认 409，条目不属于这份草稿 400。见决策 015 |
-| `GET /api/plan/today` | 今天的计划（#18） | — | `{date, dailyNewLimit, newLearnedToday, reviews: [{kpId, title, type}], newItems: [...]}` | 实时计算：先复习后新学，各自按学习顺序；新知识最多“每天新学数 − 今天已学数”个；date 是学习日（按时区和 day_start_hour）。见决策 016 |
+| `GET /api/plan/today` | 今天的计划（#18、#48） | — | `{date, dailyNewLimit, newLearnedToday, reviews: [{kpId, title, type}], newItems: [...], completed: [{kpId, title, type, rating, firstReview}], upcomingReviews: [{date, count}]}` | 实时计算：先复习后新学，各自按学习顺序；新知识最多“每天新学数 − 今天已学数”个；date 是学习日（按时区和 day_start_hour）。completed 是今天已完成的，按完成时间排列，同一知识点取最后一次评分，暂停的也在内；upcomingReviews 是从明天起 7 个学习日每天到期的复习数，今天和已过期的在 reviews 中，不算暂停的。见决策 016、024 |
 | `GET /api/settings` | 读取用户设置（#18） | — | `{timezone, dayStartHour, dailyNewLimit}` | |
 | `PATCH /api/settings` | 修改用户设置（#18） | 只传要改的字段，如 `{dailyNewLimit: 5}` | 同上 | timezone 为合法时区，dayStartHour 0～23，dailyNewLimit 0～50，否则 400；修改后立即生效。见决策 016 |
 | `GET /api/auth/registration` | 注册是否开放（#46），不需要登录 | — | `{open}` | 由 `WENGU_ALLOW_REGISTRATION` 控制，默认开放 |
@@ -283,9 +285,8 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 
 | 需要的接口 | 内容 | 页面 |
 | --- | --- | --- |
-| 每日计划补充 | 今天已完成的条目（今天学习日范围内的 review_log，含评分、是否新学）；今天已学的分钟数 | 今天 |
-| 接下来 7 天要复习的 | 每天到期的数量，按学习日分组 | 今天 |
-| 草稿列表 | 待确认的草稿，含推算出的状态和条目数，包括候选知识点的草稿 | 今天、导入资料 |
+| 每日计划补充 | 今天已学的分钟数，来自会话的有效时长（#19 添加，决策 024） | 今天 |
+| 草稿列表补充 | 候选知识点的草稿（#31） | 今天、导入资料 |
 | 草稿详情补充 | 没拆出知识点的题及原文：各批次存着发给模型的题目，减去条目引用的和 covered 中的 | 确认知识点 |
 | 评分预览 | 四种评分分别算出下次复习的学习日，不保存 | 收尾与评分 |
 | 模型状态 | 模型名、最近一次调用的结果和时间；不返回服务地址和 Key，不为此真实调用模型 | 设置、账户区的红点 |

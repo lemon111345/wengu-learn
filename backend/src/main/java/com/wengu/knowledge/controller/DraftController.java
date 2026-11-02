@@ -4,6 +4,7 @@ import com.wengu.common.context.CurrentUser;
 import com.wengu.common.result.Result;
 import com.wengu.knowledge.dto.ConfirmDraftRequest;
 import com.wengu.knowledge.dto.CreateDraftRequest;
+import com.wengu.knowledge.dto.DraftSummary;
 import com.wengu.knowledge.dto.DraftView;
 import com.wengu.knowledge.service.ExtractionDraftService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,6 +13,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/drafts")
@@ -29,6 +32,12 @@ public class DraftController {
     @PostMapping
     public Result<DraftView> create(@RequestBody CreateDraftRequest request) {
         return Result.ok(draftService.create(currentUser.id(), request));
+    }
+
+    /** 草稿列表，新的在前：未确认的全部返回，已确认的只返回最近 10 份。 */
+    @GetMapping
+    public Result<List<DraftSummary>> list() {
+        return Result.ok(draftService.list(currentUser.id()));
     }
 
     @GetMapping("/{id}")

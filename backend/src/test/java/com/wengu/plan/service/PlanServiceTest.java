@@ -7,8 +7,10 @@ import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.knowledge.mapper.KpSourceMapper;
+import com.wengu.plan.dto.CompletedItem;
 import com.wengu.plan.dto.PlanItem;
 import com.wengu.plan.dto.TodayPlan;
+import com.wengu.plan.dto.UpcomingDay;
 import com.wengu.review.entity.CardState;
 import com.wengu.review.entity.ReviewLog;
 import com.wengu.review.fsrs.Card;
@@ -33,6 +35,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * 每日计划（决策 016）。真实 MySQL，时钟可以手动拨动。
@@ -218,6 +221,7 @@ class PlanServiceTest {
 
         assertThat(plan.date()).isEqualTo(LocalDate.of(2026, 10, 29));
         assertThat(plan.newLearnedToday()).isEqualTo(1);
+        assertThat(plan.completed()).extracting(CompletedItem::title).containsExactly("凌晨学的");
 
         // 同一时刻，纽约还是 10 月 28 日下午，这个学习日从纽约 10 月 28 日 04:00 开始，同样算今天学的
         settingsService.update(1, new UpdateSettingsRequest("America/New_York", null, null));
@@ -272,5 +276,137 @@ class PlanServiceTest {
 
         assertThat(titles(plan.reviews())).containsExactly("正常的复习");
         assertThat(titles(plan.newItems())).containsExactly("正常的新知识");
+    }
+
+    /** 写一条评分流水，不改调度状态：“今天已完成”只看流水。 */
+    private void log(KnowledgePoint kp, Instant at, Rating rating, boolean first) {
+        ReviewLog log = new ReviewLog();
+        log.setUserId(kp.getUserId());
+        log.setKpId(kp.getId());
+        log.setRatingUser(rating);
+        log.setStateBefore(first ? State.LEARNING : State.REVIEW);
+        log.setFirstReview(first);
+        log.setReviewedAt(at);
+        reviewLogMapper.insert(log);
+    }
+
+    @Test
+    void 今天已完成的按完成时间排列并带评分和是否新学() {
+        KnowledgePoint learned = newKp("新学的", 1);
+        KnowledgePoint reviewed = reviewedKp("复习的", 2, NOW.plus(Duration.ofDays(3)));
+        log(reviewed, NOW.minus(Duration.ofMinutes(30)), Rating.HARD, false);
+        log(learned, NOW.minus(Duration.ofHours(1)), Rating.GOOD, true);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.completed()).containsExactly(
+                new CompletedItem(learned.getId(), "新学的", KnowledgePointType.MECHANISM, Rating.GOOD, true),
+                new CompletedItem(reviewed.getId(), "复习的", KnowledgePointType.MECHANISM, Rating.HARD, false));
+    }
+
+    @Test
+    void 今天已完成的按学习日的分界时刻划分() {
+        KnowledgePoint before = reviewedKp("北京时间凌晨3点59分评的", 1, NOW.plus(Duration.ofDays(3)));
+        KnowledgePoint atStart = reviewedKp("北京时间凌晨4点整评的", 2, NOW.plus(Duration.ofDays(3)));
+        KnowledgePoint tomorrow = reviewedKp("明天凌晨4点评的", 3, NOW.plus(Duration.ofDays(3)));
+        // 10 月 29 日这个学习日是 [10-28T20:00Z, 10-29T20:00Z)，UTC 日期和北京时间不在同一天
+        log(before, DAY_START.minusSeconds(1), Rating.GOOD, false);
+        log(atStart, DAY_START, Rating.GOOD, false);
+        log(tomorrow, DAY_END, Rating.GOOD, false);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.completed()).extracting(CompletedItem::title).containsExactly("北京时间凌晨4点整评的");
+    }
+
+    @Test
+    void 同一个知识点今天评了两次时取最后一次() {
+        KnowledgePoint a = reviewedKp("评了两次的", 1, NOW.plus(Duration.ofDays(3)));
+        KnowledgePoint b = reviewedKp("评了一次的", 2, NOW.plus(Duration.ofDays(3)));
+        log(a, NOW.minus(Duration.ofHours(3)), Rating.AGAIN, false);
+        log(b, NOW.minus(Duration.ofHours(2)), Rating.GOOD, false);
+        log(a, NOW.minus(Duration.ofHours(1)), Rating.EASY, false);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.completed()).extracting(CompletedItem::title, CompletedItem::rating)
+                .containsExactly(tuple("评了一次的", Rating.GOOD), tuple("评了两次的", Rating.EASY));
+    }
+
+    @Test
+    void 今天已完成的包括暂停的但不包括其他用户的() {
+        KnowledgePoint suspended = reviewedKp(1, "学完后暂停的", 1, NOW.plus(Duration.ofDays(3)),
+                KnowledgePointStatus.SUSPENDED);
+        KnowledgePoint others = reviewedKp(2, "其他用户的", 1, NOW.plus(Duration.ofDays(3)),
+                KnowledgePointStatus.ACTIVE);
+        log(suspended, NOW, Rating.GOOD, false);
+        log(others, NOW, Rating.GOOD, false);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.completed()).extracting(CompletedItem::title).containsExactly("学完后暂停的");
+    }
+
+    private static List<Integer> counts(TodayPlan plan) {
+        return plan.upcomingReviews().stream().map(UpcomingDay::count).toList();
+    }
+
+    @Test
+    void 接下来7天从明天开始按学习日分组() {
+        // 今天是 10 月 29 日这个学习日，到 DAY_END（北京时间 10 月 30 日 04:00）为止
+        reviewedKp("今天最后一刻到期", 1, DAY_END.minusSeconds(1));
+        reviewedKp("已经过期", 2, NOW.minus(Duration.ofDays(2)));
+        reviewedKp("明天第一刻到期", 3, DAY_END);
+        reviewedKp("明天最后一刻到期", 4, DAY_END.plus(Duration.ofDays(1)).minusSeconds(1));
+        reviewedKp("后天到期", 5, DAY_END.plus(Duration.ofDays(1)));
+        reviewedKp("第7天最后一刻到期", 6, DAY_END.plus(Duration.ofDays(7)).minusSeconds(1));
+        reviewedKp("第8天到期", 7, DAY_END.plus(Duration.ofDays(7)));
+        newKp("新知识", 8);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.upcomingReviews()).extracting(UpcomingDay::date)
+                .containsExactly(LocalDate.of(2026, 10, 30), LocalDate.of(2026, 10, 31), LocalDate.of(2026, 11, 1),
+                        LocalDate.of(2026, 11, 2), LocalDate.of(2026, 11, 3), LocalDate.of(2026, 11, 4),
+                        LocalDate.of(2026, 11, 5));
+        assertThat(counts(plan)).containsExactly(2, 1, 0, 0, 0, 0, 1);
+        // 今天到期的和已经过期的在今天的复习列表里，不重复算
+        assertThat(titles(plan.reviews())).containsExactly("今天最后一刻到期", "已经过期");
+    }
+
+    @Test
+    void 接下来7天不算暂停的和其他用户的() {
+        reviewedKp(1, "暂停的", 1, DAY_END, KnowledgePointStatus.SUSPENDED);
+        reviewedKp(2, "其他用户的", 1, DAY_END, KnowledgePointStatus.ACTIVE);
+        reviewedKp("正常的", 2, DAY_END);
+
+        assertThat(counts(planService.today(1))).containsExactly(1, 0, 0, 0, 0, 0, 0);
+    }
+
+    @Test
+    void 修改分界时刻后接下来7天的分组跟着变() {
+        // 北京时间 10 月 30 日 01:00：4 点分界时属于 10 月 29 日（今天），0 点分界时属于 10 月 30 日（明天）
+        reviewedKp("凌晨1点到期", 1, Instant.parse("2026-10-29T17:00:00Z"));
+
+        assertThat(counts(planService.today(1))).containsExactly(0, 0, 0, 0, 0, 0, 0);
+
+        settingsService.update(1, new UpdateSettingsRequest(null, 0, null));
+        assertThat(counts(planService.today(1))).containsExactly(1, 0, 0, 0, 0, 0, 0);
+    }
+
+    @Test
+    void 夏令时结束的那一天是25小时() {
+        // 纽约 2026 年 11 月 1 日 02:00 夏令时结束。10 月 31 日这个学习日从 10-31 04:00 EDT（08:00Z）
+        // 到 11-01 04:00 EST（09:00Z），共 25 小时
+        settingsService.update(1, new UpdateSettingsRequest("America/New_York", 4, null));
+        setClock(Instant.parse("2026-10-29T14:00:00Z"));
+        // 11-01 03:30 EST：按 24 小时切分会落到 11 月 1 日，按学习日应属于 10 月 31 日
+        reviewedKp("夏令时结束后凌晨到期", 1, Instant.parse("2026-11-01T08:30:00Z"));
+        reviewedKp("11月1日的学习日开始时到期", 2, Instant.parse("2026-11-01T09:00:00Z"));
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.date()).isEqualTo(LocalDate.of(2026, 10, 29));
+        assertThat(counts(plan)).containsExactly(0, 1, 1, 0, 0, 0, 0);
     }
 }
