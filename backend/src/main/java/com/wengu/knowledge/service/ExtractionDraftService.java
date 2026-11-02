@@ -13,6 +13,7 @@ import com.wengu.knowledge.dto.DraftSummary;
 import com.wengu.knowledge.dto.DraftView;
 import com.wengu.knowledge.dto.ExtractionQuestion;
 import com.wengu.knowledge.dto.ResolvedCovered;
+import com.wengu.knowledge.dto.UncoveredQuestion;
 import com.wengu.knowledge.entity.BatchStatus;
 import com.wengu.knowledge.entity.DraftStatus;
 import com.wengu.knowledge.entity.ExtractionBatch;
@@ -400,17 +401,21 @@ public class ExtractionDraftService {
     private DraftView toView(ExtractionDraft draft, List<ExtractionBatch> batches, List<ExtractionDraftItem> items) {
         List<BatchView> batchViews = new ArrayList<>();
         List<CoveredView> coveredViews = new ArrayList<>();
+        // 成功的批次发给模型的题，用来找出没拆出知识点的
+        List<ExtractionQuestion> readyQuestions = new ArrayList<>();
         for (ExtractionBatch batch : batches) {
-            if (batch.getStatus() == BatchStatus.READY && batch.getCovered() != null) {
-                for (ResolvedCovered c : jsonMapper.readValue(batch.getCovered(), ResolvedCovered[].class)) {
-                    coveredViews.add(new CoveredView(c.questionId(), c.titles()));
+            List<ExtractionQuestion> questions = List.of(
+                    jsonMapper.readValue(batch.getQuestions(), ExtractionQuestion[].class));
+            if (batch.getStatus() == BatchStatus.READY) {
+                readyQuestions.addAll(questions);
+                if (batch.getCovered() != null) {
+                    for (ResolvedCovered c : jsonMapper.readValue(batch.getCovered(), ResolvedCovered[].class)) {
+                        coveredViews.add(new CoveredView(c.questionId(), c.titles()));
+                    }
                 }
             }
-            List<Integer> questionIds = Arrays.stream(
-                            jsonMapper.readValue(batch.getQuestions(), ExtractionQuestion[].class))
-                    .map(ExtractionQuestion::id)
-                    .toList();
-            batchViews.add(new BatchView(batch.getBatchNo(), batch.getStatus(), questionIds));
+            batchViews.add(new BatchView(batch.getBatchNo(), batch.getStatus(),
+                    questions.stream().map(ExtractionQuestion::id).toList()));
         }
         List<DraftItemView> itemViews = new ArrayList<>();
         for (ExtractionDraftItem item : items) {
@@ -419,6 +424,21 @@ public class ExtractionDraftService {
                     item.getDecision()));
         }
         DraftStatus status = draft.getConfirmedAt() != null ? DraftStatus.CONFIRMED : statusOf(batches);
-        return new DraftView(draft.getId(), draft.getSourceId(), status, batchViews, itemViews, coveredViews);
+        String sourceName = draft.getSourceId() == null ? null
+                : sourceService.getNames(draft.getUserId(), Set.of(draft.getSourceId())).get(draft.getSourceId());
+        return new DraftView(draft.getId(), draft.getSourceId(), sourceName, status, batchViews, itemViews, coveredViews,
+                uncovered(readyQuestions, itemViews, coveredViews));
+    }
+
+    /** 成功的批次中，既没有条目引用、也没有标为已有的题，按原文顺序（#22） */
+    private static List<UncoveredQuestion> uncovered(List<ExtractionQuestion> questions, List<DraftItemView> items,
+                                                     List<CoveredView> covered) {
+        Set<Integer> used = new HashSet<>();
+        items.forEach(i -> used.addAll(i.sourceQuestionIds()));
+        covered.forEach(c -> used.add(c.questionId()));
+        return questions.stream()
+                .filter(q -> !used.contains(q.id()))
+                .map(q -> new UncoveredQuestion(q.id(), q.text()))
+                .toList();
     }
 }

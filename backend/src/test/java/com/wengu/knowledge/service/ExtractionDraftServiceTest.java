@@ -17,6 +17,7 @@ import com.wengu.knowledge.dto.ExtractionQuestion;
 import com.wengu.knowledge.dto.ExtractionResult;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.ResolvedCovered;
+import com.wengu.knowledge.dto.UncoveredQuestion;
 import com.wengu.knowledge.entity.BatchStatus;
 import com.wengu.knowledge.entity.DraftStatus;
 import com.wengu.knowledge.entity.ExtractionBatch;
@@ -224,8 +225,28 @@ class ExtractionDraftServiceTest {
         ExtractionBatch batch = onlyBatch(view);
         assertThat(batch.getAttempts()).isEqualTo(2);
         assertThat(batch.getError()).isNull();
+        assertThat(view.uncovered()).isEmpty();
+        assertThat(view.sourceName()).isEqualTo("Java 基础");
         assertThat(batch.getPromptTokens()).isEqualTo(2000);
         assertThat(batch.getCompletionTokens()).isEqualTo(1000);
+        verify(extractionService, times(2)).extract(anyList(), any());
+    }
+
+    @Test
+    void 重试后只剩漏题时这一批算成功且漏掉的题在详情中() {
+        // 两次都漏了第 3 题，别的都对
+        when(extractionService.extract(anyList(), any()))
+                .thenReturn(result(kp(1, "HashMap 的 put 流程是怎样的？", 1), kp(2, "MVCC 是怎么实现的？", 2)));
+
+        DraftView view = createAndRun(null);
+
+        assertThat(view.status()).isEqualTo(DraftStatus.READY);
+        assertThat(view.items()).hasSize(2);
+        assertThat(view.uncovered()).containsExactly(new UncoveredQuestion(3, "Redis 为什么快？"));
+        ExtractionBatch batch = onlyBatch(view);
+        assertThat(batch.getAttempts()).isEqualTo(2);
+        // 漏题的说明留着，供以后分析
+        assertThat(batch.getError()).contains("[3]");
         verify(extractionService, times(2)).extract(anyList(), any());
     }
 
@@ -234,7 +255,8 @@ class ExtractionDraftServiceTest {
         when(extractionService.extract(anyList(), any()))
                 .thenThrow(new LlmOutputParseException("返回内容不符合要求的 JSON 结构",
                         new LlmResult<>(null, "不是 JSON", "test-model", "stop", 1000, 5), new RuntimeException()))
-                .thenReturn(result(kp(1, "只覆盖了第 1 题", 1)));
+                // 除了漏题还有别的问题（没有来源题号）：最后一次也算失败
+                .thenReturn(result(kp(1, "没有来源题号")));
 
         DraftView view = createAndRun(null);
 
@@ -244,7 +266,7 @@ class ExtractionDraftServiceTest {
         assertThat(batch.getStatus()).isEqualTo(BatchStatus.FAILED);
         assertThat(batch.getAttempts()).isEqualTo(2);
         assertThat(batch.getRawOutput()).isEqualTo("raw-1");
-        assertThat(batch.getError()).contains("以下题目既没有对应的知识点，也没有标为已有：[2, 3]");
+        assertThat(batch.getError()).contains("没有来源题号");
         assertThat(batch.getPromptTokens()).isEqualTo(2000);
         assertThat(itemMapper.selectCount(null)).isZero();
     }
@@ -420,7 +442,8 @@ class ExtractionDraftServiceTest {
         long bigSource = importSource(31);
         when(extractionService.extract(anyList(), any()))
                 .thenReturn(result(kp(1, "只覆盖了第 1 题", 1)))
-                .thenReturn(result(kp(1, "只覆盖了第 1 题", 1)))
+                // 只漏题的话最后一次会按成功处理，这里还有别的问题，第一批才会失败
+                .thenReturn(result(kp(1, "没有来源题号")))
                 .thenAnswer(inv -> onePerQuestion(inv.getArgument(0)));
 
         DraftView view = createAndRunFrom(bigSource);

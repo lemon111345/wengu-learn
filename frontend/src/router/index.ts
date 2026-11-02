@@ -31,9 +31,9 @@ const router = createRouter({
       children: [
         { path: '', component: () => import('@/views/today/TodayView.vue') },
         { path: 'library', component: () => import('@/views/LibraryView.vue') },
-        { path: 'import', component: () => import('@/views/ImportView.vue') },
-        // 确认知识点，由 #22 实现；今天页的提示条先链接到这里
-        { path: 'drafts/:id', component: () => import('@/views/DraftView.vue') },
+        { path: 'import', component: () => import('@/views/import/ImportPage.vue') },
+        // 草稿：抽取进度、确认知识点、已确认的结果，按状态显示（决策 028）
+        { path: 'drafts/:id', component: () => import('@/views/import/DraftPage.vue'), props: true },
         { path: 'settings', component: () => import('@/views/SettingsView.vue') },
       ],
     },
