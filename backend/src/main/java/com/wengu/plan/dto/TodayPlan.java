@@ -14,7 +14,10 @@ import java.util.List;
  * @param newItems        新知识，按学习顺序排列，最多“每天新学数 − 今天已学数”个
  * @param completed       今天已完成的，按完成时间排列；暂停的也在内
  * @param upcomingReviews 接下来 7 个学习日（从明天起）每天要复习的数量；今天和已经过期的在 reviews 中
+ * @param knowledgePointCount 知识点总数，暂停的和不参与调度的也算；为 0 时今天页显示空状态。
+ *                            不能只看上面几个列表是否为空：知识点都在很多天后到期、或者只有不参与调度的类型时，列表也是空的
  */
 public record TodayPlan(LocalDate date, int dailyNewLimit, int newLearnedToday, List<PlanItem> reviews,
-                        List<PlanItem> newItems, List<CompletedItem> completed, List<UpcomingDay> upcomingReviews) {
+                        List<PlanItem> newItems, List<CompletedItem> completed, List<UpcomingDay> upcomingReviews,
+                        int knowledgePointCount) {
 }

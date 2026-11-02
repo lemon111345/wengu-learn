@@ -64,7 +64,7 @@ public class PlanService {
 
         // 7. 先复习，后新学；另附今天已完成的，供页面显示对勾、评分和进度
         return new TodayPlan(day.date(), settings.dailyNewLimit(), learned, reviews, newItems,
-                completed(userId, day), upcomingReviews(userId, day, settings));
+                completed(userId, day), upcomingReviews(userId, day, settings), knowledgePointService.count(userId));
     }
 
     /** 接下来几个学习日要复习的：从明天起，不含今天。今天到期的、已经过期的都在今天的复习列表里。 */
