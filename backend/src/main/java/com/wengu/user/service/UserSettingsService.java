@@ -6,6 +6,7 @@ import com.wengu.user.dto.SettingsView;
 import com.wengu.user.dto.UpdateSettingsRequest;
 import com.wengu.user.entity.UserSettings;
 import com.wengu.user.mapper.UserSettingsMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.DateTimeException;
@@ -20,16 +21,48 @@ public class UserSettingsService {
     /** 每天新学数量的上限，防止误填一个很大的数。 */
     public static final int MAX_DAILY_NEW_LIMIT = 50;
 
-    private final UserSettingsMapper settingsMapper;
+    /** 新用户的默认值（决策 009 第 5 条）。 */
+    static final int DEFAULT_DAILY_NEW_LIMIT = 3;
+    static final int DEFAULT_DAY_START_HOUR = 4;
 
-    public UserSettingsService(UserSettingsMapper settingsMapper) {
+    private final UserSettingsMapper settingsMapper;
+    /** 注册时读不到浏览器时区，或者它不合法时使用，来自 WENGU_TIMEZONE（决策 017）。 */
+    private final String defaultTimezone;
+
+    public UserSettingsService(UserSettingsMapper settingsMapper,
+                               @Value("${wengu.default-timezone}") String defaultTimezone) {
         this.settingsMapper = settingsMapper;
+        this.defaultTimezone = validTimezone(defaultTimezone);
+    }
+
+    /**
+     * 写入新用户的默认设置，注册时调用。浏览器提交的时区合法就用它，否则用 WENGU_TIMEZONE，不报错：
+     * 时区是静默提交的，用户不知道有这回事，以后可以在设置页改。
+     */
+    void createDefaults(long userId, String browserTimezone) {
+        UserSettings settings = new UserSettings();
+        settings.setUserId(userId);
+        settings.setDailyNewLimit(DEFAULT_DAILY_NEW_LIMIT);
+        settings.setDayStartHour(DEFAULT_DAY_START_HOUR);
+        settings.setTimezone(timezoneOrDefault(browserTimezone));
+        settingsMapper.insert(settings);
+    }
+
+    private String timezoneOrDefault(String timezone) {
+        if (timezone == null || timezone.isBlank()) {
+            return defaultTimezone;
+        }
+        try {
+            return validTimezone(timezone);
+        } catch (BusinessException e) {
+            return defaultTimezone;
+        }
     }
 
     /**
      * 读取用户设置。
      *
-     * @throws IllegalStateException 用户没有设置行。单用户模式下 V1 已插入默认用户的设置，出现这种情况说明数据有问题
+     * @throws IllegalStateException 用户没有设置行。注册时会同时写入设置，出现这种情况说明数据有问题
      */
     public SettingsView get(long userId) {
         UserSettings settings = settingsMapper.selectById(userId);

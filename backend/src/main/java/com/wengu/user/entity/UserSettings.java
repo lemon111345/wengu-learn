@@ -3,7 +3,7 @@ package com.wengu.user.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 
-/** 用户设置，对应 user_settings 表（V1）。默认用户的设置由 V1 插入。 */
+/** 用户设置，对应 user_settings 表（V1）。注册时写入默认值。 */
 public class UserSettings {
 
     @TableId(type = IdType.INPUT)

@@ -1,5 +1,6 @@
 package com.wengu.knowledge.controller;
 
+import com.wengu.common.context.CurrentUser;
 import com.wengu.common.result.Result;
 import com.wengu.knowledge.dto.ConfirmDraftRequest;
 import com.wengu.knowledge.dto.CreateDraftRequest;
@@ -17,31 +18,33 @@ import org.springframework.web.bind.annotation.RestController;
 public class DraftController {
 
     private final ExtractionDraftService draftService;
+    private final CurrentUser currentUser;
 
-    public DraftController(ExtractionDraftService draftService) {
+    public DraftController(ExtractionDraftService draftService, CurrentUser currentUser) {
         this.draftService = draftService;
+        this.currentUser = currentUser;
     }
 
     /** 对导入的材料抽取知识点。在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET 查看进度。 */
     @PostMapping
     public Result<DraftView> create(@RequestBody CreateDraftRequest request) {
-        return Result.ok(draftService.create(request));
+        return Result.ok(draftService.create(currentUser.id(), request));
     }
 
     @GetMapping("/{id}")
     public Result<DraftView> get(@PathVariable long id) {
-        return Result.ok(draftService.get(id));
+        return Result.ok(draftService.get(currentUser.id(), id));
     }
 
     /** 重新抽取失败的批次，成功的批次不动。 */
     @PostMapping("/{id}/retry")
     public Result<DraftView> retry(@PathVariable long id) {
-        return Result.ok(draftService.retry(id));
+        return Result.ok(draftService.retry(currentUser.id(), id));
     }
 
     /** 确认草稿：勾选的条目生成知识点。不传 rejectedItemIds 时全部接受。 */
     @PostMapping("/{id}/confirm")
     public Result<DraftView> confirm(@PathVariable long id, @RequestBody(required = false) ConfirmDraftRequest request) {
-        return Result.ok(draftService.confirm(id, request));
+        return Result.ok(draftService.confirm(currentUser.id(), id, request));
     }
 }

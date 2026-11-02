@@ -1,6 +1,5 @@
 package com.wengu.source.service;
 
-import com.wengu.common.context.CurrentUser;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.llm.dto.LlmResult;
@@ -50,15 +49,13 @@ public class SourceService {
 
     private final SourceMapper sourceMapper;
     private final QuestionSplitService splitService;
-    private final CurrentUser currentUser;
     private final Clock clock;
     private final JsonMapper jsonMapper;
 
-    public SourceService(SourceMapper sourceMapper, QuestionSplitService splitService, CurrentUser currentUser,
-                         Clock clock, JsonMapper jsonMapper) {
+    public SourceService(SourceMapper sourceMapper, QuestionSplitService splitService, Clock clock,
+                         JsonMapper jsonMapper) {
         this.sourceMapper = sourceMapper;
         this.splitService = splitService;
-        this.currentUser = currentUser;
         this.clock = clock;
         this.jsonMapper = jsonMapper;
     }
@@ -68,7 +65,7 @@ public class SourceService {
      * <p>
      * 调用模型要几秒到十几秒，方法不加事务，避免长时间占用数据库连接；保存只有一条 insert，不需要事务。
      */
-    public ImportedSource importQuestions(ImportQuestionsRequest request) {
+    public ImportedSource importQuestions(long userId, ImportQuestionsRequest request) {
         String name = request.name() == null ? "" : request.name().strip();
         String content = request.content() == null ? "" : request.content().strip();
         if (name.isEmpty()) {
@@ -100,7 +97,7 @@ public class SourceService {
         }
 
         Source source = new Source();
-        source.setUserId(currentUser.id());
+        source.setUserId(userId);
         source.setType(SourceType.QUESTION);
         source.setName(name);
         source.setContent(content);
@@ -113,11 +110,11 @@ public class SourceService {
     /**
      * 读取导入时切分出的题目，供抽取使用。题号只在同一份材料内唯一。
      *
-     * @throws BusinessException 材料不存在或不属于当前用户时为 NOT_FOUND；材料没有题目时为 BAD_REQUEST
+     * @throws BusinessException 材料不存在或不属于这个用户时为 NOT_FOUND；材料没有题目时为 BAD_REQUEST
      */
-    public List<SourceQuestion> getQuestions(long sourceId) {
+    public List<SourceQuestion> getQuestions(long userId, long sourceId) {
         Source source = sourceMapper.selectById(sourceId);
-        if (source == null || source.getUserId() != currentUser.id()) {
+        if (source == null || source.getUserId() != userId) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "材料不存在");
         }
         if (source.getQuestions() == null) {

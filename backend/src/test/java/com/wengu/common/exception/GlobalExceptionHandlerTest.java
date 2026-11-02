@@ -1,16 +1,23 @@
 package com.wengu.common.exception;
 
+import com.wengu.common.config.SecurityConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static com.wengu.TestCsrf.csrfToken;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+// 这里测的是异常处理，不是登录：用一个模拟的登录用户通过鉴权
 @WebMvcTest(ExceptionTestController.class)
+@Import(SecurityConfig.class)
+@WithMockUser
 class GlobalExceptionHandlerTest {
 
     @Autowired
@@ -65,7 +72,7 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void 请求方法不支持返回405() throws Exception {
-        mockMvc.perform(post("/test/number"))
+        mockMvc.perform(post("/test/number").with(csrfToken()))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"));
     }

@@ -63,6 +63,9 @@ import static org.mockito.Mockito.when;
 @Import(TestcontainersConfiguration.class)
 class DraftConfirmTest {
 
+    /** 测试中的当前用户。 */
+    private static final long USER_ID = 1L;
+
     private static final String CONTENT = """
             1. 什么是 MVCC？
             2. 如何设计一个秒杀系统？
@@ -126,7 +129,7 @@ class DraftConfirmTest {
                 new SplitQuestion("如何设计一个秒杀系统？", List.of()),
                 new SplitQuestion("你在项目中是怎么使用缓存的？", List.of()),
                 new SplitQuestion("TCP 和 UDP 有什么区别？", List.of()))), "{...}", "test-model", "stop", 10, 10));
-        sourceId = sourceService.importQuestions(new ImportQuestionsRequest("后端", CONTENT)).id();
+        sourceId = sourceService.importQuestions(USER_ID, new ImportQuestionsRequest("后端", CONTENT)).id();
     }
 
     private static ExtractedKnowledgePoint kp(int order, String title, KnowledgePointType type, Integer... ids) {
@@ -147,9 +150,9 @@ class DraftConfirmTest {
     /** 抽取成功、等待确认的草稿。 */
     private DraftView readyDraft(LlmResult<ExtractionResult> extraction) {
         when(extractionService.extract(anyList(), any())).thenReturn(extraction);
-        DraftView view = draftService.create(new CreateDraftRequest(sourceId, null));
+        DraftView view = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null));
         ((ManualTaskExecutor) testExecutor).runAll();
-        DraftView ready = draftService.get(view.id());
+        DraftView ready = draftService.get(USER_ID, view.id());
         assertThat(ready.status()).isEqualTo(DraftStatus.READY);
         return ready;
     }
@@ -188,7 +191,7 @@ class DraftConfirmTest {
         DraftView draft = readyDraft(result(List.of(), FIVE_TYPES));
         long rejectedId = draft.items().get(1).id();
 
-        DraftView confirmed = draftService.confirm(draft.id(), new ConfirmDraftRequest(List.of(rejectedId)));
+        DraftView confirmed = draftService.confirm(USER_ID, draft.id(), new ConfirmDraftRequest(List.of(rejectedId)));
 
         assertThat(confirmed.status()).isEqualTo(DraftStatus.CONFIRMED);
         assertThat(confirmed.items()).extracting(DraftItemView::decision).containsExactly(ItemDecision.ACCEPTED,
@@ -203,7 +206,7 @@ class DraftConfirmTest {
         assertThat(kps.getFirst().getDraftItemId()).isEqualTo(draft.items().getFirst().id());
         assertThat(kps.getFirst().getSummary()).isEqualTo("要点 1");
         assertThat(kps).allSatisfy(kp -> {
-            assertThat(kp.getUserId()).isEqualTo(1L);
+            assertThat(kp.getUserId()).isEqualTo(USER_ID);
             assertThat(kp.getStatus()).isEqualTo(KnowledgePointStatus.ACTIVE);
         });
 
@@ -219,7 +222,7 @@ class DraftConfirmTest {
     void SYSTEM_DESIGN和EXPERIENCE不初始化调度状态() {
         DraftView draft = readyDraft(result(List.of(), FIVE_TYPES));
 
-        DraftView confirmed = draftService.confirm(draft.id(), null);
+        DraftView confirmed = draftService.confirm(USER_ID, draft.id(), null);
 
         List<KnowledgePoint> kps = created(confirmed);
         List<Long> scheduled = kps.stream()
@@ -232,7 +235,7 @@ class DraftConfirmTest {
         assertThat(cards).allSatisfy(card -> {
             assertThat(card.getState()).isEqualTo(State.LEARNING);
             assertThat(card.getLastReview()).isNull();
-            assertThat(card.getUserId()).isEqualTo(1L);
+            assertThat(card.getUserId()).isEqualTo(USER_ID);
         });
     }
 
@@ -246,7 +249,7 @@ class DraftConfirmTest {
         DraftView draft = readyDraft(result(List.of(new CoveredQuestion(4, List.of("E1", "E2"), "同一内容")),
                 FIVE_TYPES.subList(0, 4)));
 
-        draftService.confirm(draft.id(), null);
+        draftService.confirm(USER_ID, draft.id(), null);
 
         List<KpSource> tcpLinks = kpSourceMapper.selectList(new LambdaQueryWrapper<KpSource>()
                 .eq(KpSource::getKpId, tcp.getId()));
@@ -260,7 +263,7 @@ class DraftConfirmTest {
         DraftView draft = readyDraft(result(List.of(), FIVE_TYPES));
         doThrow(new IllegalStateException("初始化调度状态失败")).when(reviewService).initCards(anyLong(), anyList());
 
-        assertThatThrownBy(() -> draftService.confirm(draft.id(), new ConfirmDraftRequest(List.of(draft.items().get(1).id()))))
+        assertThatThrownBy(() -> draftService.confirm(USER_ID, draft.id(), new ConfirmDraftRequest(List.of(draft.items().get(1).id()))))
                 .isInstanceOf(IllegalStateException.class);
 
         assertThat(knowledgePointMapper.selectCount(null)).isZero();
@@ -268,7 +271,7 @@ class DraftConfirmTest {
         assertThat(cardStateMapper.selectCount(null)).isZero();
         ExtractionDraft stored = draftMapper.selectById(draft.id());
         assertThat(stored.getConfirmedAt()).isNull();
-        DraftView after = draftService.get(draft.id());
+        DraftView after = draftService.get(USER_ID, draft.id());
         assertThat(after.status()).isEqualTo(DraftStatus.READY);
         assertThat(after.items()).extracting(DraftItemView::decision).containsOnlyNulls();
     }
@@ -277,7 +280,7 @@ class DraftConfirmTest {
     void 全部取消也能确认() {
         DraftView draft = readyDraft(result(List.of(), FIVE_TYPES));
 
-        DraftView confirmed = draftService.confirm(draft.id(),
+        DraftView confirmed = draftService.confirm(USER_ID, draft.id(),
                 new ConfirmDraftRequest(draft.items().stream().map(DraftItemView::id).toList()));
 
         assertThat(confirmed.status()).isEqualTo(DraftStatus.CONFIRMED);
@@ -289,12 +292,12 @@ class DraftConfirmTest {
     @Test
     void 未抽取完成或失败的草稿不能确认() {
         when(extractionService.extract(anyList(), any())).thenThrow(new IllegalStateException("Key 不对"));
-        DraftView running = draftService.create(new CreateDraftRequest(sourceId, null));
-        assertError(() -> draftService.confirm(running.id(), null), ErrorCode.CONFLICT);
+        DraftView running = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null));
+        assertError(() -> draftService.confirm(USER_ID, running.id(), null), ErrorCode.CONFLICT);
 
         ((ManualTaskExecutor) testExecutor).runAll();
-        assertThat(draftService.get(running.id()).status()).isEqualTo(DraftStatus.FAILED);
-        assertError(() -> draftService.confirm(running.id(), null), ErrorCode.CONFLICT);
+        assertThat(draftService.get(USER_ID, running.id()).status()).isEqualTo(DraftStatus.FAILED);
+        assertError(() -> draftService.confirm(USER_ID, running.id(), null), ErrorCode.CONFLICT);
         assertThat(knowledgePointMapper.selectCount(null)).isZero();
     }
 
@@ -302,13 +305,13 @@ class DraftConfirmTest {
     void 不能重复确认也不能再重试且取消的条目必须属于这份草稿() {
         DraftView draft = readyDraft(result(List.of(), FIVE_TYPES));
 
-        assertError(() -> draftService.confirm(draft.id(), new ConfirmDraftRequest(List.of(Long.MAX_VALUE))),
+        assertError(() -> draftService.confirm(USER_ID, draft.id(), new ConfirmDraftRequest(List.of(Long.MAX_VALUE))),
                 ErrorCode.BAD_REQUEST);
         assertThat(knowledgePointMapper.selectCount(null)).isZero();
 
-        draftService.confirm(draft.id(), null);
-        assertError(() -> draftService.confirm(draft.id(), null), ErrorCode.CONFLICT);
-        assertError(() -> draftService.retry(draft.id()), ErrorCode.CONFLICT);
+        draftService.confirm(USER_ID, draft.id(), null);
+        assertError(() -> draftService.confirm(USER_ID, draft.id(), null), ErrorCode.CONFLICT);
+        assertError(() -> draftService.retry(USER_ID, draft.id()), ErrorCode.CONFLICT);
         assertThat(knowledgePointMapper.selectCount(null)).isEqualTo(5);
     }
 }
