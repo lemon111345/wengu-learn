@@ -1,5 +1,6 @@
 package com.wengu.plan.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.wengu.chat.service.StudySessionService;
 import com.wengu.common.time.StudyDay;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
@@ -8,15 +9,19 @@ import com.wengu.plan.dto.CompletedItem;
 import com.wengu.plan.dto.PlanItem;
 import com.wengu.plan.dto.TodayPlan;
 import com.wengu.plan.dto.UpcomingDay;
+import com.wengu.plan.entity.StudyDayCompletion;
+import com.wengu.plan.mapper.StudyDayCompletionMapper;
 import com.wengu.review.dto.DueCard;
 import com.wengu.review.dto.ReviewRecord;
 import com.wengu.review.service.ReviewService;
 import com.wengu.user.dto.SettingsView;
 import com.wengu.user.service.UserSettingsService;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +31,7 @@ import java.util.stream.IntStream;
 
 /**
  * 每日计划，每次打开时实时计算，不建表：它是派生数据，事实已经在 card_state 和 review_log 里
- * （技术方案“每日计划的计算逻辑”，决策 016）。
+ * （技术方案“每日计划的计算逻辑”，决策 016）。计划变空时写一条“当天完成”的记录（决策 020），那是事实，不是计划的快照。
  * <p>
  * 每个模块只读自己的表：review 给出候选 kp_id，knowledge 过滤掉暂停的并排序，user 提供设置（决策 002）。
  */
@@ -37,15 +42,17 @@ public class PlanService {
     private final ReviewService reviewService;
     private final KnowledgePointService knowledgePointService;
     private final StudySessionService sessionService;
+    private final StudyDayCompletionMapper completionMapper;
     private final Clock clock;
 
     public PlanService(UserSettingsService settingsService, ReviewService reviewService,
                        KnowledgePointService knowledgePointService, StudySessionService sessionService,
-                       Clock clock) {
+                       StudyDayCompletionMapper completionMapper, Clock clock) {
         this.settingsService = settingsService;
         this.reviewService = reviewService;
         this.knowledgePointService = knowledgePointService;
         this.sessionService = sessionService;
+        this.completionMapper = completionMapper;
         this.clock = clock;
     }
 
@@ -68,9 +75,36 @@ public class PlanService {
                 .stream().limit(remaining).toList();
 
         // 7. 先复习，后新学；另附今天已完成的，供页面显示对勾、评分和进度
+        List<CompletedItem> completed = completed(userId, day);
+        if (reviews.isEmpty() && newItems.isEmpty() && !completed.isEmpty()) {
+            recordCompletion(userId, day.date());
+        }
         return new TodayPlan(day.date(), settings.dailyNewLimit(), learned, reviews, newItems,
-                completed(userId, day), upcomingReviews(userId, day, settings), knowledgePointService.count(userId),
+                completed, upcomingReviews(userId, day, settings), knowledgePointService.count(userId),
                 sessionService.activeSecondsBetween(userId, day.start(), day.end()) / 60);
+    }
+
+    /**
+     * 记下“当天完成”（决策 020）：今天的计划变空、并且今天确实学过。这是已经发生的事实，不是计划的快照。
+     * <p>
+     * 在算计划时写，而不是在评分后写：评分在 chat，判断计划是否变空要用 plan，chat 调 plan 会形成循环。
+     * 评分页的“下一个”本来就要重新取计划，学完最后一个时自然会走到这里。重复写由唯一索引挡住。
+     */
+    private void recordCompletion(long userId, LocalDate date) {
+        if (completionMapper.exists(new LambdaQueryWrapper<StudyDayCompletion>()
+                .eq(StudyDayCompletion::getUserId, userId)
+                .eq(StudyDayCompletion::getStudyDate, date))) {
+            return;
+        }
+        StudyDayCompletion completion = new StudyDayCompletion();
+        completion.setUserId(userId);
+        completion.setStudyDate(date);
+        completion.setCompletedAt(Instant.now(clock));
+        try {
+            completionMapper.insert(completion);
+        } catch (DuplicateKeyException e) {
+            // 两个请求同时发现计划变空，先写进去的为准
+        }
     }
 
     /** 接下来几个学习日要复习的：从明天起，不含今天。今天到期的、已经过期的都在今天的复习列表里。 */
