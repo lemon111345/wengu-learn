@@ -10,7 +10,14 @@ import { updateSettings } from '@/api/settings'
 const MIN = 0
 const MAX = 50
 
-const props = defineProps<{ value: number }>()
+const props = withDefaults(
+  defineProps<{
+    value: number
+    /** 放在一行的右边时靠右（今天页），单独一块时靠左（空状态） */
+    align?: 'start' | 'end'
+  }>(),
+  { align: 'end' },
+)
 const emit = defineEmits<{ saved: [value: number] }>()
 
 const draft = ref(props.value)
@@ -40,7 +47,7 @@ async function save() {
 </script>
 
 <template>
-  <div class="stepper">
+  <div class="stepper" :class="`align-${align}`">
     <div class="controls">
       <button type="button" class="step" aria-label="减少一个" :disabled="draft <= MIN" @click="change(-1)">−</button>
       <span class="value" aria-live="polite">{{ draft }}</span>
@@ -57,8 +64,15 @@ async function save() {
 .stepper {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
   gap: 10px;
+}
+
+.align-start {
+  align-items: flex-start;
+}
+
+.align-end {
+  align-items: flex-end;
 }
 
 .controls {
