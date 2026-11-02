@@ -53,6 +53,15 @@ class DefaultUserMigrationTest {
         jdbc = new JdbcTemplate(dataSource);
     }
 
+    /** V1 插入的默认用户在空库上没有业务数据，迁移到最新后它和它的设置都被删掉（决策 017）。 */
+    @Test
+    void 空库迁移完没有默认用户() {
+        migrate(null);
+
+        assertThat(count("SELECT COUNT(*) FROM `user` WHERE username = 'default'")).isZero();
+        assertThat(count("SELECT COUNT(*) FROM user_settings WHERE user_id = 1")).isZero();
+    }
+
     @Test
     void 默认用户没有业务数据时被删除() {
         migrate("6");
