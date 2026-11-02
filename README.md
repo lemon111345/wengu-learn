@@ -24,6 +24,19 @@ cd backend
 | `WENGU_TIMEZONE` | 注册时读不到浏览器时区（或不合法）时使用的时区，以后可以在设置中修改 | `Asia/Shanghai` |
 | `WENGU_ALLOW_REGISTRATION` | 是否开放注册 | `true` |
 
+### 前端
+
+需要 Node.js 20.19 以上（或 22.12 以上）。先按上面启动后端，再：
+
+```powershell
+cd frontend
+npm install
+npm run dev     # 开发服务器 http://localhost:5173，/api 开头的请求转发给后端
+npm run build   # 类型检查并打包到 frontend/dist
+```
+
+后端默认在 `http://localhost:8080`。改了端口的话，在 `frontend/.env.local` 中写 `WENGU_API_TARGET=http://localhost:18080`（这个文件不提交）。
+
 ### 账号
 
 所有人都要注册登录后使用，没有管理员。自己部署时：
