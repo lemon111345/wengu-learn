@@ -24,6 +24,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Random;
 
 /**
@@ -120,6 +121,17 @@ public class ReviewService {
             throw new BusinessException(ErrorCode.CONFLICT, "这次学习已经评过分了");
         }
         return new ReviewResult(ratingUser, after.due(), firstReview);
+    }
+
+    /**
+     * 这个会话的评分结果，没评过分时为空（#23 学习页刷新后显示已评的分）。
+     * V10 之前的流水没有 due_after，这里不会遇到：那时还没有学习会话的评分。
+     */
+    public Optional<ReviewResult> reviewOf(long sessionId) {
+        ReviewLog log = reviewLogMapper.selectOne(new LambdaQueryWrapper<ReviewLog>()
+                .eq(ReviewLog::getSessionId, sessionId));
+        return Optional.ofNullable(log)
+                .map(l -> new ReviewResult(l.getRatingUser(), l.getDueAfter(), l.getFirstReview()));
     }
 
     /** 这个会话是否已经评过分 */

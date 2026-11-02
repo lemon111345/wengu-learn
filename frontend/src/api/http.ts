@@ -36,17 +36,26 @@ export function setUnauthorizedHandler(handler: () => void) {
   onUnauthorized = handler
 }
 
+/** 修改类请求要带的 CSRF 请求头。令牌每次都从 Cookie 现读：后端可能更换令牌，缓存旧值会被拒 */
+export function csrfHeaders(): Record<string, string> {
+  const token = readCookie('XSRF-TOKEN')
+  return token ? { 'X-XSRF-TOKEN': token } : {}
+}
+
+/** 失败的响应转成 ApiError；401 时通知路由跳转登录页。流式接口（api/sse.ts）也用它 */
+export async function errorOf(response: Response, options: RequestOptions = {}): Promise<ApiError> {
+  const result = await parseResult<unknown>(response)
+  if (response.status === 401 && !options.skipAuthRedirect) {
+    onUnauthorized()
+  }
+  // 后端没启动时，开发代理返回的不是统一格式
+  return new ApiError(response.status, result?.code ?? 'UNKNOWN', result?.message ?? '服务暂时不可用，请稍后重试')
+}
+
 export async function request<T>(method: string, url: string, options: RequestOptions = {}): Promise<T> {
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string> = method === 'GET' ? {} : csrfHeaders()
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
-  }
-  if (method !== 'GET') {
-    // 令牌每次都从 Cookie 现读：后端可能更换令牌，缓存旧值会被拒
-    const token = readCookie('XSRF-TOKEN')
-    if (token) {
-      headers['X-XSRF-TOKEN'] = token
-    }
   }
 
   let response: Response
@@ -60,15 +69,14 @@ export async function request<T>(method: string, url: string, options: RequestOp
     throw new ApiError(0, 'NETWORK_ERROR', '连不上服务器，请检查网络后重试')
   }
 
-  const result = await parseResult<T>(response)
-  if (response.ok && result?.code === 'OK') {
-    return result.data
+  if (response.ok) {
+    // clone：万一不是统一格式的成功结果，errorOf 还要再读一次响应体
+    const result = await parseResult<T>(response.clone())
+    if (result?.code === 'OK') {
+      return result.data
+    }
   }
-  if (response.status === 401 && !options.skipAuthRedirect) {
-    onUnauthorized()
-  }
-  // 后端没启动时，开发代理返回的不是统一格式
-  throw new ApiError(response.status, result?.code ?? 'UNKNOWN', result?.message ?? '服务暂时不可用，请稍后重试')
+  throw await errorOf(response, options)
 }
 
 export function get<T>(url: string, options?: RequestOptions) {

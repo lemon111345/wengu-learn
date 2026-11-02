@@ -19,3 +19,14 @@ export function formatStudyDate(date: string): string {
   const d = parse(date)
   return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日 ${weekdayLabel(date)}`
 }
+
+/** 如“11月7日”，用于“11月7日再见” */
+export function formatMonthDay(date: string): string {
+  const d = parse(date)
+  return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日`
+}
+
+/** 距今天几个学习日的说法：1 天是“明天”，其他是“3 天后” */
+export function daysLater(days: number): string {
+  return days === 1 ? '明天' : `${days} 天后`
+}

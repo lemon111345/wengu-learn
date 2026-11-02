@@ -2,6 +2,7 @@
 // 概况面板（ui.md 5.2）：左边是还剩多少和进度，右边是“下一个”
 import { computed } from 'vue'
 import type { TodayPlan } from '@/api/plan'
+import ProgressSegments from '@/components/ProgressSegments.vue'
 import { typeLabels } from '@/utils/labels'
 import { nextItem, overviewDescription, overviewTitle } from './summary'
 
@@ -11,10 +12,6 @@ const emit = defineEmits<{ start: [kpId: number] }>()
 const next = computed(() => nextItem(props.plan))
 const done = computed(() => props.plan.completed.length)
 const total = computed(() => done.value + props.plan.reviews.length + props.plan.newItems.length)
-// 一段代表一个知识点：已完成、当前（下一个）、未开始
-const segments = computed(() =>
-  Array.from({ length: total.value }, (_, i) => (i < done.value ? 'done' : i === done.value ? 'current' : 'todo')),
-)
 </script>
 
 <template>
@@ -25,9 +22,7 @@ const segments = computed(() =>
         <p class="description">{{ overviewDescription(plan) }}</p>
       </div>
       <div v-if="total > 0" class="progress">
-        <div class="segments" role="img" :aria-label="`今天共 ${total} 个，已完成 ${done} 个`">
-          <span v-for="(s, i) in segments" :key="i" class="segment" :class="s" />
-        </div>
+        <ProgressSegments :done="done" :total="total" />
         <span class="count">{{ done }} / {{ total }}</span>
       </div>
     </div>
@@ -83,26 +78,6 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-.segments {
-  display: flex;
-  gap: 5px;
-}
-
-.segment {
-  flex: 1;
-  height: 10px;
-  border-radius: 5px;
-  background: var(--wg-tag-bg);
-}
-
-.segment.done {
-  background: var(--wg-primary);
-}
-
-.segment.current {
-  background: var(--wg-heat-2);
 }
 
 .count {

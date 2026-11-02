@@ -2,6 +2,7 @@ package com.wengu.chat.service;
 
 import com.wengu.MutableClock;
 import com.wengu.TestcontainersConfiguration;
+import com.wengu.chat.dto.RatingOption;
 import com.wengu.chat.dto.SessionView;
 import com.wengu.chat.dto.StartSessionRequest;
 import com.wengu.chat.entity.Message;
@@ -16,16 +17,22 @@ import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.review.fsrs.Rating;
+import com.wengu.review.mapper.CardStateMapper;
+import com.wengu.review.mapper.ReviewLogMapper;
+import com.wengu.review.service.ReviewService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.convention.TestBean;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -57,9 +64,26 @@ class StudySessionServiceTest {
     @Autowired
     private KnowledgePointMapper knowledgePointMapper;
 
+    @Autowired
+    private ReviewService reviewService;
+
+    @Autowired
+    private CardStateMapper cardStateMapper;
+
+    @Autowired
+    private ReviewLogMapper reviewLogMapper;
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
     @BeforeEach
     void reset() {
         ((MutableClock) clock).set(NOW);
+        // 已评的分要按用户设置换算学习日；空库上 V7 删掉了用户 1 的设置
+        jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
+                + " VALUES (1, 3, 'Asia/Shanghai', 4)");
+        reviewLogMapper.delete(null);
+        cardStateMapper.delete(null);
         messageMapper.delete(null);
         sessionMapper.delete(null);
         knowledgePointMapper.delete(null);
@@ -103,10 +127,21 @@ class StudySessionServiceTest {
         // 没结束时再开始，还是同一个会话
         assertThat(sessionService.start(USER_ID, new StartSessionRequest(kpId)).id()).isEqualTo(first.id());
 
-        // 结束以后再开始，是新的会话
+        // 学完了但还没评分：还是同一个会话，回去评分
         saved.setEndedAt(NOW);
         sessionMapper.updateById(saved);
+        SessionView unrated = sessionService.start(USER_ID, new StartSessionRequest(kpId));
+        assertThat(unrated.id()).isEqualTo(first.id());
+        assertThat(unrated.ended()).isTrue();
+        assertThat(unrated.rating()).isNull();
+
+        // 评过分以后再开始，是新的会话；原来的会话带上评分
+        reviewService.initCards(USER_ID, List.of(kpId));
+        reviewService.rate(USER_ID, kpId, first.id(), Rating.GOOD, null);
         assertThat(sessionService.start(USER_ID, new StartSessionRequest(kpId)).id()).isNotEqualTo(first.id());
+        RatingOption rating = sessionService.get(USER_ID, first.id()).rating();
+        assertThat(rating.rating()).isEqualTo(Rating.GOOD);
+        assertThat(rating.days()).isPositive();
     }
 
     @Test
