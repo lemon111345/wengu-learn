@@ -1,4 +1,4 @@
-import { patch } from './http'
+import { get, patch } from './http'
 
 export interface Settings {
   /** IANA 时区，如 Asia/Shanghai */
@@ -7,6 +7,10 @@ export interface Settings {
   dayStartHour: number
   /** 每天新学几个，0～50 */
   dailyNewLimit: number
+}
+
+export function fetchSettings() {
+  return get<Settings>('/api/settings')
 }
 
 /** 只修改传了的字段，返回修改后的全部设置 */
