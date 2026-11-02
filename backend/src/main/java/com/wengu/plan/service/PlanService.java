@@ -1,6 +1,7 @@
 package com.wengu.plan.service;
 
 import com.wengu.chat.service.StudySessionService;
+import com.wengu.common.time.StudyDay;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.service.KnowledgePointService;
 import com.wengu.plan.dto.CompletedItem;
