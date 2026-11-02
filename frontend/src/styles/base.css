@@ -1,0 +1,88 @@
+/* 全局基础样式：只放所有页面共用的，页面自己的样式写在各自的组件里 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  background: var(--wg-bg);
+  color: var(--wg-text);
+  font-family: var(--wg-font-sans);
+  font-size: 15px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* 页面主标题用宋体；面板标题等其他标题用黑体 */
+h1 {
+  font-family: var(--wg-font-serif);
+  font-weight: 700;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--wg-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--wg-primary-hover);
+}
+
+/* 应用框架中顶栏以下的页面主体：最宽 1400，居中（ui.md 4.1） */
+.wg-page-body {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px 40px 72px;
+}
+
+@media (max-width: 600px) {
+  .wg-page-body {
+    padding: 20px 16px 48px;
+  }
+}
+
+.wg-muted {
+  color: var(--wg-text-muted);
+}
+
+/* 宋体：知识点标题、“温故”标识等 */
+.wg-serif {
+  font-family: var(--wg-font-serif);
+  font-weight: 700;
+}
+
+/* 快捷键提示 */
+kbd {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid var(--wg-border-strong);
+  border-radius: var(--wg-radius-kbd);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+/* 键盘操作时显示焦点框；鼠标点击时不显示 */
+:focus-visible {
+  outline: 2px solid var(--wg-primary);
+  outline-offset: 2px;
+}

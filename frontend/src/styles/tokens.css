@@ -1,0 +1,50 @@
+/*
+ * 设计变量，数值来自 docs/design/ui.md 第 2 节。
+ * 组件中不写死色值，一律用这里的变量；以后加暗色模式时，只需再定义一套同名变量。
+ */
+:root {
+  /* 颜色 */
+  --wg-bg: #ffffff;
+  --wg-surface: #f6f7f9;
+  --wg-text: #1c1d21;
+  --wg-text-muted: #5f636b;
+  --wg-border: #e4e6ea;
+  --wg-border-strong: #d5d8dd;
+  --wg-tag-bg: #eef0f3;
+  --wg-primary: #1f6fb2;
+  --wg-primary-hover: #16507f;
+  --wg-primary-soft: #e7f0f9;
+  --wg-primary-line: #c6d9ee;
+  --wg-warn: #c2410c;
+  --wg-warn-soft: #fdf0e8;
+  --wg-success: #2b8a3e;
+
+  /* 评分与掌握程度共用的色阶：只用于色点、色条、柱子，不用作文字颜色 */
+  --wg-level-1: #d9480f;
+  --wg-level-2: #e8a100;
+  --wg-level-3: #7fb0dd;
+  --wg-level-4: #1f6fb2;
+  --wg-level-new: #c9cdd3;
+  --wg-level-paused: #8a9099;
+
+  /* 学习时长热力，从“没学”到最多 */
+  --wg-heat-0: #eef0f3;
+  --wg-heat-1: #dceaf7;
+  --wg-heat-2: #a9cbea;
+  --wg-heat-3: #5c97cf;
+  --wg-heat-4: #1f6fb2;
+
+  /* 字体：宋体只用于标识、页面主标题、知识点标题、“X月X日再见”和个别大数字 */
+  --wg-font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --wg-font-serif: 'Noto Serif SC', 'Songti SC', 'SimSun', serif;
+
+  /* 圆角 */
+  --wg-radius-kbd: 4px;
+  --wg-radius-segment: 6px;
+  --wg-radius-control: 8px;
+  --wg-radius-card: 10px;
+  --wg-radius-panel: 14px;
+
+  /* 只有弹出菜单和弹窗用阴影 */
+  --wg-shadow-pop: 0 8px 24px rgba(28, 29, 33, 0.08);
+}

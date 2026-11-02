@@ -1,0 +1,79 @@
+/*
+ * 把 Element Plus 的 CSS 变量映射到设计变量（决策 021）。
+ * 这个文件在 Element Plus 的样式之后引入，同样写在 :root 上，后定义的生效。
+ * Element Plus 用 SCSS 在构建时算出主色的深浅变体，这里改用 color-mix 在浏览器中计算，不需要 sass。
+ */
+:root {
+  --el-color-primary: var(--wg-primary);
+  --el-color-primary-light-3: color-mix(in srgb, var(--wg-primary) 70%, white);
+  --el-color-primary-light-5: color-mix(in srgb, var(--wg-primary) 50%, white);
+  --el-color-primary-light-7: color-mix(in srgb, var(--wg-primary) 30%, white);
+  --el-color-primary-light-8: color-mix(in srgb, var(--wg-primary) 20%, white);
+  --el-color-primary-light-9: color-mix(in srgb, var(--wg-primary) 10%, white);
+  --el-color-primary-dark-2: var(--wg-primary-hover);
+
+  /* 表单校验失败、危险操作 */
+  --el-color-danger: var(--wg-warn);
+  --el-color-error: var(--wg-warn);
+  --el-color-success: var(--wg-success);
+
+  --el-text-color-primary: var(--wg-text);
+  --el-text-color-regular: var(--wg-text);
+  --el-text-color-secondary: var(--wg-text-muted);
+  --el-border-color: var(--wg-border-strong);
+  --el-border-color-light: var(--wg-border);
+  --el-border-color-lighter: var(--wg-border);
+  --el-fill-color-light: var(--wg-surface);
+  --el-bg-color: var(--wg-bg);
+  --el-bg-color-overlay: var(--wg-bg);
+
+  --el-font-family: var(--wg-font-sans);
+  --el-font-size-base: 15px;
+  --el-border-radius-base: var(--wg-radius-control);
+  --el-box-shadow-light: var(--wg-shadow-pop);
+
+  /* 输入框、按钮高 44（ui.md 第 2.3、3 节） */
+  --el-component-size: 44px;
+}
+
+/* 弹窗：面板的圆角，弹窗专用的阴影（ui.md 2.3） */
+.el-dialog {
+  --el-dialog-border-radius: var(--wg-radius-panel);
+  --el-dialog-box-shadow: var(--wg-shadow-pop);
+}
+
+/* 主按钮用主色的浅底、主色文字，不用实心主色（决策 021） */
+.el-button--primary {
+  --el-button-bg-color: var(--wg-primary-soft);
+  --el-button-border-color: var(--wg-primary-soft);
+  --el-button-text-color: var(--wg-primary);
+  --el-button-hover-bg-color: color-mix(in srgb, var(--wg-primary-soft), var(--wg-primary) 8%);
+  --el-button-hover-border-color: var(--el-button-hover-bg-color);
+  --el-button-hover-text-color: var(--wg-primary-hover);
+  --el-button-active-bg-color: color-mix(in srgb, var(--wg-primary-soft), var(--wg-primary) 14%);
+  --el-button-active-border-color: var(--el-button-active-bg-color);
+  --el-button-active-text-color: var(--wg-primary-hover);
+  --el-button-disabled-bg-color: var(--wg-surface);
+  --el-button-disabled-border-color: var(--wg-surface);
+  --el-button-disabled-text-color: var(--wg-text-muted);
+  font-weight: 700;
+}
+
+.el-button--primary kbd {
+  border-color: var(--wg-primary-line);
+}
+
+/*
+ * 菜单中的危险操作（退出登录、删除）用 --wg-warn 色的文字（ui.md 第 3 节）。
+ * 写在全局：下拉菜单项由 Element Plus 的内部组件渲染，组件中的 scoped 样式作用不到
+ */
+.el-dropdown-menu__item.wg-danger {
+  --el-dropdown-menuItem-hover-color: var(--wg-warn);
+  --el-dropdown-menuItem-hover-fill: var(--wg-warn-soft);
+  color: var(--wg-warn);
+}
+
+/* 次按钮：白底，深一点的描边 */
+.el-button--default {
+  --el-button-border-color: var(--wg-border-strong);
+}
