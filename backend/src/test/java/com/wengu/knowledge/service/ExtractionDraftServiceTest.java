@@ -20,6 +20,7 @@ import com.wengu.knowledge.dto.ResolvedCovered;
 import com.wengu.knowledge.entity.BatchStatus;
 import com.wengu.knowledge.entity.DraftStatus;
 import com.wengu.knowledge.entity.ExtractionBatch;
+import com.wengu.knowledge.entity.ExtractionDraft;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.mapper.ExtractionBatchMapper;
@@ -45,6 +46,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -577,6 +579,8 @@ class ExtractionDraftServiceTest {
         // 重试过的草稿有一行旧的失败批次，状态要按最新一行算
         assertThat(list).extracting(DraftSummary::status)
                 .containsExactly(DraftStatus.RUNNING, DraftStatus.CONFIRMED, DraftStatus.READY);
+        // 条目数只算成功的批次：抽取中的为 0；重试前失败的那一行没有条目；确认后不变
+        assertThat(list).extracting(DraftSummary::itemCount).containsExactly(0, 4, 4);
         assertThat(list).allSatisfy(d -> {
             assertThat(d.sourceId()).isEqualTo(sourceId);
             assertThat(d.sourceName()).isEqualTo("Java 基础");
@@ -585,15 +589,24 @@ class ExtractionDraftServiceTest {
     }
 
     @Test
-    void 草稿列表最多返回20份() {
-        long last = 0;
-        for (int i = 0; i < ExtractionDraftService.LIST_LIMIT + 1; i++) {
-            last = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null)).id();
-        }
+    void 草稿列表返回全部未确认的和最近10份已确认的() {
+        // 未确认的先建，比已确认的都旧：如果只取“最近 N 份”，它们会被挤出列表
+        int count = ExtractionDraftService.CONFIRMED_LIMIT + 2;
+        List<Long> unconfirmed = IntStream.range(0, count)
+                .mapToObj(i -> draftService.create(USER_ID, new CreateDraftRequest(sourceId, null)).id())
+                .toList();
+        List<Long> confirmed = IntStream.range(0, count)
+                .mapToObj(i -> draftService.create(USER_ID, new CreateDraftRequest(sourceId, null)).id())
+                .toList();
+        // 直接标记为已确认，不走抽取：这里只关心列表返回哪些
+        draftMapper.update(new LambdaUpdateWrapper<ExtractionDraft>()
+                .in(ExtractionDraft::getId, confirmed)
+                .set(ExtractionDraft::getConfirmedAt, Instant.now()));
 
         List<DraftSummary> list = draftService.list(USER_ID);
 
-        assertThat(list).hasSize(ExtractionDraftService.LIST_LIMIT);
-        assertThat(list.getFirst().id()).isEqualTo(last);
+        List<Long> expected = new ArrayList<>(confirmed.reversed().subList(0, ExtractionDraftService.CONFIRMED_LIMIT));
+        expected.addAll(unconfirmed.reversed());
+        assertThat(list).extracting(DraftSummary::id).containsExactlyElementsOf(expected);
     }
 }

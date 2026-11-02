@@ -34,7 +34,7 @@ public class DraftController {
         return Result.ok(draftService.create(currentUser.id(), request));
     }
 
-    /** 最近的 20 份草稿，新的在前。 */
+    /** 草稿列表，新的在前：未确认的全部返回，已确认的只返回最近 10 份。 */
     @GetMapping
     public Result<List<DraftSummary>> list() {
         return Result.ok(draftService.list(currentUser.id()));
