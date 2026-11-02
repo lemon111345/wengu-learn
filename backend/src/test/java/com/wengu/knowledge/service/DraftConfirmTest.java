@@ -12,6 +12,7 @@ import com.wengu.knowledge.dto.DraftView;
 import com.wengu.knowledge.dto.ExtractedKnowledgePoint;
 import com.wengu.knowledge.dto.ExtractionResult;
 import com.wengu.knowledge.dto.KnowledgePointType;
+import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.knowledge.entity.DraftStatus;
 import com.wengu.knowledge.entity.ExtractionDraft;
 import com.wengu.knowledge.entity.ItemDecision;
@@ -78,6 +79,9 @@ class DraftConfirmTest {
 
     @Autowired
     private SourceService sourceService;
+
+    @Autowired
+    private KnowledgePointService knowledgePointService;
 
     @Autowired
     private ExtractionDraftMapper draftMapper;
@@ -313,5 +317,26 @@ class DraftConfirmTest {
         assertError(() -> draftService.confirm(USER_ID, draft.id(), null), ErrorCode.CONFLICT);
         assertError(() -> draftService.retry(USER_ID, draft.id()), ErrorCode.CONFLICT);
         assertThat(knowledgePointMapper.selectCount(null)).isEqualTo(5);
+    }
+
+    @Test
+    void 学习材料带上来源面试题() {
+        // 抽取要求每道题都有对应的知识点；第一个知识点引用的题号顺序和原文不同，返回时按原文顺序
+        DraftView draft = readyDraft(result(List.of(),
+                List.of(kp(1, "MVCC 和 TCP 有什么关系？", KnowledgePointType.COMPARISON, 4, 1),
+                        kp(2, "如何设计一个秒杀系统？", KnowledgePointType.SYSTEM_DESIGN, 2),
+                        kp(3, "你在项目中是怎么使用缓存的？", KnowledgePointType.EXPERIENCE, 3))));
+        draftService.confirm(USER_ID, draft.id(), null);
+        long kpId = created(draft).getFirst().getId();
+
+        StudyMaterial material = knowledgePointService.studyMaterial(USER_ID, kpId);
+
+        assertThat(material).isEqualTo(new StudyMaterial(kpId, "MVCC 和 TCP 有什么关系？", KnowledgePointType.COMPARISON,
+                "要点 1", List.of("什么是 MVCC？", "TCP 和 UDP 有什么区别？")));
+        // 不是从草稿来的知识点没有来源题
+        KnowledgePoint manual = existing(USER_ID, "手动新建的？", 10);
+        assertThat(knowledgePointService.studyMaterial(USER_ID, manual.getId()).sourceQuestions()).isEmpty();
+        // 其他用户的知识点
+        assertError(() -> knowledgePointService.studyMaterial(2, kpId), ErrorCode.NOT_FOUND);
     }
 }

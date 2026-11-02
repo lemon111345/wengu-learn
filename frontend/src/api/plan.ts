@@ -37,6 +37,8 @@ export interface TodayPlan {
   upcomingReviews: UpcomingDay[]
   /** 知识点总数；为 0 时显示空状态 */
   knowledgePointCount: number
+  /** 今天的有效学习时长（分钟） */
+  studiedMinutesToday: number
 }
 
 export function fetchTodayPlan() {

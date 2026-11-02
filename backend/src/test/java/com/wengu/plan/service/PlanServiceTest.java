@@ -2,6 +2,10 @@ package com.wengu.plan.service;
 
 import com.wengu.MutableClock;
 import com.wengu.TestcontainersConfiguration;
+import com.wengu.chat.entity.SessionType;
+import com.wengu.chat.entity.StudySession;
+import com.wengu.chat.mapper.MessageMapper;
+import com.wengu.chat.mapper.StudySessionMapper;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
@@ -76,6 +80,12 @@ class PlanServiceTest {
     private ReviewLogMapper reviewLogMapper;
 
     @Autowired
+    private StudySessionMapper sessionMapper;
+
+    @Autowired
+    private MessageMapper messageMapper;
+
+    @Autowired
     private JdbcTemplate jdbc;
 
     @BeforeEach
@@ -85,6 +95,8 @@ class PlanServiceTest {
         jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
                 + " VALUES (1, 3, 'Asia/Shanghai', 4)");
         settingsService.update(1, new UpdateSettingsRequest("Asia/Shanghai", 4, 3));
+        messageMapper.delete(null);
+        sessionMapper.delete(null);
         reviewLogMapper.delete(null);
         cardStateMapper.delete(null);
         kpSourceMapper.delete(null);
@@ -422,5 +434,27 @@ class PlanServiceTest {
 
         assertThat(plan.date()).isEqualTo(LocalDate.of(2026, 10, 29));
         assertThat(counts(plan)).containsExactly(0, 1, 1, 0, 0, 0, 0);
+    }
+
+    private void session(long userId, Instant startedAt, int activeSeconds) {
+        StudySession session = new StudySession();
+        session.setUserId(userId);
+        session.setType(SessionType.STUDY);
+        session.setStartedAt(startedAt);
+        session.setSkippedExplanation(false);
+        session.setActiveSeconds(activeSeconds);
+        sessionMapper.insert(session);
+    }
+
+    @Test
+    void 今天已学的分钟数来自今天开始的学习会话() {
+        session(1, DAY_START, 600);
+        session(1, NOW, 150);
+        // 昨天开始的会话整个算在昨天，其他用户的不算
+        session(1, DAY_START.minusSeconds(1), 1200);
+        session(2, NOW, 3000);
+
+        // 750 秒，不足一分钟的舍去
+        assertThat(planService.today(1).studiedMinutesToday()).isEqualTo(12);
     }
 }

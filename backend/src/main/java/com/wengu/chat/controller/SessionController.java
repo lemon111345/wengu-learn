@@ -1,0 +1,67 @@
+package com.wengu.chat.controller;
+
+import com.wengu.chat.dto.SendMessageRequest;
+import com.wengu.chat.dto.SessionView;
+import com.wengu.chat.dto.StartSessionRequest;
+import com.wengu.chat.service.ChatService;
+import com.wengu.chat.service.StudySessionService;
+import com.wengu.common.context.CurrentUser;
+import com.wengu.common.result.Result;
+import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
+
+/** 学习会话（决策 025）。 */
+@RestController
+@RequestMapping("/api/sessions")
+public class SessionController {
+
+    private final StudySessionService sessionService;
+    private final ChatService chatService;
+    private final CurrentUser currentUser;
+
+    public SessionController(StudySessionService sessionService, ChatService chatService, CurrentUser currentUser) {
+        this.sessionService = sessionService;
+        this.chatService = chatService;
+        this.currentUser = currentUser;
+    }
+
+    /** 开始学习一个知识点；有没结束的会话时返回那个会话。不调用模型，老师的第一句由 reply 生成。 */
+    @PostMapping
+    public Result<SessionView> start(@RequestBody StartSessionRequest request) {
+        return Result.ok(sessionService.start(currentUser.id(), request));
+    }
+
+    /** 会话和全部消息，刷新后恢复用。 */
+    @GetMapping("/{id}")
+    public Result<SessionView> get(@PathVariable long id) {
+        return Result.ok(sessionService.get(currentUser.id(), id));
+    }
+
+    // 下面三个接口的响应是 text/event-stream：delta（一段文字）、done（回复完成）、error（出错）。
+    // 用 POST，前端用 fetch 读流：EventSource 只能发 GET，带不上回答内容和 CSRF 令牌（决策 025）。
+    // 校验不通过时在推送之前就返回统一格式的 JSON 错误
+
+    /** 生成老师的下一条回复：刚开始时的第一句，或者出错后重试。 */
+    @PostMapping("/{id}/reply")
+    public Flux<ServerSentEvent<Object>> reply(@PathVariable long id) {
+        return chatService.reply(currentUser.id(), id);
+    }
+
+    /** 学生回答，老师流式回复。 */
+    @PostMapping("/{id}/messages")
+    public Flux<ServerSentEvent<Object>> send(@PathVariable long id, @RequestBody SendMessageRequest request) {
+        return chatService.send(currentUser.id(), id, request);
+    }
+
+    /** “这个我会，直接完整作答”。 */
+    @PostMapping("/{id}/skip-explanation")
+    public Flux<ServerSentEvent<Object>> skipExplanation(@PathVariable long id) {
+        return chatService.skipExplanation(currentUser.id(), id);
+    }
+}
