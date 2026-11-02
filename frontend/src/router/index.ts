@@ -4,6 +4,9 @@ import { clearCurrentUser, loadCurrentUser } from '@/auth/session'
 import AppLayout from '@/layouts/AppLayout.vue'
 import StudyLayout from '@/layouts/StudyLayout.vue'
 
+// 两个页面共用一个组件，用 props 区分
+const LegalView = () => import('@/views/LegalView.vue')
+
 declare module 'vue-router' {
   interface RouteMeta {
     /** 只给没登录的人看（注册、登录）；已登录时直接进入应用 */
@@ -19,6 +22,8 @@ const router = createRouter({
   routes: [
     { path: '/login', component: () => import('@/views/auth/LoginView.vue'), meta: { guest: true } },
     { path: '/register', component: () => import('@/views/auth/RegisterView.vue'), meta: { guest: true } },
+    { path: '/terms', component: LegalView, props: { kind: 'terms' }, meta: { public: true } },
+    { path: '/privacy', component: LegalView, props: { kind: 'privacy' }, meta: { public: true } },
     {
       // 应用框架：左侧导航 + 内容区（ui.md 4.1）
       path: '/',
