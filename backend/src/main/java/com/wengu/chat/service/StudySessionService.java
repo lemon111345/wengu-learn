@@ -98,6 +98,21 @@ public class StudySessionService {
         return view(session, kp == null ? null : kp.title());
     }
 
+    /**
+     * [start, end) 之间开始的会话的有效时长之和（秒），今天页的“今天已学 X 分钟”用（#19）。
+     * 按会话开始的时间归到某一天：跨过分界时刻的会话整个算在开始的那天，不拆开。
+     */
+    public int activeSecondsBetween(long userId, Instant start, Instant end) {
+        return sessionMapper.selectList(new LambdaQueryWrapper<StudySession>()
+                        .select(StudySession::getActiveSeconds)
+                        .eq(StudySession::getUserId, userId)
+                        .ge(StudySession::getStartedAt, start)
+                        .lt(StudySession::getStartedAt, end))
+                .stream()
+                .mapToInt(StudySession::getActiveSeconds)
+                .sum();
+    }
+
     /** @throws BusinessException 会话不存在或不属于这个用户时为 NOT_FOUND */
     StudySession find(long userId, long sessionId) {
         StudySession session = sessionMapper.selectById(sessionId);

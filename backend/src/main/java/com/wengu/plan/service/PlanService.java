@@ -1,5 +1,6 @@
 package com.wengu.plan.service;
 
+import com.wengu.chat.service.StudySessionService;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.service.KnowledgePointService;
 import com.wengu.plan.dto.CompletedItem;
@@ -34,13 +35,16 @@ public class PlanService {
     private final UserSettingsService settingsService;
     private final ReviewService reviewService;
     private final KnowledgePointService knowledgePointService;
+    private final StudySessionService sessionService;
     private final Clock clock;
 
     public PlanService(UserSettingsService settingsService, ReviewService reviewService,
-                       KnowledgePointService knowledgePointService, Clock clock) {
+                       KnowledgePointService knowledgePointService, StudySessionService sessionService,
+                       Clock clock) {
         this.settingsService = settingsService;
         this.reviewService = reviewService;
         this.knowledgePointService = knowledgePointService;
+        this.sessionService = sessionService;
         this.clock = clock;
     }
 
@@ -64,7 +68,8 @@ public class PlanService {
 
         // 7. 先复习，后新学；另附今天已完成的，供页面显示对勾、评分和进度
         return new TodayPlan(day.date(), settings.dailyNewLimit(), learned, reviews, newItems,
-                completed(userId, day), upcomingReviews(userId, day, settings), knowledgePointService.count(userId));
+                completed(userId, day), upcomingReviews(userId, day, settings), knowledgePointService.count(userId),
+                sessionService.activeSecondsBetween(userId, day.start(), day.end()) / 60);
     }
 
     /** 接下来几个学习日要复习的：从明天起，不含今天。今天到期的、已经过期的都在今天的复习列表里。 */

@@ -32,18 +32,21 @@ export function overviewTitle(plan: TodayPlan): string {
   return plan.completed.length > 0 ? '今天的都学完了' : '今天没有要学的'
 }
 
-/** 说明行：还有要学的时写已完成多少；都学完了时写明天 */
+/** 说明行：还有要学的时写已完成多少和今天学了多久；都学完了时写今天学了多久和明天 */
 export function overviewDescription(plan: TodayPlan): string {
   const remaining = plan.reviews.length + plan.newItems.length
+  const minutes = plan.studiedMinutesToday > 0 ? `今天已学 ${plan.studiedMinutesToday} 分钟` : ''
   if (remaining === 0) {
     const tomorrow = plan.upcomingReviews[0]?.count ?? 0
-    return tomorrow > 0 ? `明天有 ${tomorrow} 个要复习` : '明天没有要复习的'
+    const next = tomorrow > 0 ? `明天有 ${tomorrow} 个要复习` : '明天没有要复习的'
+    return minutes ? `${minutes}，${next}` : next
   }
   const doneReviews = plan.completed.filter((c) => !c.firstReview).length
   const doneNew = plan.completed.length - doneReviews
   const done = [
     doneReviews > 0 ? `复习 ${doneReviews} 个已完成` : '',
     doneNew > 0 ? `新学 ${doneNew} 个已完成` : '',
+    minutes,
   ].filter((s) => s !== '')
   return done.length > 0 ? done.join('，') : `今天共 ${remaining} 个，先复习后学新的`
 }
