@@ -38,10 +38,18 @@ const router = createRouter({
       ],
     },
     {
-      // 学习模式：隐藏侧栏，内容居中一栏（ui.md 4.2）
+      // 学习模式：隐藏侧栏，内容居中一栏（ui.md 4.2）。入口按知识点，拿到会话后换成按会话 id 的地址（决策 027）
       path: '/study',
       component: StudyLayout,
-      children: [{ path: ':kpId', component: () => import('@/views/StudyView.vue'), props: true }],
+      children: [{ path: ':kpId', component: () => import('@/views/study/StudyEntry.vue'), props: true }],
+    },
+    {
+      path: '/session',
+      component: StudyLayout,
+      children: [
+        // 学习，学完后同一页切换成收尾与评分
+        { path: ':id', component: () => import('@/views/study/SessionPage.vue'), props: true },
+      ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

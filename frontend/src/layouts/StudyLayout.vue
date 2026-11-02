@@ -1,21 +1,20 @@
 <script setup lang="ts">
 // 学习模式（ui.md 4.2）：隐藏侧栏，只做眼前这一件事。
 // 顶栏：左边“← 今天”，中间当天的分段进度，右边“本次 X 分钟”
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { fetchTodayPlan, type TodayPlan } from '@/api/plan'
+import { fetchTodayPlan } from '@/api/plan'
 import ProgressSegments from '@/components/ProgressSegments.vue'
 import { studyHeader } from './studyHeader'
 
 const route = useRoute()
-const plan = ref<TodayPlan | null>(null)
 
 // 进度取不到时不显示，不影响学习
 async function loadProgress() {
   try {
-    plan.value = await fetchTodayPlan()
+    studyHeader.plan = await fetchTodayPlan()
   } catch {
-    plan.value = null
+    studyHeader.plan = null
   }
 }
 
@@ -23,10 +22,11 @@ onMounted(loadProgress)
 // 进入下一个知识点、评完分时重新取
 watch(() => [route.params.id, studyHeader.progressVersion], loadProgress)
 
-const done = computed(() => plan.value?.completed.length ?? 0)
-const total = computed(() =>
-  plan.value ? done.value + plan.value.reviews.length + plan.value.newItems.length : 0,
-)
+const done = computed(() => studyHeader.plan?.completed.length ?? 0)
+const total = computed(() => {
+  const plan = studyHeader.plan
+  return plan ? done.value + plan.reviews.length + plan.newItems.length : 0
+})
 </script>
 
 <template>
