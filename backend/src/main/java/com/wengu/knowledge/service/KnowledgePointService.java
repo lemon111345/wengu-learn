@@ -1,20 +1,30 @@
 package com.wengu.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.wengu.common.exception.BusinessException;
+import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.dto.KnowledgePointType;
+import com.wengu.knowledge.dto.StudyMaterial;
+import com.wengu.knowledge.entity.ExtractionDraft;
+import com.wengu.knowledge.entity.ExtractionDraftItem;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.entity.KpSource;
+import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
+import com.wengu.knowledge.mapper.ExtractionDraftMapper;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.knowledge.mapper.KpSourceMapper;
 import com.wengu.review.service.ReviewService;
+import com.wengu.source.dto.SourceQuestion;
+import com.wengu.source.service.SourceService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -22,21 +32,28 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 知识点：创建、关联材料，以及抽取去重、每日计划要用的查询。编辑、合并、暂停由 #25 添加。
+ * 知识点：创建、关联材料，以及抽取去重、每日计划、学习对话要用的查询。编辑、合并、暂停由 #25 添加。
  */
 @Service
 public class KnowledgePointService {
 
     private final KnowledgePointMapper knowledgePointMapper;
     private final KpSourceMapper kpSourceMapper;
+    private final ExtractionDraftItemMapper draftItemMapper;
+    private final ExtractionDraftMapper draftMapper;
     private final ReviewService reviewService;
+    private final SourceService sourceService;
     private final Clock clock;
 
     public KnowledgePointService(KnowledgePointMapper knowledgePointMapper, KpSourceMapper kpSourceMapper,
-                                 ReviewService reviewService, Clock clock) {
+                                 ExtractionDraftItemMapper draftItemMapper, ExtractionDraftMapper draftMapper,
+                                 ReviewService reviewService, SourceService sourceService, Clock clock) {
         this.knowledgePointMapper = knowledgePointMapper;
         this.kpSourceMapper = kpSourceMapper;
+        this.draftItemMapper = draftItemMapper;
+        this.draftMapper = draftMapper;
         this.reviewService = reviewService;
+        this.sourceService = sourceService;
         this.clock = clock;
     }
 
@@ -174,6 +191,47 @@ public class KnowledgePointService {
                 .stream()
                 .collect(Collectors.toMap(KnowledgePoint::getId,
                         kp -> new KnowledgePointSummary(kp.getId(), kp.getTitle(), kp.getType())));
+    }
+
+    /**
+     * 学习一个知识点时发给模型的材料：标题、类型、要点、来源面试题（#19）。
+     * 来源面试题按“知识点 → 草稿条目 → 草稿的材料”找到，题号来自条目的 source_question_ids。
+     * 暂停的知识点也能取：用户从知识库直接打开时照样可以学。
+     *
+     * @throws BusinessException 知识点不存在或不属于这个用户时为 NOT_FOUND
+     */
+    public StudyMaterial studyMaterial(long userId, long kpId) {
+        KnowledgePoint kp = knowledgePointMapper.selectById(kpId);
+        if (kp == null || kp.getUserId() != userId) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "知识点不存在");
+        }
+        return new StudyMaterial(kp.getId(), kp.getTitle(), kp.getType(), kp.getSummary(),
+                sourceQuestions(userId, kp.getDraftItemId()));
+    }
+
+    /** 草稿条目引用的来源题，带上追问；找不到时返回空列表，不影响学习。 */
+    private List<String> sourceQuestions(long userId, Long draftItemId) {
+        ExtractionDraftItem item = draftItemId == null ? null : draftItemMapper.selectById(draftItemId);
+        ExtractionDraft draft = item == null ? null : draftMapper.selectById(item.getDraftId());
+        if (draft == null || draft.getSourceId() == null) {
+            return List.of();
+        }
+        List<SourceQuestion> questions;
+        try {
+            questions = sourceService.getQuestions(userId, draft.getSourceId());
+        } catch (BusinessException e) {
+            // 材料被删掉了，或者没有题目
+            return List.of();
+        }
+        Set<Integer> ids = Arrays.stream(item.getSourceQuestionIds().split(","))
+                .map(String::strip)
+                .map(Integer::valueOf)
+                .collect(Collectors.toSet());
+        return questions.stream()
+                .filter(q -> ids.contains(q.id()))
+                .map(q -> q.followUps().isEmpty() ? q.text()
+                        : q.text() + "（追问：" + String.join("；", q.followUps()) + "）")
+                .toList();
     }
 
     /** 用户的知识点总数，暂停的也算。今天页据此判断是否显示空状态（#49）。 */
