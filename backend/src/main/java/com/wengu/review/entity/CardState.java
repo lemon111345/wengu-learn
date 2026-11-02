@@ -40,6 +40,11 @@ public class CardState {
         return cs;
     }
 
+    /** 转回 FSRS 的卡片，交给 Scheduler 计算。 */
+    public Card toCard() {
+        return new Card(state, step, stability, difficulty, due, lastReview);
+    }
+
     public Long getKpId() {
         return kpId;
     }

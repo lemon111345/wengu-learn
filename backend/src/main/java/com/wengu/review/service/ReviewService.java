@@ -1,24 +1,35 @@
 package com.wengu.review.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.wengu.common.exception.BusinessException;
+import com.wengu.common.result.ErrorCode;
 import com.wengu.review.dto.DueCard;
 import com.wengu.review.dto.ReviewRecord;
+import com.wengu.review.dto.ReviewResult;
 import com.wengu.review.entity.CardState;
 import com.wengu.review.entity.ReviewLog;
 import com.wengu.review.fsrs.Card;
+import com.wengu.review.fsrs.Rating;
+import com.wengu.review.fsrs.Scheduler;
 import com.wengu.review.mapper.CardStateMapper;
 import com.wengu.review.mapper.ReviewLogMapper;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Random;
 
 /**
  * 评分与调度。只通过 kp_id 工作，不知道知识点是什么、属于哪种类型（决策 002）。
  * <p>
- * 目前有初始化和每日计划要用的查询；评分后更新调度状态、写评分流水由 #20 添加。
+ * 初始化调度状态、评分与预览（#20），以及每日计划要用的查询。
  */
 @Service
 public class ReviewService {
@@ -48,6 +59,90 @@ public class ReviewService {
         for (Long kpId : kpIds) {
             cardStateMapper.insert(CardState.of(kpId, userId, card));
         }
+    }
+
+    /**
+     * 评分预览：四种评分分别算出下次复习的时间，不保存（#20）。
+     *
+     * @throws BusinessException 这个知识点没有调度状态（不存在、不属于该用户、或者是只收录的类型）时为 NOT_FOUND
+     */
+    public Map<Rating, Instant> preview(long userId, long kpId) {
+        Card card = card(userId, kpId).toCard();
+        Instant now = Instant.now(clock);
+        Map<Rating, Instant> dues = new EnumMap<>(Rating.class);
+        for (Rating rating : Rating.values()) {
+            dues.put(rating, schedulerFor(kpId, card).review(card, rating, now).due());
+        }
+        return dues;
+    }
+
+    /**
+     * 评分：用 FSRS 算出新的调度状态，更新 card_state，写一条评分流水（决策 002 第 5 条，#20）。
+     * 两步在一个事务里，要么都写入，要么都不写。
+     *
+     * @param sessionId 这次学习的会话；同一个会话只能评一次分
+     * @param ratingAi  AI 建议的评分，没有时为 null
+     * @throws BusinessException 知识点没有调度状态时为 NOT_FOUND；这个会话已经评过分时为 CONFLICT
+     */
+    @Transactional
+    public ReviewResult rate(long userId, long kpId, Long sessionId, Rating ratingUser, Rating ratingAi) {
+        if (sessionId != null && isRated(sessionId)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "这次学习已经评过分了");
+        }
+        Card before = card(userId, kpId).toCard();
+        Instant now = Instant.now(clock);
+        Card after = schedulerFor(kpId, before).review(before, ratingUser, now);
+        boolean firstReview = before.lastReview() == null;
+
+        // 不用 updateById：它默认跳过值为 null 的字段，而进入 REVIEW 后 step 要变成 null
+        cardStateMapper.update(new LambdaUpdateWrapper<CardState>()
+                .eq(CardState::getKpId, kpId)
+                .set(CardState::getState, after.state())
+                .set(CardState::getStep, after.step())
+                .set(CardState::getStability, after.stability())
+                .set(CardState::getDifficulty, after.difficulty())
+                .set(CardState::getDue, after.due())
+                .set(CardState::getLastReview, after.lastReview()));
+        ReviewLog log = new ReviewLog();
+        log.setUserId(userId);
+        log.setKpId(kpId);
+        log.setSessionId(sessionId);
+        log.setRatingUser(ratingUser);
+        log.setRatingAi(ratingAi);
+        log.setStateBefore(before.state());
+        log.setFirstReview(firstReview);
+        log.setDueAfter(after.due());
+        log.setReviewedAt(now);
+        try {
+            reviewLogMapper.insert(log);
+        } catch (DuplicateKeyException e) {
+            // 两个评分请求同时到达，都通过了上面的检查，由 session_id 的唯一索引拦下后到的那个；事务回滚
+            throw new BusinessException(ErrorCode.CONFLICT, "这次学习已经评过分了");
+        }
+        return new ReviewResult(ratingUser, after.due(), firstReview);
+    }
+
+    /** 这个会话是否已经评过分 */
+    public boolean isRated(long sessionId) {
+        return reviewLogMapper.exists(new LambdaQueryWrapper<ReviewLog>().eq(ReviewLog::getSessionId, sessionId));
+    }
+
+    private CardState card(long userId, long kpId) {
+        CardState card = cardStateMapper.selectById(kpId);
+        if (card == null || card.getUserId() != userId) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "这个知识点没有复习安排");
+        }
+        return card;
+    }
+
+    /**
+     * fuzz（给间隔加随机扰动）的随机数由“这张卡 + 上次复习时间”决定（决策 026）：
+     * 同一次评分，预览和实际评分算出的日期一样，前端可以先按预览显示“X月X日再见”；
+     * 每次复习的上次复习时间不同，扰动照样分散，同一天学的卡不会总在同一天到期。
+     */
+    private static Scheduler schedulerFor(long kpId, Card card) {
+        Random random = new Random(Objects.hash(kpId, card.lastReview()));
+        return Scheduler.projectDefault(random::nextDouble);
     }
 
     /**
