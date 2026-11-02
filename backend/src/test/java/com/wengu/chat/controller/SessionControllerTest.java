@@ -8,6 +8,7 @@ import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.llm.service.LlmService;
+import com.wengu.review.service.ReviewService;
 import com.wengu.user.dto.RegisterRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static com.wengu.TestCsrf.csrfToken;
@@ -59,6 +61,9 @@ class SessionControllerTest {
     @Autowired
     private KnowledgePointMapper knowledgePointMapper;
 
+    @Autowired
+    private ReviewService reviewService;
+
     @MockitoBean
     private LlmService llmService;
 
@@ -87,6 +92,7 @@ class SessionControllerTest {
         kp.setUpdatedAt(Instant.now());
         knowledgePointMapper.insert(kp);
         kpId = kp.getId();
+        reviewService.initCards(userId, List.of(kpId));
     }
 
     private long startSession() throws Exception {
@@ -136,6 +142,17 @@ class SessionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.type").value("FOLLOW_UP"))
                 .andExpect(jsonPath("$.data.parentSessionId").value(sessionId));
+
+        // 评分预览和确认评分
+        mockMvc.perform(get("/api/sessions/" + sessionId + "/rating-preview").session(login))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(4))
+                .andExpect(jsonPath("$.data[2].rating").value("GOOD"));
+        mockMvc.perform(post("/api/sessions/" + sessionId + "/rating").session(login).with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"rating\":\"GOOD\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rating").value("GOOD"))
+                .andExpect(jsonPath("$.data.days").isNumber());
     }
 
     @Test

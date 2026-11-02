@@ -1,10 +1,13 @@
 package com.wengu.chat.controller;
 
+import com.wengu.chat.dto.RateRequest;
+import com.wengu.chat.dto.RatingOption;
 import com.wengu.chat.dto.RatingSuggestionView;
 import com.wengu.chat.dto.SendMessageRequest;
 import com.wengu.chat.dto.SessionView;
 import com.wengu.chat.dto.StartSessionRequest;
 import com.wengu.chat.service.ChatService;
+import com.wengu.chat.service.RatingService;
 import com.wengu.chat.service.RatingSuggestionService;
 import com.wengu.chat.service.StudySessionService;
 import com.wengu.common.context.CurrentUser;
@@ -18,6 +21,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
+import java.util.List;
+
 /** 学习会话（决策 025）。 */
 @RestController
 @RequestMapping("/api/sessions")
@@ -26,13 +31,16 @@ public class SessionController {
     private final StudySessionService sessionService;
     private final ChatService chatService;
     private final RatingSuggestionService ratingSuggestionService;
+    private final RatingService ratingService;
     private final CurrentUser currentUser;
 
     public SessionController(StudySessionService sessionService, ChatService chatService,
-                             RatingSuggestionService ratingSuggestionService, CurrentUser currentUser) {
+                             RatingSuggestionService ratingSuggestionService, RatingService ratingService,
+                             CurrentUser currentUser) {
         this.sessionService = sessionService;
         this.chatService = chatService;
         this.ratingSuggestionService = ratingSuggestionService;
+        this.ratingService = ratingService;
         this.currentUser = currentUser;
     }
 
@@ -58,6 +66,18 @@ public class SessionController {
     @PostMapping("/{id}/rating-suggestion")
     public Result<RatingSuggestionView> ratingSuggestion(@PathVariable long id) {
         return Result.ok(ratingSuggestionService.suggest(currentUser.id(), id));
+    }
+
+    /** 评分预览：四种评分分别对应的下次复习日期（学习日和距今天几天），不保存。 */
+    @GetMapping("/{id}/rating-preview")
+    public Result<List<RatingOption>> ratingPreview(@PathVariable long id) {
+        return Result.ok(ratingService.preview(currentUser.id(), id));
+    }
+
+    /** 确认评分：更新调度状态、写评分流水，返回下次复习日期。一次学习只能评一次。 */
+    @PostMapping("/{id}/rating")
+    public Result<RatingOption> rate(@PathVariable long id, @RequestBody RateRequest request) {
+        return Result.ok(ratingService.rate(currentUser.id(), id, request));
     }
 
     /** 会话和全部消息，刷新后恢复用。 */
