@@ -98,7 +98,7 @@ frontend/src
 ├── components/     跨页面的组件，如 PageHeader、FormField
 ├── shortcuts/      useShortcut、快捷键列表、快捷键弹窗
 ├── utils/          日期、类型和评分的名称、老师回复的格式渲染（markdown.ts）
-└── views/          各页面；auth/ 下是注册与登录，today/ 是今天页，study/ 是学习、收尾与评分、接着问
+└── views/          各页面；auth/ 下是注册与登录，today/ 是今天页，study/ 是学习、收尾与评分、接着问，import/ 是导入资料和草稿（抽取进度、确认知识点）
 ```
 
 约定：
@@ -108,6 +108,7 @@ frontend/src
 - 当前用户从 `auth/session.ts` 读取，不另建状态管理
 - 路由默认要求登录；`meta.guest` 只给没登录的人看，`meta.public` 谁都能看
 - 流式回复用 `api/sse.ts`（fetch 发 POST、自己读流），对话逻辑用 `views/study/useChat.ts`，每次回复结束都重新取会话，以后端为准；老师的回复用 `utils/markdown.ts` 渲染，先整体转义再识别格式（决策 027）
+- 导入的第 1、2 步只在 `/import` 页面内存中；开始抽取后换成 `/drafts/:id`，按草稿状态显示进度、确认或结果摘要，抽取中每 3 秒取一次草稿（决策 028）
 - 快捷键用 `useShortcut` 注册，单键快捷键在输入框和弹窗中自动不生效；新快捷键同时加进 `shortcuts/list.ts`
 - 开发时 Vite 把 `/api` 转发给后端（`WENGU_API_TARGET`，默认 `http://localhost:8080`），页面和接口同源，后端不开 CORS
 
@@ -256,7 +257,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 接口 | 作用 | 请求 | 返回 data | 说明 |
 | --- | --- | --- | --- | --- |
 | `POST /api/sources` | 导入面试题并切分（#15、#16） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 同步调用模型，只有题目时几秒到几十秒，10 万字带答案的资料最长约 95 秒；原文不超过 100000 字、切分后不超过 200 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`。见决策 011 |
-| `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, status, batches: [{no, status, questionIds}], items: [{id, order, title, summary, type, sourceQuestionIds, decision}], covered: [{questionId, titles}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；covered 是被已有知识点或同一草稿中其他批次覆盖的题（决策 014）；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。见决策 012、013 |
+| `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, sourceName, status, batches: [{no, status, questionIds}], items: [{id, order, title, summary, type, sourceQuestionIds, decision}], covered: [{questionId, titles}], uncovered: [{questionId, text}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；covered 是被已有知识点或同一草稿中其他批次覆盖的题（决策 014）；uncovered 是成功批次中既没有条目、也不在 covered 中的题及原文，最后一次尝试只漏了题时这一批照样成功（决策 028）；sourceName 是资料名称；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。见决策 012、013 |
 | `GET /api/drafts` | 草稿列表（#48） | — | `[{id, sourceId, sourceName, status, itemCount, createdAt}]` | 未确认的全部返回，已确认的只返回最近 10 份，新的在前，不分页；status 和详情的算法相同；itemCount 是成功批次中的条目数。见决策 024 |
 | `GET /api/drafts/{id}` | 查看草稿和抽取进度（#15、#16） | — | 同上 | 不存在或不属于当前用户 404 |
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中或已确认 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
@@ -301,7 +302,6 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 需要的接口 | 内容 | 页面 |
 | --- | --- | --- |
 | 草稿列表补充 | 候选知识点的草稿（#31） | 今天、导入资料 |
-| 草稿详情补充 | 没拆出知识点的题及原文：各批次存着发给模型的题目，减去条目引用的和 covered 中的 | 确认知识点 |
 | 模型状态 | 模型名、最近一次调用的结果和时间；不返回服务地址和 Key，不为此真实调用模型 | 设置、账户区的红点 |
 | 知识库列表 | 按掌握程度和类型筛选（同时生效）；各掌握程度的数量随类型筛选变化；排序：默认学习顺序，可按掌握程度、下次复习 | 知识库 |
 | 知识点详情 | 掌握程度、下次复习、要点是否改过、学习记录、来源 | 知识库 |
