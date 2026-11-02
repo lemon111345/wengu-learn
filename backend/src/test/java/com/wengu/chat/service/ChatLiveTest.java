@@ -2,21 +2,29 @@ package com.wengu.chat.service;
 
 import com.wengu.TestcontainersConfiguration;
 import com.wengu.chat.dto.ChatEvents;
+import com.wengu.chat.dto.RateRequest;
+import com.wengu.chat.dto.RatingOption;
+import com.wengu.chat.dto.RatingSuggestionView;
 import com.wengu.chat.dto.SendMessageRequest;
 import com.wengu.chat.dto.StartSessionRequest;
 import com.wengu.chat.entity.Marker;
 import com.wengu.chat.mapper.MessageMapper;
+import com.wengu.chat.mapper.RatingSuggestionMapper;
 import com.wengu.chat.mapper.StudySessionMapper;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.review.mapper.CardStateMapper;
+import com.wengu.review.mapper.ReviewLogMapper;
+import com.wengu.review.service.ReviewService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.jdbc.core.JdbcTemplate;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
@@ -26,7 +34,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 实连测试：用真实模型走一遍学习对话和接着问，检查学习对话 prompt v3 的两个标记模型是否照做，
+ * 实连测试：用真实模型走一遍学习对话、评分建议和接着问，检查学习对话 prompt v3 的两个标记模型是否照做，
  * 并打印接着问的回答供人工查看（是否只回答、不反问）。会产生少量费用，默认跳过：
  * <pre>
  * .\mvnw.cmd test -Dtest=ChatLiveTest -Dllm.live=true
@@ -56,6 +64,27 @@ class ChatLiveTest {
     @Autowired
     private KnowledgePointMapper knowledgePointMapper;
 
+    @Autowired
+    private RatingSuggestionService ratingSuggestionService;
+
+    @Autowired
+    private RatingService ratingService;
+
+    @Autowired
+    private ReviewService reviewService;
+
+    @Autowired
+    private RatingSuggestionMapper suggestionMapper;
+
+    @Autowired
+    private ReviewLogMapper reviewLogMapper;
+
+    @Autowired
+    private CardStateMapper cardStateMapper;
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
     /** 推送完的文字和最后的 done 事件；出错时 done 为 null */
     private record Reply(String text, ChatEvents.Done done) {
     }
@@ -78,6 +107,12 @@ class ChatLiveTest {
 
     @Test
     void 开场然后跳过讲解完整作答后收尾再接着问() {
+        // 空库上 V7 删掉了默认用户和它的设置，评分换算学习日要用设置
+        jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
+                + " VALUES (1, 3, 'Asia/Shanghai', 4)");
+        suggestionMapper.delete(null);
+        reviewLogMapper.delete(null);
+        cardStateMapper.delete(null);
         messageMapper.delete(null);
         sessionMapper.delete(null);
         KnowledgePoint kp = new KnowledgePoint();
@@ -90,6 +125,7 @@ class ChatLiveTest {
         kp.setCreatedAt(Instant.now());
         kp.setUpdatedAt(Instant.now());
         knowledgePointMapper.insert(kp);
+        reviewService.initCards(USER_ID, List.of(kp.getId()));
         long sessionId = sessionService.start(USER_ID, new StartSessionRequest(kp.getId())).id();
 
         Reply opening = run("开场", chatService.reply(USER_ID, sessionId));
@@ -111,6 +147,16 @@ class ChatLiveTest {
         assertThat(end.done().marker()).isEqualTo(Marker.END);
         assertThat(end.done().ended()).isTrue();
         assertThat(sessionService.get(USER_ID, sessionId).skippedExplanation()).isTrue();
+
+        // AI 评分建议，然后按建议确认评分
+        RatingSuggestionView suggestion = ratingSuggestionService.suggest(USER_ID, sessionId);
+        System.out.println("[评分建议] " + suggestion.rating() + "\n依据：" + suggestion.analysis()
+                + "\n没掌握的：" + suggestion.weakPoints() + "\n超出范围的：" + suggestion.outOfScopeGaps() + "\n");
+        assertThat(suggestion.rating()).isNotNull();
+        assertThat(suggestion.analysis()).isNotBlank();
+        RatingOption rated = ratingService.rate(USER_ID, sessionId, new RateRequest(suggestion.rating()));
+        System.out.println("[评分] " + rated + "\n");
+        assertThat(rated.days()).isPositive();
 
         // 接着问：老师只回答，不输出标记，会话不结束。是否反问只能人工看打印的内容
         long followUpId = sessionService.startFollowUp(USER_ID, sessionId).id();

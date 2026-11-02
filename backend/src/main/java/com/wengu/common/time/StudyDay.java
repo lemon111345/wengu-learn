@@ -1,4 +1,4 @@
-package com.wengu.plan.service;
+package com.wengu.common.time;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -8,7 +8,7 @@ import java.time.ZonedDateTime;
 
 /**
  * 用户的“今天”（学习日）：从用户时区的 day_start_hour 开始，到第二天的 day_start_hour 为止。
- * 纯计算，不依赖 Spring，时间一律用 UTC 的 Instant 表示（CLAUDE.md）。
+ * 纯计算，不依赖 Spring，时间一律用 UTC 的 Instant 表示（CLAUDE.md）。每日计划和评分预览（#20）都要用，所以放在 common。
  * <p>
  * 例如时区 Asia/Shanghai、day_start_hour 为 4：北京时间 10 月 30 日 03:59 仍属于 10 月 29 日这个学习日，
  * 04:00 起才是 10 月 30 日。熬夜学到凌晨，学的还算前一天。

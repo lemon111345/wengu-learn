@@ -9,7 +9,7 @@ import com.wengu.review.fsrs.State;
 import java.time.Instant;
 
 /**
- * 一次评分的流水，对应 review_log 表（V1）。只增不改，供统计和以后优化 FSRS 参数。写入由 #20 添加。
+ * 一次评分的流水，对应 review_log 表（V1、V10）。只增不改，供统计和以后优化 FSRS 参数。
  */
 public class ReviewLog {
 
@@ -27,6 +27,8 @@ public class ReviewLog {
     /** 是否为该知识点的第一次学习。新卡的 state 也是 LEARNING，不能用 stateBefore 判断（决策 003） */
     @TableField("is_first_review")
     private Boolean firstReview;
+    /** 评分后的下次到期时间（决策 020）；V10 之前的记录为空 */
+    private Instant dueAfter;
     private Instant reviewedAt;
 
     public Long getId() {
@@ -91,6 +93,14 @@ public class ReviewLog {
 
     public void setFirstReview(Boolean firstReview) {
         this.firstReview = firstReview;
+    }
+
+    public Instant getDueAfter() {
+        return dueAfter;
+    }
+
+    public void setDueAfter(Instant dueAfter) {
+        this.dueAfter = dueAfter;
     }
 
     public Instant getReviewedAt() {

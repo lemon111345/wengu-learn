@@ -15,6 +15,7 @@ import com.wengu.plan.dto.CompletedItem;
 import com.wengu.plan.dto.PlanItem;
 import com.wengu.plan.dto.TodayPlan;
 import com.wengu.plan.dto.UpcomingDay;
+import com.wengu.plan.mapper.StudyDayCompletionMapper;
 import com.wengu.review.entity.CardState;
 import com.wengu.review.entity.ReviewLog;
 import com.wengu.review.fsrs.Card;
@@ -86,6 +87,9 @@ class PlanServiceTest {
     private MessageMapper messageMapper;
 
     @Autowired
+    private StudyDayCompletionMapper completionMapper;
+
+    @Autowired
     private JdbcTemplate jdbc;
 
     @BeforeEach
@@ -95,6 +99,7 @@ class PlanServiceTest {
         jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
                 + " VALUES (1, 3, 'Asia/Shanghai', 4)");
         settingsService.update(1, new UpdateSettingsRequest("Asia/Shanghai", 4, 3));
+        completionMapper.delete(null);
         messageMapper.delete(null);
         sessionMapper.delete(null);
         reviewLogMapper.delete(null);
@@ -456,5 +461,39 @@ class PlanServiceTest {
 
         // 750 秒，不足一分钟的舍去
         assertThat(planService.today(1).studiedMinutesToday()).isEqualTo(12);
+    }
+
+    @Test
+    void 学完今天的全部任务后记一条当天完成() {
+        KnowledgePoint review = reviewedKp("到期复习", 1, NOW);
+        KnowledgePoint fresh = newKp("新知识", 2);
+        // 还有没学完的：不记
+        planService.today(1);
+        assertThat(completionMapper.selectCount(null)).isZero();
+
+        firstReview(fresh, NOW);
+        log(review, NOW, Rating.GOOD, false);
+        cardStateMapper.updateById(CardState.of(review.getId(), 1,
+                new Card(State.REVIEW, null, 8.0, 5.0, NOW.plus(Duration.ofDays(8)), NOW)));
+        planService.today(1);
+        // 再打开一次也只有一条
+        planService.today(1);
+
+        assertThat(completionMapper.selectList(null)).singleElement().satisfies(c -> {
+            assertThat(c.getUserId()).isEqualTo(1);
+            assertThat(c.getStudyDate()).isEqualTo(LocalDate.of(2026, 10, 29));
+            assertThat(c.getCompletedAt()).isEqualTo(NOW);
+        });
+    }
+
+    @Test
+    void 今天本来就没有任务时不记当天完成() {
+        reviewedKp("很多天后才到期", 1, NOW.plus(Duration.ofDays(20)));
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.reviews()).isEmpty();
+        assertThat(plan.newItems()).isEmpty();
+        assertThat(completionMapper.selectCount(null)).isZero();
     }
 }

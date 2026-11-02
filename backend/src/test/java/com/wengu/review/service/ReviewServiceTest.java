@@ -1,10 +1,14 @@
 package com.wengu.review.service;
 
 import com.wengu.TestcontainersConfiguration;
+import com.wengu.common.exception.BusinessException;
+import com.wengu.common.result.ErrorCode;
+import com.wengu.review.dto.ReviewResult;
 import com.wengu.review.entity.CardState;
 import com.wengu.review.entity.ReviewLog;
 import com.wengu.review.fsrs.Card;
 import com.wengu.review.fsrs.Rating;
+import com.wengu.review.fsrs.Scheduler;
 import com.wengu.review.fsrs.State;
 import com.wengu.review.mapper.CardStateMapper;
 import com.wengu.review.mapper.ReviewLogMapper;
@@ -21,6 +25,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -125,5 +132,89 @@ class ReviewServiceTest {
                 .isInstanceOf(DuplicateKeyException.class);
         // 单独调用时自己开事务：102 也没有写进去
         assertThat(cardStateMapper.selectById(102L)).isNull();
+    }
+
+    /** 测试中直接调用 Scheduler 的结果：随机数的种子和 ReviewService 一样，由知识点 id 和上次复习时间决定（决策 026） */
+    private static Card expected(long kpId, Card before, Rating rating) {
+        Random random = new Random(Objects.hash(kpId, before.lastReview()));
+        return Scheduler.projectDefault(random::nextDouble).review(before, rating, NOW);
+    }
+
+    @Test
+    void 新卡第一次评分时更新调度状态并写流水() {
+        reviewService.initCards(1, List.of(401L));
+        Card before = cardStateMapper.selectById(401L).toCard();
+
+        ReviewResult result = reviewService.rate(1, 401L, 9001L, Rating.GOOD, Rating.HARD);
+
+        Card after = cardStateMapper.selectById(401L).toCard();
+        // 调度结果和直接调用 Scheduler 一致
+        assertThat(after).isEqualTo(expected(401L, before, Rating.GOOD));
+        assertThat(result).isEqualTo(new ReviewResult(Rating.GOOD, after.due(), true));
+        ReviewLog log = reviewLogMapper.selectOne(null);
+        assertThat(log.getSessionId()).isEqualTo(9001L);
+        assertThat(log.getRatingUser()).isEqualTo(Rating.GOOD);
+        assertThat(log.getRatingAi()).isEqualTo(Rating.HARD);
+        assertThat(log.getStateBefore()).isEqualTo(State.LEARNING);
+        assertThat(log.getFirstReview()).isTrue();
+        assertThat(log.getDueAfter()).isEqualTo(after.due());
+        assertThat(log.getReviewedAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    void 复习时不是第一次学习() {
+        Card reviewed = new Card(State.REVIEW, null, 5.0, 5.0, NOW, NOW.minus(Duration.ofDays(5)));
+        cardStateMapper.insert(CardState.of(402L, 1, reviewed));
+
+        ReviewResult result = reviewService.rate(1, 402L, 9002L, Rating.AGAIN, null);
+
+        assertThat(result.firstReview()).isFalse();
+        assertThat(cardStateMapper.selectById(402L).toCard()).isEqualTo(expected(402L, reviewed, Rating.AGAIN));
+        ReviewLog log = reviewLogMapper.selectOne(null);
+        assertThat(log.getStateBefore()).isEqualTo(State.REVIEW);
+        assertThat(log.getRatingAi()).isNull();
+    }
+
+    @Test
+    void 预览四档评分且和实际评分的结果一致() {
+        reviewService.initCards(1, List.of(501L, 502L, 503L, 504L));
+        Map<Rating, Instant> preview = reviewService.preview(1, 501L);
+        assertThat(preview).containsOnlyKeys(Rating.values());
+        // 评分越高，间隔越长
+        assertThat(preview.get(Rating.AGAIN)).isBefore(preview.get(Rating.EASY));
+
+        // 每张卡各取一种评分，实际结果和它自己的预览一致；预览不保存
+        long kpId = 501L;
+        for (Rating rating : Rating.values()) {
+            Instant expectedDue = reviewService.preview(1, kpId).get(rating);
+            assertThat(cardStateMapper.selectById(kpId).getLastReview()).isNull();
+            assertThat(reviewService.rate(1, kpId, 9100L + kpId, rating, null).due()).isEqualTo(expectedDue);
+            kpId++;
+        }
+    }
+
+    @Test
+    void 同一个会话不能评两次分() {
+        reviewService.initCards(1, List.of(601L));
+        reviewService.rate(1, 601L, 9003L, Rating.GOOD, null);
+        CardState afterFirst = cardStateMapper.selectById(601L);
+
+        assertThatThrownBy(() -> reviewService.rate(1, 601L, 9003L, Rating.EASY, null))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.CONFLICT));
+        assertThat(reviewService.isRated(9003L)).isTrue();
+        assertThat(cardStateMapper.selectById(601L).getDue()).isEqualTo(afterFirst.getDue());
+        assertThat(reviewLogMapper.selectCount(null)).isEqualTo(1);
+    }
+
+    @Test
+    void 其他用户的知识点不能评分也不能预览() {
+        reviewService.initCards(2, List.of(701L));
+
+        assertThatThrownBy(() -> reviewService.rate(1, 701L, 9004L, Rating.GOOD, null))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+        assertThatThrownBy(() -> reviewService.preview(1, 701L)).isInstanceOf(BusinessException.class);
+        assertThat(reviewLogMapper.selectCount(null)).isZero();
     }
 }

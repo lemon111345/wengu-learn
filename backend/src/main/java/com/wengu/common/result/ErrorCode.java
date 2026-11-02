@@ -27,7 +27,9 @@ public enum ErrorCode {
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "服务器内部错误"),
 
     /** 模型的切分结果重试后仍不可用。502：上游（模型）返回了无效的结果 */
-    QUESTION_SPLIT_FAILED(HttpStatus.BAD_GATEWAY, "题目识别失败，可以重试，或检查原文格式");
+    QUESTION_SPLIT_FAILED(HttpStatus.BAD_GATEWAY, "题目识别失败，可以重试，或检查原文格式"),
+    /** AI 评分建议没有生成出来（模型出错、或结果重试后仍不可用）。评分不依赖它，用户可以直接评分 */
+    RATING_SUGGESTION_FAILED(HttpStatus.BAD_GATEWAY, "AI 评分建议没有生成出来，可以重试，也可以直接评分");
 
     private final HttpStatus httpStatus;
     private final String message;

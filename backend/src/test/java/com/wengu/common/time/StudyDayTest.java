@@ -1,4 +1,4 @@
-package com.wengu.plan.service;
+package com.wengu.common.time;
 
 import org.junit.jupiter.api.Test;
 

@@ -95,6 +95,13 @@ final class LearningChatPrompt {
         return turns;
     }
 
+    /** 对话记录的文字版：【老师】【学生】分段，标记已经去掉。接着问的上下文、评分建议的输入都用它，格式和 #14 实验一致 */
+    static String transcript(List<Message> messages) {
+        return messages.stream()
+                .map(m -> (m.getRole() == MessageRole.ASSISTANT ? "【老师】" : "【学生】") + "\n" + m.getContent().strip())
+                .collect(Collectors.joining("\n\n"));
+    }
+
     /** 一条存库的消息还原成模型当时看到的样子：学生消息带上附加的提示，老师的回复补回标记。接着问也用它。 */
     static ChatTurn turn(Message m) {
         if (m.getRole() == MessageRole.USER) {

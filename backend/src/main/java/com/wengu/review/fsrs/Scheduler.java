@@ -100,8 +100,12 @@ public final class Scheduler {
      * 随机数用 ThreadLocalRandom：每个线程各用各的，实例可以安全地在多个请求间共享。
      */
     public static Scheduler projectDefault() {
-        return new Scheduler(DEFAULT_PARAMETERS, 0.9, List.of(), List.of(), 36500,
-                true, () -> ThreadLocalRandom.current().nextDouble());
+        return projectDefault(() -> ThreadLocalRandom.current().nextDouble());
+    }
+
+    /** 本项目的默认配置，fuzz 用给定的随机数来源。评分时用它让预览和实际结果一致（决策 026）。 */
+    public static Scheduler projectDefault(DoubleSupplier randomSource) {
+        return new Scheduler(DEFAULT_PARAMETERS, 0.9, List.of(), List.of(), 36500, true, randomSource);
     }
 
     /** 返回默认参数的副本。 */

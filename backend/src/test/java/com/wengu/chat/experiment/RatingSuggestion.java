@@ -7,7 +7,8 @@ import java.util.List;
  * <p>
  * Spring AI 生成的 JSON Schema 按字段名字母顺序排列，模型也按这个顺序输出。判断依据命名为 analysis，
  * 排在 rating 前面，模型先写依据、再给结论（v1 叫 reason，排在 rating 后面，依据成了事后的解释）。
- * 组件也按这个顺序声明，和模型的输出顺序一致。实验结束后（#20）再移到 chat 的正式代码中。
+ * 组件也按这个顺序声明，和模型的输出顺序一致。正式代码中的版本是 chat.dto.RatingSuggestionResult（#20），
+ * 评分改用 FSRS 的 Rating；这里保留原样，供离线重评使用。
  *
  * @param analysis       判断依据
  * @param outOfScopeGaps 学生还不会、但超出要点范围的内容，每条是一个可以单独学习的知识点标题，学完后作为候选知识点；没有时为空列表
