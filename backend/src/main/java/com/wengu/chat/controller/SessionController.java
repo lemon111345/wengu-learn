@@ -37,6 +37,15 @@ public class SessionController {
         return Result.ok(sessionService.start(currentUser.id(), request));
     }
 
+    /**
+     * 进入接着问：id 是已经结束的学习会话，返回它的接着问会话，没有就新建。
+     * 之后的提问、重试、读取都用会话的通用接口，学生先问，没有开场白。
+     */
+    @PostMapping("/{id}/follow-up")
+    public Result<SessionView> followUp(@PathVariable long id) {
+        return Result.ok(sessionService.startFollowUp(currentUser.id(), id));
+    }
+
     /** 会话和全部消息，刷新后恢复用。 */
     @GetMapping("/{id}")
     public Result<SessionView> get(@PathVariable long id) {

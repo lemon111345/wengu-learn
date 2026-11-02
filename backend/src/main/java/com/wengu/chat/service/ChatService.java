@@ -6,6 +6,7 @@ import com.wengu.chat.dto.SendMessageRequest;
 import com.wengu.chat.entity.Marker;
 import com.wengu.chat.entity.Message;
 import com.wengu.chat.entity.MessageRole;
+import com.wengu.chat.entity.SessionType;
 import com.wengu.chat.entity.StudySession;
 import com.wengu.chat.mapper.MessageMapper;
 import com.wengu.chat.mapper.StudySessionMapper;
@@ -13,6 +14,7 @@ import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.knowledge.service.KnowledgePointService;
+import com.wengu.llm.dto.ChatTurn;
 import com.wengu.llm.service.LlmService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,7 +56,8 @@ public class ChatService {
     private final LlmService llmService;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
-    private final String systemPrompt = LearningChatPrompt.system();
+    private final String studyPrompt = LearningChatPrompt.system();
+    private final String followUpPrompt = FollowUpPrompt.system();
 
     public ChatService(StudySessionService sessions, StudySessionMapper sessionMapper, MessageMapper messageMapper,
                        KnowledgePointService knowledgePointService, LlmService llmService,
@@ -79,6 +82,10 @@ public class ChatService {
         if (!messages.isEmpty() && messages.getLast().getRole() == MessageRole.ASSISTANT) {
             throw new BusinessException(ErrorCode.CONFLICT, "老师已经回复了，等你回答");
         }
+        // 接着问没有开场白，学生先问
+        if (messages.isEmpty() && session.getType() == SessionType.FOLLOW_UP) {
+            throw new BusinessException(ErrorCode.CONFLICT, "先提一个问题");
+        }
         begin(sessionId);
         try {
             return stream(session, messages);
@@ -88,7 +95,10 @@ public class ChatService {
         }
     }
 
-    /** 学生回答，老师流式回复。第 7、8 次回答附上轮数提示（决策 008 第 3 条）。 */
+    /**
+     * 学生回答（接着问时是提问），老师流式回复。按会话类型附上提示：学习对话第 7、8 次回答附轮数提示
+     * （决策 008 第 3 条），接着问第 26 次提问时提醒可以先回去。
+     */
     public Flux<ServerSentEvent<Object>> send(long userId, long sessionId, SendMessageRequest request) {
         String content = request == null || request.content() == null ? "" : request.content().strip();
         if (content.isEmpty()) {
@@ -99,20 +109,25 @@ public class ChatService {
         }
         StudySession session = openSession(userId, sessionId);
         List<Message> messages = sessions.messages(sessionId);
-        requireStudentTurn(messages);
+        requireStudentTurn(session, messages);
         int answers = (int) messages.stream().filter(m -> m.getRole() == MessageRole.USER).count() + 1;
-        return answer(session, messages, content, LearningChatPrompt.turnNote(answers));
+        String note = session.getType() == SessionType.FOLLOW_UP ? FollowUpPrompt.turnNote(answers)
+                : LearningChatPrompt.turnNote(answers);
+        return answer(session, messages, content, note);
     }
 
     /**
      * “这个我会，直接完整作答”：跳过讲解，直接进入完整作答，照常评分（决策 018）。
      *
-     * @throws BusinessException 已经在完整作答时为 CONFLICT
+     * @throws BusinessException 不是学习对话、或者已经在完整作答时为 CONFLICT
      */
     public Flux<ServerSentEvent<Object>> skipExplanation(long userId, long sessionId) {
         StudySession session = openSession(userId, sessionId);
+        if (session.getType() != SessionType.STUDY) {
+            throw new BusinessException(ErrorCode.CONFLICT, "接着问不需要跳过讲解");
+        }
         List<Message> messages = sessions.messages(sessionId);
-        requireStudentTurn(messages);
+        requireStudentTurn(session, messages);
         if (messages.getLast().getMarker() == Marker.RESTATE) {
             throw new BusinessException(ErrorCode.CONFLICT, "已经在完整作答了");
         }
@@ -126,14 +141,19 @@ public class ChatService {
     private StudySession openSession(long userId, long sessionId) {
         StudySession session = sessions.find(userId, sessionId);
         if (session.getEndedAt() != null) {
-            throw new BusinessException(ErrorCode.CONFLICT, "这次学习已经结束");
+            throw new BusinessException(ErrorCode.CONFLICT, session.getType() == SessionType.FOLLOW_UP
+                    ? "这次聊得比较多了，可以先回去，把聊到的新知识加入复习，明天接着学"
+                    : "这次学习已经结束");
         }
         return session;
     }
 
-    /** 轮到学生回答：老师已经开口，并且最后一条是老师的回复。 */
-    private static void requireStudentTurn(List<Message> messages) {
+    /** 轮到学生说话：最后一条是老师的回复。学习对话要等老师先开口，接着问由学生先问。 */
+    private static void requireStudentTurn(StudySession session, List<Message> messages) {
         if (messages.isEmpty()) {
+            if (session.getType() == SessionType.FOLLOW_UP) {
+                return;
+            }
             throw new BusinessException(ErrorCode.CONFLICT, "老师还没有开始");
         }
         if (messages.getLast().getRole() != MessageRole.ASSISTANT) {
@@ -173,23 +193,44 @@ public class ChatService {
         }
     }
 
+    /**
+     * 不同会话类型的对话规则：system prompt、发给模型的历史、随机性、回答（提问）的上限。
+     *
+     * @param endOnMarker 模型输出【学习结束】时是否结束会话；接着问没有这个标记
+     */
+    private record Rules(String system, List<ChatTurn> history, double temperature, int maxAnswers,
+                         boolean endOnMarker) {
+    }
+
+    private Rules rules(StudySession session, List<Message> messages) {
+        StudyMaterial material = knowledgePointService.studyMaterial(session.getUserId(), session.getKpId());
+        return switch (session.getType()) {
+            case STUDY -> new Rules(studyPrompt, LearningChatPrompt.history(material, messages),
+                    LearningChatPrompt.TEMPERATURE, LearningChatPrompt.MAX_ANSWERS, true);
+            case FOLLOW_UP -> new Rules(followUpPrompt,
+                    FollowUpPrompt.history(material, sessions.messages(session.getParentSessionId()), messages),
+                    FollowUpPrompt.TEMPERATURE, FollowUpPrompt.MAX_QUESTIONS, false);
+            case QUESTION -> throw new BusinessException(ErrorCode.BAD_REQUEST, "从一个问题开始还没有实现");
+        };
+    }
+
     /** 调用模型生成回复：推给前端的是去掉标记的文字，生成完存库并推送 done；出错推送 error。 */
     private Flux<ServerSentEvent<Object>> stream(StudySession session, List<Message> messages) {
         long sessionId = session.getId();
-        StudyMaterial material = knowledgePointService.studyMaterial(session.getUserId(), session.getKpId());
+        Rules rules = rules(session, messages);
         int answers = (int) messages.stream().filter(m -> m.getRole() == MessageRole.USER).count();
         MarkerFilter filter = new MarkerFilter();
 
         // cache：模型只调用一次，保存和推送两个订阅共用；标记的过滤在 cache 之前，每段只处理一次
-        Flux<String> visible = llmService.stream(systemPrompt, LearningChatPrompt.history(material, messages),
-                        LearningChatPrompt.TEMPERATURE)
+        Flux<String> visible = llmService.stream(rules.system(), rules.history(), rules.temperature())
                 .map(filter::push)
                 .concatWith(Mono.fromCallable(filter::finish))
                 .filter(text -> !text.isEmpty())
                 .cache();
         // 存库是阻塞的 JDBC 调用，不能在模型客户端的网络线程上做
         Mono<Saved> saved = visible
-                .then(Mono.fromCallable(() -> saveReply(session, filter, answers)).subscribeOn(Schedulers.boundedElastic()))
+                .then(Mono.fromCallable(() -> saveReply(session, filter, rules, answers))
+                        .subscribeOn(Schedulers.boundedElastic()))
                 .doFinally(signal -> sessions.finishReply(sessionId))
                 .cache();
         // 先订阅保存，再把推送的 Flux 交给前端：浏览器断开只取消推送，不影响生成和保存
@@ -204,18 +245,18 @@ public class ChatService {
     }
 
     /**
-     * 存下老师的回复，记一次活动；输出了【学习结束】、或者学生已回答到上限时结束会话。
+     * 存下老师的回复，记一次活动；学习对话输出了【学习结束】、或者学生已回答到上限时结束会话。
      *
      * @throws IllegalStateException 模型返回了空回复（这时不存，学生可以重试）
      */
-    private Saved saveReply(StudySession session, MarkerFilter filter, int answers) {
+    private Saved saveReply(StudySession session, MarkerFilter filter, Rules rules, int answers) {
         String content = filter.content();
         Marker marker = filter.marker();
         if (content.isEmpty()) {
             throw new IllegalStateException("模型返回了空回复");
         }
         Instant now = Instant.now(clock);
-        boolean ended = marker == Marker.END || answers >= LearningChatPrompt.MAX_ANSWERS;
+        boolean ended = (rules.endOnMarker() && marker == Marker.END) || answers >= rules.maxAnswers();
         return transactionTemplate.execute(status -> {
             Message message = new Message();
             message.setUserId(session.getUserId());

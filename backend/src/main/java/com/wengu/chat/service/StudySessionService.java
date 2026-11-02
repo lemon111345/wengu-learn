@@ -90,6 +90,43 @@ public class StudySessionService {
         return view(session, material.title());
     }
 
+    /**
+     * 进入接着问：返回这个学习会话的接着问会话，没有就新建。每个学习会话最多一个接着问会话，
+     * 反复进出都是同一段对话，老师记得前面问过什么（决策 025）。到达上限已经结束的也照样返回，前端据此提示。
+     *
+     * @param studySessionId 原来的学习会话
+     * @throws BusinessException 会话不存在时为 NOT_FOUND；不是学习会话时为 BAD_REQUEST；学习还没结束时为 CONFLICT
+     */
+    public SessionView startFollowUp(long userId, long studySessionId) {
+        StudySession study = find(userId, studySessionId);
+        if (study.getType() != SessionType.STUDY) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "只有学习会话可以接着问");
+        }
+        if (study.getEndedAt() == null) {
+            throw new BusinessException(ErrorCode.CONFLICT, "学完这个知识点之后才能接着问");
+        }
+        StudySession followUp = sessionMapper.selectOne(new LambdaQueryWrapper<StudySession>()
+                .eq(StudySession::getParentSessionId, studySessionId)
+                .eq(StudySession::getType, SessionType.FOLLOW_UP)
+                .orderByDesc(StudySession::getId)
+                .last("LIMIT 1"));
+        if (followUp == null) {
+            Instant now = Instant.now(clock);
+            followUp = new StudySession();
+            followUp.setUserId(userId);
+            followUp.setType(SessionType.FOLLOW_UP);
+            followUp.setKpId(study.getKpId());
+            followUp.setParentSessionId(studySessionId);
+            followUp.setStartedAt(now);
+            followUp.setSkippedExplanation(false);
+            followUp.setActiveSeconds(0);
+            followUp.setLastActiveAt(now);
+            followUp.setPromptVersion(FollowUpPrompt.VERSION);
+            sessionMapper.insert(followUp);
+        }
+        return get(userId, followUp.getId());
+    }
+
     /** 会话和全部消息，刷新后恢复用。 */
     public SessionView get(long userId, long sessionId) {
         StudySession session = find(userId, sessionId);
@@ -164,7 +201,7 @@ public class StudySessionService {
         List<MessageView> messages = messages(session.getId()).stream()
                 .map(m -> new MessageView(m.getId(), m.getRole(), m.getContent(), m.getMarker(), m.getCreatedAt()))
                 .toList();
-        return new SessionView(session.getId(), session.getType(), session.getKpId(), kpTitle,
+        return new SessionView(session.getId(), session.getType(), session.getKpId(), session.getParentSessionId(), kpTitle,
                 session.getEndedAt() != null, Boolean.TRUE.equals(session.getSkippedExplanation()),
                 generating.contains(session.getId()), messages);
     }
