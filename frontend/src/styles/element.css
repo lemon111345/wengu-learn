@@ -36,6 +36,12 @@
   --el-component-size: 44px;
 }
 
+/* 弹窗：面板的圆角，弹窗专用的阴影（ui.md 2.3） */
+.el-dialog {
+  --el-dialog-border-radius: var(--wg-radius-panel);
+  --el-dialog-box-shadow: var(--wg-shadow-pop);
+}
+
 /* 主按钮用主色的浅底、主色文字，不用实心主色（决策 021） */
 .el-button--primary {
   --el-button-bg-color: var(--wg-primary-soft);

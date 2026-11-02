@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { logout } from '@/api/auth'
 import { ApiError } from '@/api/http'
 import { clearCurrentUser, currentUser } from '@/auth/session'
+import { shortcutHelpOpen } from '@/shortcuts/list'
 
 const router = useRouter()
 
@@ -13,7 +14,9 @@ const username = computed(() => currentUser.value?.username ?? '')
 const initial = computed(() => (Array.from(username.value)[0] ?? '').toUpperCase())
 
 async function onCommand(command: string) {
-  if (command === 'logout') {
+  if (command === 'shortcuts') {
+    shortcutHelpOpen.value = true
+  } else if (command === 'logout') {
     try {
       await logout()
     } catch (e) {
@@ -47,7 +50,8 @@ async function onCommand(command: string) {
     </button>
     <template #dropdown>
       <el-dropdown-menu>
-        <el-dropdown-item command="logout" class="logout">退出登录</el-dropdown-item>
+        <el-dropdown-item command="shortcuts">快捷键</el-dropdown-item>
+        <el-dropdown-item command="logout" class="logout" divided>退出登录</el-dropdown-item>
       </el-dropdown-menu>
     </template>
   </el-dropdown>
