@@ -81,6 +81,32 @@ flowchart TB
 
 所有模块都可以依赖 common，图中省略。
 
+## 前端结构与约定
+
+前端在仓库根目录的 `frontend/`，设计规范见 [`docs/design/ui.md`](./design/ui.md)，骨架的取舍见 [决策 023](./decisions/023-前端骨架.md)。
+
+```
+frontend/src
+├── main.ts         创建应用，全量注册 Element Plus（中文语言包）
+├── styles/         tokens.css 设计变量；base.css 全局基础样式；element.css Element Plus 变量映射
+├── api/            http.ts 请求封装；按后端模块分文件，如 auth.ts
+├── auth/           session.ts 当前用户
+├── router/         路由与登录检查
+├── layouts/        AppLayout 应用框架（侧栏、账户区）；StudyLayout 学习模式
+├── components/     跨页面的组件，如 PageHeader、FormField
+├── shortcuts/      useShortcut、快捷键列表、快捷键弹窗
+└── views/          各页面；auth/ 下是注册与登录
+```
+
+约定：
+
+- 颜色、圆角、阴影一律用 `tokens.css` 中的变量，组件中不写死色值
+- 接口都通过 `api/http.ts` 调用：它解析统一返回格式，失败时抛出 `ApiError`（`message` 可以直接显示），非 GET 请求自动带上 CSRF 令牌，401 时跳转登录页
+- 当前用户从 `auth/session.ts` 读取，不另建状态管理
+- 路由默认要求登录；`meta.guest` 只给没登录的人看，`meta.public` 谁都能看
+- 快捷键用 `useShortcut` 注册，单键快捷键在输入框和弹窗中自动不生效；新快捷键同时加进 `shortcuts/list.ts`
+- 开发时 Vite 把 `/api` 转发给后端（`WENGU_API_TARGET`，默认 `http://localhost:8080`），页面和接口同源，后端不开 CORS
+
 ## 数据模型
 
 所有业务表都带 user_id。V1 插入的默认用户（id 为 1）在只保留多用户模式后不再使用：V7 删除没有业务数据的默认用户，有数据的由 `tools/migrate-default-user.sql` 手动转给新注册的账号，见 [决策 017](./decisions/017-只保留多用户模式.md)。时间统一用 `DATETIME(3)` 存 UTC，枚举存名称，不建外键，约定见 [决策 009](./decisions/009-数据库迁移与表结构约定.md)。下表是 V1 建出的表，后续 issue 需要的字段由各自的迁移脚本添加。
@@ -151,6 +177,7 @@ flowchart TB
 | 评分以用户确认为准，同时记录 AI 建议 | 用户最了解自己；保留差异以后可评估 AI 准确度 | 完全由 AI 评分 |
 | 只有多用户模式，不设管理员，注册开关放环境变量 | 一种模式只有一条路径，界面、测试、文档不用覆盖两种情况；管理员在 M1 没有专属功能，见 [决策 017](./decisions/017-只保留多用户模式.md) | 单用户 / 多用户用配置切换；维护两个分支；第一个注册的用户为管理员 |
 | 登录凭证是服务端 Session（HttpOnly Cookie），保留 CSRF 保护，令牌放在前端可读的 Cookie 中；登录接口自己写，Session 中只存用户 id 和用户名 | SSE 的 EventSource 自动带上 Cookie；退出登录立即生效；不多一个签名密钥，不引入 JWT 库。代价是重启后要重新登录，见 [决策 022](./decisions/022-登录凭证与认证.md) | Cookie 或请求头中的 JWT；关闭 CSRF 只靠 SameSite；配置 UserDetailsService 走标准认证链 |
+| 前端少用依赖：fetch 封装请求、模块级 ref 保存当前用户、CSS 变量做主题，宋体字体随前端打包 | 要做的事几十行代码就够；作者从零学前端，依赖越少越好读；Windows 默认没有标题用的宋体，Google Fonts 国内常连不上，见 [决策 023](./decisions/023-前端骨架.md) | axios；Pinia；Element Plus 的 SCSS 主题；Google Fonts |
 | 候选知识点先“整理成题目”，再走现有的抽取和确认流程 | 粒度、类型、去重的规则只在一处维护；对话 → 题目、题目 → 知识点分开，每步都能单独检查，见 [决策 019](./decisions/019-候选知识点的提炼方式.md) | 新写一个从对话直接抽知识点的 prompt；边聊边整理 |
 | 连续学习从 M1 起记录事实：评分后的到期日、“当天完成” | 计划不存库，过去的任务事后算不回来；只记已发生的事，不存计划快照，见 [决策 020](./decisions/020-连续学习的口径.md) | 建表保存每天的计划快照；M2 再开始记录 |
 | Flyway 管理表结构，字段随 issue 增量添加 | 空库启动即建好表，每次改动有记录；实现前不预先猜字段，见 [决策 009](./decisions/009-数据库迁移与表结构约定.md) | 手写 SQL 手动执行；V1 一次建好所有字段 |
