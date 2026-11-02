@@ -99,7 +99,7 @@ onBeforeUnmount(stopPolling)
       <ImportSidebar />
     </div>
   </template>
-  <ConfirmDraft v-else :draft="draft" @changed="load" />
+  <ConfirmDraft v-else :draft="draft" />
 </template>
 
 <style scoped>
