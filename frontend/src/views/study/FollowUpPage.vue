@@ -155,6 +155,11 @@ useAutoScroll(() => [messages.value.length, streamingText.value])
   border-radius: 50%;
 }
 
+/* 卡片本身是灰底，展开的对话里学生的话换成白底，才看得出来 */
+.study-thread :deep(.student) {
+  background: var(--wg-bg);
+}
+
 .toggle {
   min-height: 44px;
   border: none;

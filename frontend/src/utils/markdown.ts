@@ -3,9 +3,10 @@
  * - 代码块（```），流式输出时还没闭合的代码块也按代码块显示
  * - 行内代码（`x`）、加粗（**x**）
  * - 段落、有序列表（1. ）、无序列表（- 或 * ）、标题（# ，显示成加粗的一行）
+ * - 表格（表头 + |---| 分隔线 + 表格行）
  *
  * 先把全部内容按 HTML 转义，再识别格式，模型输出的任何标签都只会显示成文字，不会被浏览器执行。
- * 表格等其他写法原样显示。
+ * 其他写法（引用、链接、图片等）原样显示。
  */
 
 const ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
@@ -29,6 +30,21 @@ function inline(text: string): string {
 const UNORDERED = /^\s*[-*]\s+(.*)$/
 const ORDERED = /^\s*\d+[.)]\s+(.*)$/
 const HEADING = /^#{1,6}\s+(.*)$/
+const TABLE_ROW = /^\s*\|.*\|\s*$/
+const TABLE_SEPARATOR = /^\s*\|?(\s*:?-{2,}:?\s*\|)+\s*(:?-{2,}:?\s*)?\|?\s*$/
+
+/** 表格的一行拆成单元格：去掉首尾的竖线 */
+function cells(row: string): string[] {
+  return row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+}
+
+/** 第一行是表头；外面包一层，表格宽时在自己的容器内横向滚动 */
+function table(rows: string[]): string {
+  const [head, ...body] = rows
+  const th = cells(head).map((c) => `<th>${inline(c)}</th>`).join('')
+  const tr = body.map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')
+  return `<div class="table-wrap"><table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`
+}
 
 /** 一段不含代码块的文字：按行归成段落、列表、标题 */
 function blocks(text: string): string {
@@ -49,7 +65,21 @@ function blocks(text: string): string {
     }
   }
 
-  for (const line of text.split('\n')) {
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // 表格：一行表头、一行分隔线（|---|---|），之后连续的表格行
+    if (TABLE_ROW.test(line) && i + 1 < lines.length && TABLE_SEPARATOR.test(lines[i + 1])) {
+      flushParagraph()
+      flushList()
+      const rows = [line]
+      for (i += 2; i < lines.length && TABLE_ROW.test(lines[i]); i++) {
+        rows.push(lines[i])
+      }
+      i--
+      out.push(table(rows))
+      continue
+    }
     const unordered = UNORDERED.exec(line)
     const ordered = unordered ? null : ORDERED.exec(line)
     const heading = HEADING.exec(line)

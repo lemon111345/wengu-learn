@@ -64,4 +64,28 @@ const html = computed(() => (props.formatted ? renderMessage(props.content) : ''
   padding: 0;
   background: none;
 }
+
+/* 表格宽时在自己的容器内横向滚动 */
+.message-content :deep(.table-wrap) {
+  margin: 0 0 12px;
+  overflow-x: auto;
+}
+
+.message-content :deep(table) {
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.message-content :deep(th),
+.message-content :deep(td) {
+  padding: 6px 12px;
+  border: 1px solid var(--wg-border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.message-content :deep(th) {
+  background: var(--wg-surface);
+}
 </style>
