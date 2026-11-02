@@ -10,6 +10,11 @@ spring:
     placeholders:
       # V1 插入默认用户时用的时区。V1 已经执行过的库不再用到它；空库仍然从 V1 开始执行，所以要保留
       default_timezone: ${wengu.default-timezone}
+  mvc:
+    async:
+      # 流式回复（SSE）是异步请求，默认超时跟随 Tomcat，约 30 秒，老师的一条长回复会被中途切断。
+      # 要比模型的单次请求超时（WENGU_LLM_TIMEOUT）长；超时只断开连接，回复照常在后台生成、存库（决策 025）
+      request-timeout: 10m
   task:
     execution:
       # 定义了抽取线程池（ExtractionExecutorConfig）后，仍然创建 Spring Boot 默认的 applicationTaskExecutor
