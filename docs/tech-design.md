@@ -97,7 +97,8 @@ frontend/src
 ├── layouts/        AppLayout 应用框架（侧栏、账户区）；StudyLayout 学习模式
 ├── components/     跨页面的组件，如 PageHeader、FormField
 ├── shortcuts/      useShortcut、快捷键列表、快捷键弹窗
-└── views/          各页面；auth/ 下是注册与登录
+├── utils/          日期、类型和评分的名称、老师回复的格式渲染（markdown.ts）
+└── views/          各页面；auth/ 下是注册与登录，today/ 是今天页，study/ 是学习、收尾与评分、接着问
 ```
 
 约定：
@@ -106,6 +107,7 @@ frontend/src
 - 接口都通过 `api/http.ts` 调用：它解析统一返回格式，失败时抛出 `ApiError`（`message` 可以直接显示），非 GET 请求自动带上 CSRF 令牌，401 时跳转登录页
 - 当前用户从 `auth/session.ts` 读取，不另建状态管理
 - 路由默认要求登录；`meta.guest` 只给没登录的人看，`meta.public` 谁都能看
+- 流式回复用 `api/sse.ts`（fetch 发 POST、自己读流），对话逻辑用 `views/study/useChat.ts`，每次回复结束都重新取会话，以后端为准；老师的回复用 `utils/markdown.ts` 渲染，先整体转义再识别格式（决策 027）
 - 快捷键用 `useShortcut` 注册，单键快捷键在输入框和弹窗中自动不生效；新快捷键同时加进 `shortcuts/list.ts`
 - 开发时 Vite 把 `/api` 转发给后端（`WENGU_API_TARGET`，默认 `http://localhost:8080`），页面和接口同源，后端不开 CORS
 
@@ -260,8 +262,8 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中或已确认 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
 | `POST /api/drafts/{id}/confirm` | 确认草稿，生成知识点（#17） | `{rejectedItemIds?}`，取消勾选的条目 id，不传则全部接受 | 同上，status 为 CONFIRMED，每个条目的 decision 为 ACCEPTED 或 REJECTED | 一个事务中生成知识点（sort_order 接在已有之后）、关联材料、初始化 card_state（SYSTEM_DESIGN、EXPERIENCE 不初始化）；covered 引用的已有知识点也关联到这份材料。草稿不是 READY 或已确认 409，条目不属于这份草稿 400。见决策 015 |
 | `GET /api/plan/today` | 今天的计划（#18、#48、#49、#19） | — | `{date, dailyNewLimit, newLearnedToday, reviews: [{kpId, title, type}], newItems: [...], completed: [{kpId, title, type, rating, firstReview}], upcomingReviews: [{date, count}], knowledgePointCount, studiedMinutesToday}` | 实时计算：先复习后新学，各自按学习顺序；新知识最多“每天新学数 − 今天已学数”个；date 是学习日（按时区和 day_start_hour）。completed 是今天已完成的，按完成时间排列，同一知识点取最后一次评分，暂停的也在内；upcomingReviews 是从明天起 7 个学习日每天到期的复习数，今天和已过期的在 reviews 中，不算暂停的。knowledgePointCount 是知识点总数（暂停的、不参与调度的也算），为 0 时今天页显示空状态：只看上面几个列表会把“都在很多天后到期”“只有只收录的”误判为空。studiedMinutesToday 是今天学习日内开始的会话的有效时长之和（分钟，不足一分钟舍去）。见决策 016、024、025 |
-| `POST /api/sessions` | 开始学习一个知识点（#19） | `{kpId}` | `{id, type, kpId, parentSessionId, kpTitle, ended, skippedExplanation, generating, messages: [{id, role, content, marker, createdAt}]}` | 只创建会话，不调用模型，老师的第一句由 reply 生成；这个知识点有没结束的会话时返回那个会话（恢复）。知识点不存在 404，只收录的类型 400。见决策 025 |
-| `GET /api/sessions/{id}` | 会话和全部消息，刷新后恢复（#19） | — | 同上 | messages 不含发给模型的知识点信息和附加提示；generating 为 true 表示上一条回复还在后台生成。不存在或不属于当前用户 404 |
+| `POST /api/sessions` | 开始学习一个知识点（#19、#23） | `{kpId}` | `{id, type, kpId, parentSessionId, kpTitle, ended, skippedExplanation, generating, activeSeconds, rating, messages: [{id, role, content, marker, createdAt}]}` | 只创建会话，不调用模型，老师的第一句由 reply 生成；这个知识点最近的会话还没走完时返回那个会话：没结束的接着学，学完但还没评分的回去评分。知识点不存在 404，只收录的类型 400。见决策 025、027 |
+| `GET /api/sessions/{id}` | 会话和全部消息，刷新后恢复（#19、#23） | — | 同上 | messages 不含发给模型的知识点信息和附加提示；generating 为 true 表示上一条回复还在后台生成；activeSeconds 是有效时长；rating 是已评的分 `{rating, date, days}`，没评分或接着问时为 null。不存在或不属于当前用户 404 |
 | `POST /api/sessions/{id}/reply` | 生成老师的下一条回复：刚开始时的第一句，或出错后重试（#19） | — | `text/event-stream`：`delta {text}`、`done {messageId, marker, ended}`、`error {message}` | 已经轮到学生回答、会话已结束、正在生成时 409（统一格式的 JSON，不开始推送）。浏览器断开后回复照样生成完、存库。见决策 025 |
 | `POST /api/sessions/{id}/messages` | 学生回答，老师流式回复（#19） | `{content}` | 同上 | 内容为空或超过 5000 字 400；没轮到学生、会话已结束、正在生成时 409。第 7 次回答后要求完整作答，第 8 次后收尾，会话结束 |
 | `POST /api/sessions/{id}/skip-explanation` | “这个我会，直接完整作答”（#19） | — | 同上 | 对话中显示一条学生消息“这个我会，直接完整作答。”，会话记录 skippedExplanation；已经在完整作答时、接着问的会话 409 |
