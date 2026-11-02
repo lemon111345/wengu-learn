@@ -29,9 +29,11 @@ const router = createRouter({
       path: '/',
       component: AppLayout,
       children: [
-        { path: '', component: () => import('@/views/TodayView.vue') },
+        { path: '', component: () => import('@/views/today/TodayView.vue') },
         { path: 'library', component: () => import('@/views/LibraryView.vue') },
         { path: 'import', component: () => import('@/views/ImportView.vue') },
+        // 确认知识点，由 #22 实现；今天页的提示条先链接到这里
+        { path: 'drafts/:id', component: () => import('@/views/DraftView.vue') },
         { path: 'settings', component: () => import('@/views/SettingsView.vue') },
       ],
     },
@@ -39,7 +41,7 @@ const router = createRouter({
       // 学习模式：隐藏侧栏，内容居中一栏（ui.md 4.2）
       path: '/study',
       component: StudyLayout,
-      children: [{ path: '', component: () => import('@/views/StudyView.vue') }],
+      children: [{ path: ':kpId', component: () => import('@/views/StudyView.vue'), props: true }],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

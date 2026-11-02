@@ -1,11 +1,14 @@
 <script setup lang="ts">
-// 应用框架中各页面的顶栏（ui.md 4.1）：左边宋体标题，右边放各页面自己的操作
-defineProps<{ title: string }>()
+// 应用框架中各页面的顶栏（ui.md 4.1）：左边宋体标题，右边放各页面自己的操作。
+// 左边不是标题时（如今天页显示学习日）用 start 插槽
+defineProps<{ title?: string }>()
 </script>
 
 <template>
   <header class="page-header">
-    <h1>{{ title }}</h1>
+    <slot name="start">
+      <h1>{{ title }}</h1>
+    </slot>
     <div class="actions">
       <slot />
     </div>

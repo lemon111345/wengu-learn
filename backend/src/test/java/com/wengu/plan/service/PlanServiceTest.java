@@ -276,6 +276,20 @@ class PlanServiceTest {
 
         assertThat(titles(plan.reviews())).containsExactly("正常的复习");
         assertThat(titles(plan.newItems())).containsExactly("正常的新知识");
+        // 知识点总数算暂停的，不算其他用户的
+        assertThat(plan.knowledgePointCount()).isEqualTo(4);
+    }
+
+    @Test
+    void 知识点总数从零开始且只收录的也算() {
+        assertThat(planService.today(1).knowledgePointCount()).isZero();
+
+        // 只有不参与调度的知识点（如系统设计，没有 card_state）：计划为空，但不是空状态
+        kp(1, "只收录的", 1, KnowledgePointStatus.ACTIVE);
+        TodayPlan plan = planService.today(1);
+        assertThat(plan.reviews()).isEmpty();
+        assertThat(plan.newItems()).isEmpty();
+        assertThat(plan.knowledgePointCount()).isEqualTo(1);
     }
 
     /** 写一条评分流水，不改调度状态：“今天已完成”只看流水。 */

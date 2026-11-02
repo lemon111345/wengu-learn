@@ -79,6 +79,10 @@ export function post<T>(url: string, body?: unknown, options?: RequestOptions) {
   return request<T>('POST', url, { ...options, body })
 }
 
+export function patch<T>(url: string, body: unknown, options?: RequestOptions) {
+  return request<T>('PATCH', url, { ...options, body })
+}
+
 async function parseResult<T>(response: Response): Promise<Result<T> | null> {
   try {
     const body: unknown = await response.json()

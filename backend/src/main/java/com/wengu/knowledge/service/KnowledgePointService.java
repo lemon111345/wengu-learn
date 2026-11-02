@@ -176,6 +176,12 @@ public class KnowledgePointService {
                         kp -> new KnowledgePointSummary(kp.getId(), kp.getTitle(), kp.getType())));
     }
 
+    /** 用户的知识点总数，暂停的也算。今天页据此判断是否显示空状态（#49）。 */
+    public int count(long userId) {
+        return Math.toIntExact(knowledgePointMapper.selectCount(new LambdaQueryWrapper<KnowledgePoint>()
+                .eq(KnowledgePoint::getUserId, userId)));
+    }
+
     /** 用户已有知识点中最大的 sort_order，没有知识点时为 0。 */
     private int maxSortOrder(long userId) {
         KnowledgePoint last = knowledgePointMapper.selectOne(new LambdaQueryWrapper<KnowledgePoint>()
