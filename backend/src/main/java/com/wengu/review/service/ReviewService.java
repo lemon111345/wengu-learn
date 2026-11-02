@@ -1,6 +1,7 @@
 package com.wengu.review.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.wengu.review.dto.DueCard;
 import com.wengu.review.dto.ReviewRecord;
 import com.wengu.review.entity.CardState;
 import com.wengu.review.entity.ReviewLog;
@@ -81,6 +82,22 @@ public class ReviewService {
                 .eq(ReviewLog::getFirstReview, true)
                 .ge(ReviewLog::getReviewedAt, start)
                 .lt(ReviewLog::getReviewedAt, end)));
+    }
+
+    /**
+     * 在 [start, end) 之间到期的复习（#48 接下来 7 天要复习的）。和 {@link #dueKpIds} 一样排除新卡。
+     * 按哪一天分组由调用方决定：学习日的划分属于每日计划，不属于调度。
+     */
+    public List<DueCard> dueBetween(long userId, Instant start, Instant end) {
+        return cardStateMapper.selectList(new LambdaQueryWrapper<CardState>()
+                        .select(CardState::getKpId, CardState::getDue)
+                        .eq(CardState::getUserId, userId)
+                        .isNotNull(CardState::getLastReview)
+                        .ge(CardState::getDue, start)
+                        .lt(CardState::getDue, end))
+                .stream()
+                .map(cs -> new DueCard(cs.getKpId(), cs.getDue()))
+                .toList();
     }
 
     /** [start, end) 之间的评分，按评分时间排列。每日计划用它显示今天已完成的条目（#48）。 */

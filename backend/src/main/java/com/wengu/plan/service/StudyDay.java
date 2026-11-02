@@ -30,6 +30,11 @@ public record StudyDay(LocalDate date, Instant start, Instant end) {
         return new StudyDay(date, start, startOf(date.plusDays(1), zone, dayStartHour));
     }
 
+    /** 某个日期的学习日，如“接下来 7 天”中的每一天。 */
+    public static StudyDay ofDate(LocalDate date, ZoneId zone, int dayStartHour) {
+        return new StudyDay(date, startOf(date, zone, dayStartHour), startOf(date.plusDays(1), zone, dayStartHour));
+    }
+
     /**
      * 某个日期的 day_start_hour 对应的时刻。这个时刻因夏令时不存在时，ZonedDateTime 会往后挪到存在的时刻；
      * 有两个时（夏令时结束时重复的一小时），取前一个。所以这样的学习日可能是 23 或 25 小时。

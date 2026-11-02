@@ -13,7 +13,8 @@ import java.util.List;
  * @param reviews         到期复习，按学习顺序排列，不含今天已完成的
  * @param newItems        新知识，按学习顺序排列，最多“每天新学数 − 今天已学数”个
  * @param completed       今天已完成的，按完成时间排列；暂停的也在内
+ * @param upcomingReviews 接下来 7 个学习日（从明天起）每天要复习的数量；今天和已经过期的在 reviews 中
  */
 public record TodayPlan(LocalDate date, int dailyNewLimit, int newLearnedToday, List<PlanItem> reviews,
-                        List<PlanItem> newItems, List<CompletedItem> completed) {
+                        List<PlanItem> newItems, List<CompletedItem> completed, List<UpcomingDay> upcomingReviews) {
 }
