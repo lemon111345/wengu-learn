@@ -26,7 +26,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 实连测试：用真实模型走一遍学习对话，检查 prompt v3 的两个标记模型是否照做。会产生少量费用，默认跳过：
+ * 实连测试：用真实模型走一遍学习对话和接着问，检查学习对话 prompt v3 的两个标记模型是否照做，
+ * 并打印接着问的回答供人工查看（是否只回答、不反问）。会产生少量费用，默认跳过：
  * <pre>
  * .\mvnw.cmd test -Dtest=ChatLiveTest -Dllm.live=true
  * </pre>
@@ -76,7 +77,7 @@ class ChatLiveTest {
     }
 
     @Test
-    void 开场然后跳过讲解完整作答后收尾() {
+    void 开场然后跳过讲解完整作答后收尾再接着问() {
         messageMapper.delete(null);
         sessionMapper.delete(null);
         KnowledgePoint kp = new KnowledgePoint();
@@ -110,5 +111,14 @@ class ChatLiveTest {
         assertThat(end.done().marker()).isEqualTo(Marker.END);
         assertThat(end.done().ended()).isTrue();
         assertThat(sessionService.get(USER_ID, sessionId).skippedExplanation()).isTrue();
+
+        // 接着问：老师只回答，不输出标记，会话不结束。是否反问只能人工看打印的内容
+        long followUpId = sessionService.startFollowUp(USER_ID, sessionId).id();
+        Reply answer = run("接着问", chatService.send(USER_ID, followUpId, new SendMessageRequest(
+                "为什么加了 volatile 的 i++ 还是线程不安全？能举个两个线程交错执行的例子吗？")));
+        assertThat(answer.done()).isNotNull();
+        assertThat(answer.done().marker()).isNull();
+        assertThat(answer.done().ended()).isFalse();
+        assertThat(answer.text()).isNotBlank().doesNotContain("【");
     }
 }

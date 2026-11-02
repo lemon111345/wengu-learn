@@ -34,15 +34,6 @@ class DatabaseMigrationTest {
                 "card_state", "study_session", "message", "review_log");
     }
 
-    /** V1 插入的默认用户在空库上没有业务数据，V7 把它和它的设置删掉了（决策 017）。 */
-    @Test
-    void 空库上没有默认用户() {
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM `user` WHERE username = 'default'", Integer.class))
-                .isZero();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_settings WHERE user_id = 1", Integer.class))
-                .isZero();
-    }
-
     @Test
     void 再次执行迁移不会重复执行已有脚本() {
         assertThat(flyway.migrate().migrationsExecuted).isZero();

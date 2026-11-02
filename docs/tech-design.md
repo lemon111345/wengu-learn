@@ -120,7 +120,7 @@ frontend/src
 | knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（ACTIVE / SUSPENDED）、sort_order（新知识按 sort_order、id 派发；确认草稿时接在已有知识点之后）、draft_item_id（来自哪个草稿条目，V6 添加，见决策 015） |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id、user_id |
 | card_state | 调度状态（每次复习都更新） | kp_id、user_id（冗余）、state（学习中 / 复习 / 重学）、step（学习步或重学步序号，复习状态为空）、due、stability、difficulty、last_review（为空表示新知识） |
-| study_session | 一次学习会话，也是自动计时的来源 | id、user_id、type（STUDY / FOLLOW_UP / QUESTION）、kp_id（从一个问题开始时为空）、started_at、ended_at（学习结束或回答到上限时写入）、skipped_explanation、active_seconds（两次活动之间最多算 10 分钟）、last_active_at、prompt_version（V8 添加），见决策 025 |
+| study_session | 一次学习会话，也是自动计时的来源 | id、user_id、type（STUDY / FOLLOW_UP / QUESTION）、kp_id（从一个问题开始时为空）、parent_session_id（接着问指向原来的学习会话，V9 添加）、started_at、ended_at（学习结束或回答到上限时写入）、skipped_explanation、active_seconds（两次活动之间最多算 10 分钟）、last_active_at、prompt_version（V8 添加），见决策 025 |
 | message | 会话中的对话消息 | id、user_id、session_id、role、content（不含标记）、marker（RESTATE / END）、model_note（附在学生消息后、只给模型看的提示）、created_at（V8 添加 marker、model_note）。学习对话的第一条消息（知识点信息）不存，每次现拼，见决策 025 |
 | review_log | 每次评分的流水 | id、user_id、kp_id、session_id、rating_user、rating_ai、state_before、is_first_review（是否为该知识点的第一次学习）、reviewed_at |
 | extraction_draft | 一次抽取，用户确认后才生成知识点（V3 添加，V4 精简） | id、user_id、source_id（会话来源由 #31 添加，见决策 008）、created_at、confirmed_at（V6 添加）；状态不存库：确认后为 CONFIRMED，之前由批次推算（RUNNING / READY / FAILED），见决策 012、013、015 |
@@ -233,9 +233,10 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 阶段 | 流程 | 评分 |
 | --- | --- | --- |
 | 主线 | 摸底 → 讲解 → 检验 → 追问 → 完整作答 → 收尾，建议 4～6 次回答；第 7 次回答后要求完整作答，第 8 次后要求收尾 | 收尾后调用评分建议，用户确认后交给 FSRS |
-| 接着问 | 收尾后学生自由提问，老师只回答、不出题，设一个防失控的上限 | 不评分 |
+| 接着问 | 收尾后学生自由提问，老师只回答、不出题；单独的会话，挂在学习会话下面，学生先问；上限 30 次提问，不显示，第 26 次时老师提醒可以先回去 | 不评分 |
 
 - 学习对话 prompt：`prompts/learning-chat-v3.md`。知识点信息放在第一条用户消息里，system prompt 不变；要求完整作答时输出“【完整作答】”，收尾时输出“【学习结束】”。后端从流中去掉标记，记在消息上。学生可以点“这个我会，直接完整作答”跳过讲解。流式对话、存库和计时见 [决策 025](./decisions/025-学习会话与流式对话.md)
+- 接着问 prompt：`prompts/follow-up-chat-v1.md`。第一次提问时在问题前面拼上知识点信息和整段学习对话；老师只回答、不出题、不反问，不输出标记
 - 评分建议 prompt：`prompts/rating-suggestion-v3.md`。以完整作答为主要依据、以知识点要点为标准，输出 `analysis`、`outOfScopeGaps`、`rating`、`weakPoints`（Spring AI 按字段名字母顺序生成 Schema，模型也按这个顺序输出，所以依据排在第一个）
 - `weakPoints` 供复习时针对性提问（#21）；`outOfScopeGaps` 和“接着问”中的新内容在学完后成为候选知识点，复用草稿确认流程（#15、#17）
 - 用户确认的评分为准，AI 建议的评分同时记录
@@ -255,11 +256,12 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中或已确认 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
 | `POST /api/drafts/{id}/confirm` | 确认草稿，生成知识点（#17） | `{rejectedItemIds?}`，取消勾选的条目 id，不传则全部接受 | 同上，status 为 CONFIRMED，每个条目的 decision 为 ACCEPTED 或 REJECTED | 一个事务中生成知识点（sort_order 接在已有之后）、关联材料、初始化 card_state（SYSTEM_DESIGN、EXPERIENCE 不初始化）；covered 引用的已有知识点也关联到这份材料。草稿不是 READY 或已确认 409，条目不属于这份草稿 400。见决策 015 |
 | `GET /api/plan/today` | 今天的计划（#18、#48、#49、#19） | — | `{date, dailyNewLimit, newLearnedToday, reviews: [{kpId, title, type}], newItems: [...], completed: [{kpId, title, type, rating, firstReview}], upcomingReviews: [{date, count}], knowledgePointCount, studiedMinutesToday}` | 实时计算：先复习后新学，各自按学习顺序；新知识最多“每天新学数 − 今天已学数”个；date 是学习日（按时区和 day_start_hour）。completed 是今天已完成的，按完成时间排列，同一知识点取最后一次评分，暂停的也在内；upcomingReviews 是从明天起 7 个学习日每天到期的复习数，今天和已过期的在 reviews 中，不算暂停的。knowledgePointCount 是知识点总数（暂停的、不参与调度的也算），为 0 时今天页显示空状态：只看上面几个列表会把“都在很多天后到期”“只有只收录的”误判为空。studiedMinutesToday 是今天学习日内开始的会话的有效时长之和（分钟，不足一分钟舍去）。见决策 016、024、025 |
-| `POST /api/sessions` | 开始学习一个知识点（#19） | `{kpId}` | `{id, type, kpId, kpTitle, ended, skippedExplanation, generating, messages: [{id, role, content, marker, createdAt}]}` | 只创建会话，不调用模型，老师的第一句由 reply 生成；这个知识点有没结束的会话时返回那个会话（恢复）。知识点不存在 404，只收录的类型 400。见决策 025 |
+| `POST /api/sessions` | 开始学习一个知识点（#19） | `{kpId}` | `{id, type, kpId, parentSessionId, kpTitle, ended, skippedExplanation, generating, messages: [{id, role, content, marker, createdAt}]}` | 只创建会话，不调用模型，老师的第一句由 reply 生成；这个知识点有没结束的会话时返回那个会话（恢复）。知识点不存在 404，只收录的类型 400。见决策 025 |
 | `GET /api/sessions/{id}` | 会话和全部消息，刷新后恢复（#19） | — | 同上 | messages 不含发给模型的知识点信息和附加提示；generating 为 true 表示上一条回复还在后台生成。不存在或不属于当前用户 404 |
 | `POST /api/sessions/{id}/reply` | 生成老师的下一条回复：刚开始时的第一句，或出错后重试（#19） | — | `text/event-stream`：`delta {text}`、`done {messageId, marker, ended}`、`error {message}` | 已经轮到学生回答、会话已结束、正在生成时 409（统一格式的 JSON，不开始推送）。浏览器断开后回复照样生成完、存库。见决策 025 |
 | `POST /api/sessions/{id}/messages` | 学生回答，老师流式回复（#19） | `{content}` | 同上 | 内容为空或超过 5000 字 400；没轮到学生、会话已结束、正在生成时 409。第 7 次回答后要求完整作答，第 8 次后收尾，会话结束 |
-| `POST /api/sessions/{id}/skip-explanation` | “这个我会，直接完整作答”（#19） | — | 同上 | 对话中显示一条学生消息“这个我会，直接完整作答。”，会话记录 skippedExplanation；已经在完整作答时 409 |
+| `POST /api/sessions/{id}/skip-explanation` | “这个我会，直接完整作答”（#19） | — | 同上 | 对话中显示一条学生消息“这个我会，直接完整作答。”，会话记录 skippedExplanation；已经在完整作答时、接着问的会话 409 |
+| `POST /api/sessions/{id}/follow-up` | 进入接着问（#19） | — | 接着问的会话，格式同 `POST /api/sessions` | id 是学习会话；学习还没结束 409，不是学习会话 400。每个学习会话最多一个接着问会话，有就返回、没有就新建；到达上限已结束的也返回（ended 为 true）。之后用 messages、reply、GET 这几个通用接口；学生先问，没有开场白，不能用 reply 开场。第 30 次回答之后再发消息 409。见决策 025 |
 | `GET /api/settings` | 读取用户设置（#18） | — | `{timezone, dayStartHour, dailyNewLimit}` | |
 | `PATCH /api/settings` | 修改用户设置（#18） | 只传要改的字段，如 `{dailyNewLimit: 5}` | 同上 | timezone 为合法时区，dayStartHour 0～23，dailyNewLimit 0～50，否则 400；修改后立即生效。见决策 016 |
 | `GET /api/auth/registration` | 注册是否开放（#46），不需要登录 | — | `{open}` | 由 `WENGU_ALLOW_REGISTRATION` 控制，默认开放 |

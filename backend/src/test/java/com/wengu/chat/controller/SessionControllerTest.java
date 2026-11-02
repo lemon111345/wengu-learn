@@ -130,6 +130,12 @@ class SessionControllerTest {
         when(llmService.stream(anyString(), anyList(), any())).thenReturn(Flux.just("对。【学习结束】"));
         String answer = stream("/api/sessions/" + sessionId + "/messages", new SendMessageRequest("是 0.75"));
         assertThat(answer).contains("\"marker\":\"END\"", "\"ended\":true").doesNotContain("【学习结束】");
+
+        // 学完之后进入接着问
+        mockMvc.perform(post("/api/sessions/" + sessionId + "/follow-up").session(login).with(csrfToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.type").value("FOLLOW_UP"))
+                .andExpect(jsonPath("$.data.parentSessionId").value(sessionId));
     }
 
     @Test
