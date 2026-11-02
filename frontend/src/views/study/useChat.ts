@@ -4,7 +4,7 @@
  * 以后端存的会话为准：每次流式回复结束（完成、出错、中断）都重新取一次会话，拿到存库的消息、标记、会话是否结束；
  * 流式进行中只在界面上临时显示学生刚发的话和老师正在说的话。
  */
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError } from '@/api/http'
 import {
   fetchSession,
@@ -130,4 +130,16 @@ export function useChat(sessionId: () => number) {
   })
 
   return { session, messages, streamingText, busy, error, loadError, refresh, reply, send, skipExplanation }
+}
+
+/** 新内容出现时，用户本来就在底部附近，就跟着滚到底部；在往上翻看的话不打扰 */
+export function useAutoScroll(source: () => unknown) {
+  watch(source, async () => {
+    const el = document.scrollingElement
+    if (!el || el.scrollHeight - el.scrollTop - el.clientHeight > 240) {
+      return
+    }
+    await nextTick()
+    el.scrollTop = el.scrollHeight
+  })
 }

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // 学习页 /session/:id（ui.md 5.3）：标题区、对话、底部输入。学完（会话结束）后同一页切换成收尾与评分（5.4）
-import { computed, nextTick, onMounted, watch } from 'vue'
+import { computed, onMounted } from 'vue'
 import { studyHeader } from '@/layouts/studyHeader'
 import { typeLabels } from '@/utils/labels'
 import ChatInput from './ChatInput.vue'
 import ChatThread from './ChatThread.vue'
 import FinishPanel from './FinishPanel.vue'
-import { useChat } from './useChat'
+import { useAutoScroll, useChat } from './useChat'
 
 const props = defineProps<{ id: string }>()
 const sessionId = () => Number(props.id)
@@ -54,18 +54,7 @@ const canSkip = computed(
   () => !!session.value && !session.value.ended && messages.value.length > 0 && !restating.value && !busy.value,
 )
 
-// 新内容出现时，用户本来就在底部附近，就跟着滚到底部；在往上翻看的话不打扰
-watch(
-  () => [messages.value.length, streamingText.value],
-  async () => {
-    const el = document.scrollingElement
-    if (!el || el.scrollHeight - el.scrollTop - el.clientHeight > 240) {
-      return
-    }
-    await nextTick()
-    el.scrollTop = el.scrollHeight
-  },
-)
+useAutoScroll(() => [messages.value.length, streamingText.value])
 </script>
 
 <template>

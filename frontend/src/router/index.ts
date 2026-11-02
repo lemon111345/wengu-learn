@@ -49,6 +49,8 @@ const router = createRouter({
       children: [
         // 学习，学完后同一页切换成收尾与评分
         { path: ':id', component: () => import('@/views/study/SessionPage.vue'), props: true },
+        // 接着问，id 是原来的学习会话
+        { path: ':id/follow-up', component: () => import('@/views/study/FollowUpPage.vue'), props: true },
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
