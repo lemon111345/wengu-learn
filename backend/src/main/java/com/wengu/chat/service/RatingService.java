@@ -51,7 +51,8 @@ public class RatingService {
         StudySession session = ratable(userId, sessionId);
         Map<Rating, Instant> dues = reviewService.preview(userId, session.getKpId());
         SettingsView settings = settingsService.get(userId);
-        return Arrays.stream(Rating.values()).map(r -> option(r, dues.get(r), settings)).toList();
+        Instant now = Instant.now(clock);
+        return Arrays.stream(Rating.values()).map(r -> option(r, dues.get(r), now, settings)).toList();
     }
 
     /**
@@ -68,7 +69,7 @@ public class RatingService {
         SettingsView settings = settingsService.get(userId);
         ReviewResult result = reviewService.rate(userId, session.getKpId(), sessionId, request.rating(),
                 suggestions.suggestedRating(sessionId));
-        return option(result.rating(), result.due(), settings);
+        return option(result.rating(), result.due(), Instant.now(clock), settings);
     }
 
     /**
@@ -90,9 +91,9 @@ public class RatingService {
         return session;
     }
 
-    /** 把下次复习的时间换算成学习日，并算出距今天几个学习日 */
-    private RatingOption option(Rating rating, Instant due, SettingsView settings) {
-        LocalDate today = StudyDay.of(Instant.now(clock), settings.zoneId(), settings.dayStartHour()).date();
+    /** 把下次复习的时间换算成学习日，并算出距今天几个学习日。读取会话时显示已评的分也用它 */
+    static RatingOption option(Rating rating, Instant due, Instant now, SettingsView settings) {
+        LocalDate today = StudyDay.of(now, settings.zoneId(), settings.dayStartHour()).date();
         LocalDate date = StudyDay.of(due, settings.zoneId(), settings.dayStartHour()).date();
         return new RatingOption(rating, date, ChronoUnit.DAYS.between(today, date));
     }

@@ -12,8 +12,11 @@ import java.util.List;
  * @param ended              学习对话是否已经结束（模型输出了【学习结束】，或者回答达到上限）
  * @param skippedExplanation 是否点过“这个我会，直接完整作答”
  * @param generating         老师是否正在回复；刷新时为 true 说明上一条回复还在后台生成，稍后再取
+ * @param activeSeconds      有效时长（秒），学习页顶栏的“本次 X 分钟”
+ * @param rating             学习会话已经评过分时，评分和下次复习的学习日；没评分、接着问时为 null
  * @param messages           按时间排列
  */
 public record SessionView(long id, SessionType type, Long kpId, Long parentSessionId, String kpTitle, boolean ended,
-                          boolean skippedExplanation, boolean generating, List<MessageView> messages) {
+                          boolean skippedExplanation, boolean generating, int activeSeconds, RatingOption rating,
+                          List<MessageView> messages) {
 }

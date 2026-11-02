@@ -3,6 +3,7 @@ package com.wengu.chat.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.wengu.chat.dto.MessageView;
+import com.wengu.chat.dto.RatingOption;
 import com.wengu.chat.dto.SessionView;
 import com.wengu.chat.dto.StartSessionRequest;
 import com.wengu.chat.entity.Message;
@@ -15,6 +16,8 @@ import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.knowledge.service.KnowledgePointService;
+import com.wengu.review.service.ReviewService;
+import com.wengu.user.service.UserSettingsService;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -38,21 +41,27 @@ public class StudySessionService {
     private final StudySessionMapper sessionMapper;
     private final MessageMapper messageMapper;
     private final KnowledgePointService knowledgePointService;
+    private final ReviewService reviewService;
+    private final UserSettingsService settingsService;
     private final Clock clock;
 
     // 正在生成回复的会话。只有一个后端实例，放在内存中即可；重启后清空，没存下的回复由用户重试
     private final Set<Long> generating = ConcurrentHashMap.newKeySet();
 
     public StudySessionService(StudySessionMapper sessionMapper, MessageMapper messageMapper,
-                               KnowledgePointService knowledgePointService, Clock clock) {
+                               KnowledgePointService knowledgePointService, ReviewService reviewService,
+                               UserSettingsService settingsService, Clock clock) {
         this.sessionMapper = sessionMapper;
         this.messageMapper = messageMapper;
         this.knowledgePointService = knowledgePointService;
+        this.reviewService = reviewService;
+        this.settingsService = settingsService;
         this.clock = clock;
     }
 
     /**
-     * 开始学习一个知识点。这个知识点有还没结束的会话时返回那个会话，接着学（刷新、离开后再回来都走这里）。
+     * 开始学习一个知识点。这个知识点最近的会话还没走完时返回那个会话（刷新、离开后再回来都走这里）：
+     * 还没结束的接着学；学完了但还没评分的回去评分（#23），否则用户学完没评分就离开，再进来会新开一个会话，那次学习就白学了。
      * 只创建会话，不调用模型：老师的第一句由前端接着调用 reply 生成。
      *
      * @throws BusinessException 知识点不存在时为 NOT_FOUND；只收录、不参与复习的类型为 BAD_REQUEST
@@ -65,15 +74,14 @@ public class StudySessionService {
         if (!material.type().isScheduled()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "这类知识点暂时只收录，不能学习");
         }
-        StudySession open = sessionMapper.selectOne(new LambdaQueryWrapper<StudySession>()
+        StudySession latest = sessionMapper.selectOne(new LambdaQueryWrapper<StudySession>()
                 .eq(StudySession::getUserId, userId)
                 .eq(StudySession::getType, SessionType.STUDY)
                 .eq(StudySession::getKpId, request.kpId())
-                .isNull(StudySession::getEndedAt)
                 .orderByDesc(StudySession::getId)
                 .last("LIMIT 1"));
-        if (open != null) {
-            return view(open, material.title());
+        if (latest != null && (latest.getEndedAt() == null || !reviewService.isRated(latest.getId()))) {
+            return view(latest, material.title());
         }
 
         Instant now = Instant.now(clock);
@@ -203,6 +211,17 @@ public class StudySessionService {
                 .toList();
         return new SessionView(session.getId(), session.getType(), session.getKpId(), session.getParentSessionId(), kpTitle,
                 session.getEndedAt() != null, Boolean.TRUE.equals(session.getSkippedExplanation()),
-                generating.contains(session.getId()), messages);
+                generating.contains(session.getId()), session.getActiveSeconds(), rating(session), messages);
+    }
+
+    /** 学习会话已经评过分时，评分和下次复习的学习日；其他情况为 null */
+    private RatingOption rating(StudySession session) {
+        if (session.getType() != SessionType.STUDY) {
+            return null;
+        }
+        return reviewService.reviewOf(session.getId())
+                .map(r -> RatingService.option(r.rating(), r.due(), Instant.now(clock),
+                        settingsService.get(session.getUserId())))
+                .orElse(null);
     }
 }
