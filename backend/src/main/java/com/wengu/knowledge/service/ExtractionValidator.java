@@ -25,6 +25,16 @@ public final class ExtractionValidator {
     private ExtractionValidator() {
     }
 
+    /** 漏题的问题以这句开头，用来认出“只剩漏题” */
+    static final String MISSING_PREFIX = "以下题目既没有对应的知识点，也没有标为已有：";
+
+    /**
+     * 发现的问题只有漏题一种。重试后只剩漏题时，这一批照样算成功，漏掉的题在确认页提示用户（#22，决策 014 修订）。
+     */
+    static boolean onlyMissing(List<String> problems) {
+        return problems.size() == 1 && problems.getFirst().startsWith(MISSING_PREFIX);
+    }
+
     /** 不带去重上下文的抽取。 */
     public static List<String> validate(List<ExtractionQuestion> questions, ExtractionResult result) {
         return validate(questions, DedupContext.EMPTY, result);
@@ -55,7 +65,7 @@ public final class ExtractionValidator {
         Set<Integer> missing = new TreeSet<>(questionIds);
         missing.removeAll(answered);
         if (!missing.isEmpty()) {
-            problems.add("以下题目既没有对应的知识点，也没有标为已有：" + missing);
+            problems.add(MISSING_PREFIX + missing);
         }
         return problems;
     }

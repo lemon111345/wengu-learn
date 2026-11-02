@@ -153,4 +153,13 @@ class ExtractionValidatorTest {
         assertThat(text).contains("[E1] TCP 四次挥手的过程是怎样的？\n[E2] TCP 三次握手的过程是怎样的？");
         assertThat(text.indexOf("[E1]")).isLessThan(text.indexOf("[1] 说说"));
     }
+
+    @Test
+    void 只剩漏题才算onlyMissing() {
+        assertThat(ExtractionValidator.onlyMissing(List.of(ExtractionValidator.MISSING_PREFIX + "[3]"))).isTrue();
+        assertThat(ExtractionValidator.onlyMissing(List.of())).isFalse();
+        assertThat(ExtractionValidator.onlyMissing(List.of(ExtractionValidator.MISSING_PREFIX + "[3]", "第 1 个知识点：没有来源题号")))
+                .isFalse();
+        assertThat(ExtractionValidator.onlyMissing(List.of("没有抽取结果"))).isFalse();
+    }
 }

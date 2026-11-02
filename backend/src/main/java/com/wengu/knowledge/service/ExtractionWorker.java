@@ -214,6 +214,7 @@ public class ExtractionWorker {
      * 调用模型抽取，把每次调用的信息记到 batch 上，返回通过校验的结果；失败时返回 null，原因记在 batch.error。
      * <p>
      * 只有输出解析失败或校验不通过时才重试；模型调用本身抛出的异常（网络错误、Key 不对）重试也没用，直接抛给调用方。
+     * 最后一次只剩漏题时也返回结果，漏题的说明留在 batch.error 中，供以后分析（#9）。
      */
     private ExtractionResult extractWithRetry(List<ExtractionQuestion> questions, DedupContext context,
                                               ExtractionBatch batch) {
@@ -225,6 +226,12 @@ public class ExtractionWorker {
                 List<String> problems = ExtractionValidator.validate(questions, context, result.content());
                 if (problems.isEmpty()) {
                     batch.setError(null);
+                    return result.content();
+                }
+                // 最后一次只剩漏题：不让一两道题拖垮整批，照样算成功；漏掉的题在确认页提示，可以单独再抽（#22）
+                if (attempt == MAX_ATTEMPTS && ExtractionValidator.onlyMissing(problems)) {
+                    batch.setError(problems.getFirst());
+                    log.warn("知识点抽取重试后仍有漏题，按成功处理: batchId={}, {}", batch.getId(), problems.getFirst());
                     return result.content();
                 }
                 batch.setError(String.join("\n", problems));
