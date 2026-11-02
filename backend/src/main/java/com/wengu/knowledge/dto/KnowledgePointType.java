@@ -1,5 +1,8 @@
 package com.wengu.knowledge.dto;
 
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * 知识点类型，决定学习和复习时使用哪种对话方式。定义见技术方案“知识点粒度与类型”。
  */
@@ -36,5 +39,10 @@ public enum KnowledgePointType {
      */
     public boolean isScheduled() {
         return this != SYSTEM_DESIGN && this != EXPERIENCE;
+    }
+
+    /** 参与调度的全部类型，每日计划用它排除只收录的（决策 029） */
+    public static List<KnowledgePointType> scheduledTypes() {
+        return Arrays.stream(values()).filter(KnowledgePointType::isScheduled).toList();
     }
 }

@@ -1,0 +1,122 @@
+package com.wengu.knowledge.controller;
+
+import com.wengu.TestcontainersConfiguration;
+import com.wengu.knowledge.dto.KnowledgePointType;
+import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.knowledge.service.KnowledgePointService;
+import com.wengu.user.dto.RegisterRequest;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import tools.jackson.databind.json.JsonMapper;
+
+import java.util.List;
+import java.util.UUID;
+
+import static com.wengu.TestCsrf.csrfToken;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * 知识点操作的 HTTP 接口（#25）：完整的过滤器链（登录、CSRF）、错误时返回统一格式。
+ * 业务规则的各种情况在 KnowledgePointServiceTest 中测；各个测试的用户名随机生成，互不影响。
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
+@Import(TestcontainersConfiguration.class)
+class KnowledgePointControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private JsonMapper jsonMapper;
+
+    @Autowired
+    private KnowledgePointService knowledgePointService;
+
+    @Autowired
+    private KnowledgePointMapper knowledgePointMapper;
+
+    private MockHttpSession login;
+    private long kpId;
+
+    @BeforeEach
+    void registerAndAddKnowledgePoint() throws Exception {
+        String username = "kp" + UUID.randomUUID().toString().substring(0, 8);
+        MvcResult result = mockMvc.perform(post("/api/auth/register").with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonMapper.writeValueAsString(new RegisterRequest(username, "correct-horse-1", null))))
+                .andExpect(status().isOk())
+                .andReturn();
+        login = (MockHttpSession) result.getRequest().getSession(false);
+        long userId = jsonMapper.readTree(result.getResponse().getContentAsString()).get("data").get("id").asLong();
+        kpId = knowledgePointService.create(userId, null, List.of(new KnowledgePointService.NewKnowledgePoint(
+                KnowledgePointType.CONCEPT, "什么是 volatile？", "要点", null))).getFirst();
+    }
+
+    @Test
+    void 编辑知识点() throws Exception {
+        mockMvc.perform(patch("/api/knowledge-points/" + kpId).session(login).with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\": \"volatile 保证了什么？\", \"type\": \"MECHANISM\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("OK"));
+
+        assertThat(knowledgePointMapper.selectById(kpId).getTitle()).isEqualTo("volatile 保证了什么？");
+        assertThat(knowledgePointMapper.selectById(kpId).getType()).isEqualTo(KnowledgePointType.MECHANISM);
+    }
+
+    @Test
+    void 标题为空时返回400() throws Exception {
+        mockMvc.perform(patch("/api/knowledge-points/" + kpId).session(login).with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\": \" \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").value("标题不能为空"));
+    }
+
+    @Test
+    void 不存在的类型返回400() throws Exception {
+        mockMvc.perform(patch("/api/knowledge-points/" + kpId).session(login).with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\": \"QUIZ\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void 别人的知识点返回404() throws Exception {
+        String other = "kp" + UUID.randomUUID().toString().substring(0, 8);
+        MvcResult result = mockMvc.perform(post("/api/auth/register").with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonMapper.writeValueAsString(new RegisterRequest(other, "correct-horse-1", null))))
+                .andExpect(status().isOk())
+                .andReturn();
+        MockHttpSession otherLogin = (MockHttpSession) result.getRequest().getSession(false);
+
+        mockMvc.perform(patch("/api/knowledge-points/" + kpId).session(otherLogin).with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\": \"改别人的\"}"))
+                .andExpect(status().isNotFound());
+        assertThat(knowledgePointMapper.selectById(kpId).getTitle()).isEqualTo("什么是 volatile？");
+    }
+
+    @Test
+    void 没有CSRF令牌时拒绝() throws Exception {
+        mockMvc.perform(patch("/api/knowledge-points/" + kpId).session(login)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\": \"新标题\"}"))
+                .andExpect(status().isForbidden());
+    }
+}

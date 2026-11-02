@@ -1,19 +1,23 @@
 package com.wengu.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.StudyMaterial;
+import com.wengu.knowledge.dto.UpdateKnowledgePointRequest;
 import com.wengu.knowledge.entity.ExtractionDraft;
 import com.wengu.knowledge.entity.ExtractionDraftItem;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
+import com.wengu.knowledge.entity.KpRevision;
 import com.wengu.knowledge.entity.KpSource;
 import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftMapper;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.knowledge.mapper.KpRevisionMapper;
 import com.wengu.knowledge.mapper.KpSourceMapper;
 import com.wengu.review.service.ReviewService;
 import com.wengu.source.dto.SourceQuestion;
@@ -40,8 +44,12 @@ import java.util.stream.Collectors;
 @Service
 public class KnowledgePointService {
 
+    /** 标题最长 500 字，和 knowledge_point.title 的列宽一致 */
+    private static final int MAX_TITLE_LENGTH = 500;
+
     private final KnowledgePointMapper knowledgePointMapper;
     private final KpSourceMapper kpSourceMapper;
+    private final KpRevisionMapper revisionMapper;
     private final ExtractionDraftItemMapper draftItemMapper;
     private final ExtractionDraftMapper draftMapper;
     private final ReviewService reviewService;
@@ -49,10 +57,11 @@ public class KnowledgePointService {
     private final Clock clock;
 
     public KnowledgePointService(KnowledgePointMapper knowledgePointMapper, KpSourceMapper kpSourceMapper,
-                                 ExtractionDraftItemMapper draftItemMapper, ExtractionDraftMapper draftMapper,
+                                 KpRevisionMapper revisionMapper, ExtractionDraftItemMapper draftItemMapper, ExtractionDraftMapper draftMapper,
                                  ReviewService reviewService, SourceService sourceService, Clock clock) {
         this.knowledgePointMapper = knowledgePointMapper;
         this.kpSourceMapper = kpSourceMapper;
+        this.revisionMapper = revisionMapper;
         this.draftItemMapper = draftItemMapper;
         this.draftMapper = draftMapper;
         this.reviewService = reviewService;
@@ -159,7 +168,8 @@ public class KnowledgePointService {
     }
 
     /**
-     * 每日计划第 6 步：从给定的 id 中去掉暂停的和删除的，按学习顺序（sort_order、id）排列（决策 002 第 6 条）。
+     * 每日计划第 6 步：从给定的 id 中去掉暂停的、删除的、只收录类型的，按学习顺序（sort_order、id）排列（决策 002 第 6 条）。
+     * 只收录的类型本来没有调度状态；从别的类型改过来的保留了调度状态，在这里排除（决策 029）。
      * 候选 id 来自 review，这里只读 knowledge 自己的表；不属于该用户的 id 直接忽略。
      * <p>
      * 用 IN 查询、在数据库中排序，MVP 只有几百个知识点，足够快；到几千个以后再改。
@@ -173,6 +183,7 @@ public class KnowledgePointService {
                         .eq(KnowledgePoint::getUserId, userId)
                         .eq(KnowledgePoint::getStatus, KnowledgePointStatus.ACTIVE)
                         .isNull(KnowledgePoint::getDeletedAt)
+                        .in(KnowledgePoint::getType, KnowledgePointType.scheduledTypes())
                         .in(KnowledgePoint::getId, kpIds)
                         .orderByAsc(KnowledgePoint::getSortOrder)
                         .orderByAsc(KnowledgePoint::getId))
@@ -208,10 +219,7 @@ public class KnowledgePointService {
      * @throws BusinessException 知识点不存在、不属于这个用户或已删除时为 NOT_FOUND
      */
     public StudyMaterial studyMaterial(long userId, long kpId) {
-        KnowledgePoint kp = knowledgePointMapper.selectById(kpId);
-        if (kp == null || kp.getUserId() != userId || kp.getDeletedAt() != null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "知识点不存在");
-        }
+        KnowledgePoint kp = owned(userId, kpId);
         return new StudyMaterial(kp.getId(), kp.getTitle(), kp.getType(), kp.getSummary(),
                 sourceQuestions(userId, kp.getDraftItemId()));
     }
@@ -239,6 +247,69 @@ public class KnowledgePointService {
                 .map(q -> q.followUps().isEmpty() ? q.text()
                         : q.text() + "（追问：" + String.join("；", q.followUps()) + "）")
                 .toList();
+    }
+
+    /**
+     * 编辑标题、类型、要点（#25），只改传了的字段。确实有改动时，先把修改前的内容存一份快照（kp_revision），再更新。
+     * <p>
+     * 改类型时的调度状态（决策 029）：
+     * <ul>
+     *   <li>改成参与调度的类型：还没有调度状态的初始化成新卡，已经有的接着用</li>
+     *   <li>改成只收录的类型：调度状态保留，每日计划按类型排除（{@link #activeInOrder}）；改回来时进度还在</li>
+     * </ul>
+     *
+     * @throws BusinessException 知识点不存在、不属于这个用户或已删除时为 NOT_FOUND；
+     *                           标题或要点为空、标题过长时为 BAD_REQUEST
+     */
+    @Transactional
+    public void update(long userId, long kpId, UpdateKnowledgePointRequest request) {
+        KnowledgePoint kp = owned(userId, kpId);
+        String title = request.title() == null ? kp.getTitle() : validTitle(request.title());
+        KnowledgePointType type = request.type() == null ? kp.getType() : request.type();
+        String summary = request.summary() == null ? kp.getSummary() : validSummary(request.summary());
+        if (title.equals(kp.getTitle()) && type == kp.getType() && summary.equals(kp.getSummary())) {
+            // 没有改动不留记录，前端可以放心地整份提交
+            return;
+        }
+        Instant now = Instant.now(clock);
+        revisionMapper.insert(KpRevision.before(kp, now));
+        if (type != kp.getType() && type.isScheduled()) {
+            reviewService.ensureCard(userId, kpId);
+        }
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getTitle, title)
+                .set(KnowledgePoint::getType, type)
+                .set(KnowledgePoint::getSummary, summary)
+                .set(KnowledgePoint::getUpdatedAt, now)
+                .eq(KnowledgePoint::getId, kpId));
+    }
+
+    private static String validTitle(String title) {
+        String stripped = title.strip();
+        if (stripped.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "标题不能为空");
+        }
+        if (stripped.length() > MAX_TITLE_LENGTH) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "标题最长 " + MAX_TITLE_LENGTH + " 字");
+        }
+        return stripped;
+    }
+
+    private static String validSummary(String summary) {
+        String stripped = summary.strip();
+        if (stripped.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "要点不能为空");
+        }
+        return stripped;
+    }
+
+    /** 属于这个用户、没有删除的知识点；否则 NOT_FOUND，不区分是哪种情况，免得别人试探出 id */
+    private KnowledgePoint owned(long userId, long kpId) {
+        KnowledgePoint kp = knowledgePointMapper.selectById(kpId);
+        if (kp == null || kp.getUserId() != userId || kp.getDeletedAt() != null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "知识点不存在");
+        }
+        return kp;
     }
 
     /** 用户的知识点总数，暂停的也算，删除的不算。今天页据此判断是否显示空状态（#49）。 */
