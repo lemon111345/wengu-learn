@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -155,6 +156,24 @@ public class KnowledgePointService {
                 .stream()
                 .map(kp -> new KnowledgePointSummary(kp.getId(), kp.getTitle(), kp.getType()))
                 .toList();
+    }
+
+    /**
+     * 按 id 查标题和类型，供每日计划显示今天已完成的条目（#48）。
+     * 暂停的也返回：“今天学过”是已经发生的事，暂停不改变它；以后有了软删除（#25），删除的不返回。
+     * 不属于该用户的 id 不在结果中。
+     */
+    public Map<Long, KnowledgePointSummary> summaries(long userId, Collection<Long> kpIds) {
+        if (kpIds.isEmpty()) {
+            return Map.of();
+        }
+        return knowledgePointMapper.selectList(new LambdaQueryWrapper<KnowledgePoint>()
+                        .select(KnowledgePoint::getId, KnowledgePoint::getTitle, KnowledgePoint::getType)
+                        .eq(KnowledgePoint::getUserId, userId)
+                        .in(KnowledgePoint::getId, kpIds))
+                .stream()
+                .collect(Collectors.toMap(KnowledgePoint::getId,
+                        kp -> new KnowledgePointSummary(kp.getId(), kp.getTitle(), kp.getType())));
     }
 
     /** 用户已有知识点中最大的 sort_order，没有知识点时为 0。 */

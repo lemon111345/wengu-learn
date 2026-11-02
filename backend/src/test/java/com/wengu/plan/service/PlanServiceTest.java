@@ -7,6 +7,7 @@ import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.knowledge.mapper.KpSourceMapper;
+import com.wengu.plan.dto.CompletedItem;
 import com.wengu.plan.dto.PlanItem;
 import com.wengu.plan.dto.TodayPlan;
 import com.wengu.review.entity.CardState;
@@ -33,6 +34,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * 每日计划（决策 016）。真实 MySQL，时钟可以手动拨动。
@@ -218,6 +220,7 @@ class PlanServiceTest {
 
         assertThat(plan.date()).isEqualTo(LocalDate.of(2026, 10, 29));
         assertThat(plan.newLearnedToday()).isEqualTo(1);
+        assertThat(plan.completed()).extracting(CompletedItem::title).containsExactly("凌晨学的");
 
         // 同一时刻，纽约还是 10 月 28 日下午，这个学习日从纽约 10 月 28 日 04:00 开始，同样算今天学的
         settingsService.update(1, new UpdateSettingsRequest("America/New_York", null, null));
@@ -272,5 +275,74 @@ class PlanServiceTest {
 
         assertThat(titles(plan.reviews())).containsExactly("正常的复习");
         assertThat(titles(plan.newItems())).containsExactly("正常的新知识");
+    }
+
+    /** 写一条评分流水，不改调度状态：“今天已完成”只看流水。 */
+    private void log(KnowledgePoint kp, Instant at, Rating rating, boolean first) {
+        ReviewLog log = new ReviewLog();
+        log.setUserId(kp.getUserId());
+        log.setKpId(kp.getId());
+        log.setRatingUser(rating);
+        log.setStateBefore(first ? State.LEARNING : State.REVIEW);
+        log.setFirstReview(first);
+        log.setReviewedAt(at);
+        reviewLogMapper.insert(log);
+    }
+
+    @Test
+    void 今天已完成的按完成时间排列并带评分和是否新学() {
+        KnowledgePoint learned = newKp("新学的", 1);
+        KnowledgePoint reviewed = reviewedKp("复习的", 2, NOW.plus(Duration.ofDays(3)));
+        log(reviewed, NOW.minus(Duration.ofMinutes(30)), Rating.HARD, false);
+        log(learned, NOW.minus(Duration.ofHours(1)), Rating.GOOD, true);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.completed()).containsExactly(
+                new CompletedItem(learned.getId(), "新学的", KnowledgePointType.MECHANISM, Rating.GOOD, true),
+                new CompletedItem(reviewed.getId(), "复习的", KnowledgePointType.MECHANISM, Rating.HARD, false));
+    }
+
+    @Test
+    void 今天已完成的按学习日的分界时刻划分() {
+        KnowledgePoint before = reviewedKp("北京时间凌晨3点59分评的", 1, NOW.plus(Duration.ofDays(3)));
+        KnowledgePoint atStart = reviewedKp("北京时间凌晨4点整评的", 2, NOW.plus(Duration.ofDays(3)));
+        KnowledgePoint tomorrow = reviewedKp("明天凌晨4点评的", 3, NOW.plus(Duration.ofDays(3)));
+        // 10 月 29 日这个学习日是 [10-28T20:00Z, 10-29T20:00Z)，UTC 日期和北京时间不在同一天
+        log(before, DAY_START.minusSeconds(1), Rating.GOOD, false);
+        log(atStart, DAY_START, Rating.GOOD, false);
+        log(tomorrow, DAY_END, Rating.GOOD, false);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.completed()).extracting(CompletedItem::title).containsExactly("北京时间凌晨4点整评的");
+    }
+
+    @Test
+    void 同一个知识点今天评了两次时取最后一次() {
+        KnowledgePoint a = reviewedKp("评了两次的", 1, NOW.plus(Duration.ofDays(3)));
+        KnowledgePoint b = reviewedKp("评了一次的", 2, NOW.plus(Duration.ofDays(3)));
+        log(a, NOW.minus(Duration.ofHours(3)), Rating.AGAIN, false);
+        log(b, NOW.minus(Duration.ofHours(2)), Rating.GOOD, false);
+        log(a, NOW.minus(Duration.ofHours(1)), Rating.EASY, false);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.completed()).extracting(CompletedItem::title, CompletedItem::rating)
+                .containsExactly(tuple("评了一次的", Rating.GOOD), tuple("评了两次的", Rating.EASY));
+    }
+
+    @Test
+    void 今天已完成的包括暂停的但不包括其他用户的() {
+        KnowledgePoint suspended = reviewedKp(1, "学完后暂停的", 1, NOW.plus(Duration.ofDays(3)),
+                KnowledgePointStatus.SUSPENDED);
+        KnowledgePoint others = reviewedKp(2, "其他用户的", 1, NOW.plus(Duration.ofDays(3)),
+                KnowledgePointStatus.ACTIVE);
+        log(suspended, NOW, Rating.GOOD, false);
+        log(others, NOW, Rating.GOOD, false);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.completed()).extracting(CompletedItem::title).containsExactly("学完后暂停的");
     }
 }

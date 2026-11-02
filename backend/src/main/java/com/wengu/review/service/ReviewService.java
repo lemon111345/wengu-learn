@@ -1,6 +1,7 @@
 package com.wengu.review.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.wengu.review.dto.ReviewRecord;
 import com.wengu.review.entity.CardState;
 import com.wengu.review.entity.ReviewLog;
 import com.wengu.review.fsrs.Card;
@@ -80,6 +81,22 @@ public class ReviewService {
                 .eq(ReviewLog::getFirstReview, true)
                 .ge(ReviewLog::getReviewedAt, start)
                 .lt(ReviewLog::getReviewedAt, end)));
+    }
+
+    /** [start, end) 之间的评分，按评分时间排列。每日计划用它显示今天已完成的条目（#48）。 */
+    public List<ReviewRecord> reviewsBetween(long userId, Instant start, Instant end) {
+        return reviewLogMapper.selectList(new LambdaQueryWrapper<ReviewLog>()
+                        .select(ReviewLog::getKpId, ReviewLog::getRatingUser, ReviewLog::getFirstReview,
+                                ReviewLog::getReviewedAt)
+                        .eq(ReviewLog::getUserId, userId)
+                        .ge(ReviewLog::getReviewedAt, start)
+                        .lt(ReviewLog::getReviewedAt, end)
+                        .orderByAsc(ReviewLog::getReviewedAt)
+                        .orderByAsc(ReviewLog::getId))
+                .stream()
+                .map(log -> new ReviewRecord(log.getKpId(), log.getRatingUser(), log.getFirstReview(),
+                        log.getReviewedAt()))
+                .toList();
     }
 
     private List<Long> kpIds(LambdaQueryWrapper<CardState> query) {
