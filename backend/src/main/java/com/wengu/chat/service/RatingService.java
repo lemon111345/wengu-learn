@@ -64,9 +64,11 @@ public class RatingService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "请选择一个评分");
         }
         StudySession session = ratable(userId, sessionId);
+        // 先读设置再评分：评分已经写进库、之后才出错的话，前端看到失败，实际却评上了
+        SettingsView settings = settingsService.get(userId);
         ReviewResult result = reviewService.rate(userId, session.getKpId(), sessionId, request.rating(),
                 suggestions.suggestedRating(sessionId));
-        return option(result.rating(), result.due(), settingsService.get(userId));
+        return option(result.rating(), result.due(), settings);
     }
 
     /**
