@@ -45,10 +45,15 @@ final class LearningChatPrompt {
     }
 
     static String system() {
+        return load(PROMPT_PATH);
+    }
+
+    /** 读取 classpath 下的 prompt 文件，接着问的 prompt 也用它。 */
+    static String load(String path) {
         try {
-            return new ClassPathResource(PROMPT_PATH).getContentAsString(StandardCharsets.UTF_8);
+            return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new UncheckedIOException("读取 prompt 失败：" + PROMPT_PATH, e);
+            throw new UncheckedIOException("读取 prompt 失败：" + path, e);
         }
     }
 
@@ -86,15 +91,15 @@ final class LearningChatPrompt {
     static List<ChatTurn> history(StudyMaterial material, List<Message> messages) {
         List<ChatTurn> turns = new ArrayList<>();
         turns.add(ChatTurn.user(kickoff(material)));
-        for (Message m : messages) {
-            if (m.getRole() == MessageRole.USER) {
-                turns.add(ChatTurn.user(m.getModelNote() == null ? m.getContent()
-                        : m.getContent() + "\n\n" + m.getModelNote()));
-            } else {
-                turns.add(ChatTurn.assistant(m.getMarker() == null ? m.getContent()
-                        : m.getContent() + "\n" + m.getMarker().text()));
-            }
-        }
+        messages.forEach(m -> turns.add(turn(m)));
         return turns;
+    }
+
+    /** 一条存库的消息还原成模型当时看到的样子：学生消息带上附加的提示，老师的回复补回标记。接着问也用它。 */
+    static ChatTurn turn(Message m) {
+        if (m.getRole() == MessageRole.USER) {
+            return ChatTurn.user(m.getModelNote() == null ? m.getContent() : m.getContent() + "\n\n" + m.getModelNote());
+        }
+        return ChatTurn.assistant(m.getMarker() == null ? m.getContent() : m.getContent() + "\n" + m.getMarker().text());
     }
 }
