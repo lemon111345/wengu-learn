@@ -2,6 +2,7 @@ package com.wengu.knowledge.controller;
 
 import com.wengu.TestcontainersConfiguration;
 import com.wengu.knowledge.dto.KnowledgePointType;
+import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.knowledge.service.KnowledgePointService;
 import com.wengu.user.dto.RegisterRequest;
@@ -118,5 +119,37 @@ class KnowledgePointControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"title\": \"新标题\"}"))
                 .andExpect(status().isForbidden());
+    }
+
+    private void postIds(String action, long id, int expectedStatus) throws Exception {
+        mockMvc.perform(post("/api/knowledge-points/" + action).session(login).with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ids\": [" + id + "]}"))
+                .andExpect(status().is(expectedStatus));
+    }
+
+    @Test
+    void 暂停_删除_撤销() throws Exception {
+        postIds("suspend", kpId, 200);
+        assertThat(knowledgePointMapper.selectById(kpId).getStatus()).isEqualTo(KnowledgePointStatus.SUSPENDED);
+
+        postIds("delete", kpId, 200);
+        assertThat(knowledgePointMapper.selectById(kpId).getDeletedAt()).isNotNull();
+        // 删除后不能再暂停、恢复、编辑
+        postIds("resume", kpId, 404);
+
+        postIds("restore", kpId, 200);
+        assertThat(knowledgePointMapper.selectById(kpId).getDeletedAt()).isNull();
+        postIds("resume", kpId, 200);
+        assertThat(knowledgePointMapper.selectById(kpId).getStatus()).isEqualTo(KnowledgePointStatus.ACTIVE);
+    }
+
+    @Test
+    void 没有选择知识点时返回400() throws Exception {
+        mockMvc.perform(post("/api/knowledge-points/delete").session(login).with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ids\": []}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("没有选择知识点"));
     }
 }

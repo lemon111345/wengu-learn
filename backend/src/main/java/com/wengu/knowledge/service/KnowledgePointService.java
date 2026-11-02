@@ -32,6 +32,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -301,6 +302,83 @@ public class KnowledgePointService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "要点不能为空");
         }
         return stripped;
+    }
+
+    /**
+     * 暂停复习（#25）：不再进每日计划，调度状态不动。已经暂停的照样成功。
+     * 恢复后，暂停期间到期的会马上作为到期复习出现。
+     *
+     * @throws BusinessException 没有选择知识点时为 BAD_REQUEST；有任何一个不存在、不属于这个用户或已删除时为 NOT_FOUND，整批不执行
+     */
+    @Transactional
+    public void suspend(long userId, Collection<Long> ids) {
+        setStatus(userId, ids, KnowledgePointStatus.SUSPENDED);
+    }
+
+    /** 恢复复习，规则同 {@link #suspend}。 */
+    @Transactional
+    public void resume(long userId, Collection<Long> ids) {
+        setStatus(userId, ids, KnowledgePointStatus.ACTIVE);
+    }
+
+    private void setStatus(long userId, Collection<Long> ids, KnowledgePointStatus status) {
+        Set<Long> selected = requireAll(userId, ids, false);
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getStatus, status)
+                .set(KnowledgePoint::getUpdatedAt, Instant.now(clock))
+                .in(KnowledgePoint::getId, selected));
+    }
+
+    /**
+     * 删除（软删除，决策 029）：只写 deleted_at。status、调度状态、学习记录、来源都不动，撤销后原样回来。
+     *
+     * @throws BusinessException 规则同 {@link #suspend}
+     */
+    @Transactional
+    public void delete(long userId, Collection<Long> ids) {
+        Set<Long> selected = requireAll(userId, ids, false);
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getDeletedAt, Instant.now(clock))
+                .in(KnowledgePoint::getId, selected));
+    }
+
+    /**
+     * 撤销删除：清空 deleted_at。后端不限时间，前端只在删除后的几秒钟内提供入口。
+     * 被合并的不能撤销：合并没有撤销，恢复出来会和主知识点重复。
+     *
+     * @throws BusinessException 没有选择知识点时为 BAD_REQUEST；有任何一个不存在、不属于这个用户、没有删除或是被合并的时为 NOT_FOUND
+     */
+    @Transactional
+    public void restore(long userId, Collection<Long> ids) {
+        Set<Long> selected = requireAll(userId, ids, true);
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getDeletedAt, null)
+                .in(KnowledgePoint::getId, selected));
+    }
+
+    /**
+     * 批量操作的检查：ids 不能为空，而且每一个都属于这个用户、处于要求的删除状态，否则整批都不执行。
+     *
+     * @param deleted false 要求都没删除；true 要求都是删除的、且不是被合并的
+     * @return 去重后的 id
+     */
+    private Set<Long> requireAll(long userId, Collection<Long> ids, boolean deleted) {
+        if (ids == null || ids.isEmpty() || ids.stream().anyMatch(Objects::isNull)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "没有选择知识点");
+        }
+        Set<Long> selected = Set.copyOf(ids);
+        LambdaQueryWrapper<KnowledgePoint> query = new LambdaQueryWrapper<KnowledgePoint>()
+                .eq(KnowledgePoint::getUserId, userId)
+                .in(KnowledgePoint::getId, selected);
+        if (deleted) {
+            query.isNotNull(KnowledgePoint::getDeletedAt).isNull(KnowledgePoint::getMergedInto);
+        } else {
+            query.isNull(KnowledgePoint::getDeletedAt);
+        }
+        if (knowledgePointMapper.selectCount(query) != selected.size()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "知识点不存在");
+        }
+        return selected;
     }
 
     /** 属于这个用户、没有删除的知识点；否则 NOT_FOUND，不区分是哪种情况，免得别人试探出 id */

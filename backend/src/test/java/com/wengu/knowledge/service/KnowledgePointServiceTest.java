@@ -1,7 +1,6 @@
 package com.wengu.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.wengu.TestcontainersConfiguration;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
@@ -9,6 +8,7 @@ import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.UpdateKnowledgePointRequest;
 import com.wengu.knowledge.entity.KnowledgePoint;
+import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.entity.KpRevision;
 import com.wengu.knowledge.entity.KpSource;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
@@ -24,7 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 
-import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -89,11 +89,8 @@ class KnowledgePointServiceTest {
                 e -> assertThat(e.getErrorCode()).isEqualTo(code));
     }
 
-    /** 直接在库里标记删除；删除接口由后面的提交加上 */
     private void markDeleted(long kpId) {
-        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
-                .set(KnowledgePoint::getDeletedAt, Instant.now())
-                .eq(KnowledgePoint::getId, kpId));
+        service.delete(USER_ID, List.of(kpId));
     }
 
     @Test
@@ -228,5 +225,64 @@ class KnowledgePointServiceTest {
         assertThat(card.getUserId()).isEqualTo(USER_ID);
         assertThat(service.activeInOrder(USER_ID, List.of(systemDesign)))
                 .extracting(KnowledgePointSummary::id).containsExactly(systemDesign);
+    }
+    @Test
+    void 暂停后不进每日计划_恢复后回来_进度不动() {
+        reviewService.rate(USER_ID, concept, null, Rating.GOOD, null);
+        CardState reviewed = cardStateMapper.selectById(concept);
+
+        service.suspend(USER_ID, List.of(concept, concept));
+        assertThat(knowledgePointMapper.selectById(concept).getStatus()).isEqualTo(KnowledgePointStatus.SUSPENDED);
+        assertThat(service.activeInOrder(USER_ID, List.of(mechanism, concept)))
+                .extracting(KnowledgePointSummary::id).containsExactly(mechanism);
+        // 暂停的仍在去重上下文中
+        assertThat(service.listTitles(USER_ID)).extracting(DedupContext.Existing::id).contains(concept);
+
+        service.resume(USER_ID, List.of(concept));
+        assertThat(service.activeInOrder(USER_ID, List.of(mechanism, concept)))
+                .extracting(KnowledgePointSummary::id).containsExactly(mechanism, concept);
+        assertThat(cardStateMapper.selectById(concept).getDue()).isEqualTo(reviewed.getDue());
+    }
+
+    @Test
+    void 撤销删除后状态和进度原样回来() {
+        reviewService.rate(USER_ID, concept, null, Rating.GOOD, null);
+        CardState reviewed = cardStateMapper.selectById(concept);
+        service.suspend(USER_ID, List.of(concept));
+
+        service.delete(USER_ID, List.of(concept, mechanism));
+        assertThat(service.count(USER_ID)).isEqualTo(1);
+
+        service.restore(USER_ID, List.of(concept, mechanism));
+        KnowledgePoint kp = knowledgePointMapper.selectById(concept);
+        assertThat(kp.getDeletedAt()).isNull();
+        // 删除前是暂停的，撤销后还是暂停
+        assertThat(kp.getStatus()).isEqualTo(KnowledgePointStatus.SUSPENDED);
+        assertThat(cardStateMapper.selectById(concept).getDue()).isEqualTo(reviewed.getDue());
+        assertThat(service.count(USER_ID)).isEqualTo(3);
+        assertThat(service.activeInOrder(USER_ID, List.of(mechanism))).hasSize(1);
+    }
+
+    @Test
+    void 批量中有一个不符合时整批不执行() {
+        markDeleted(systemDesign);
+
+        // 已删除的、别人的、不存在的
+        assertErrorCode(() -> service.suspend(USER_ID, List.of(concept, systemDesign)), ErrorCode.NOT_FOUND);
+        assertErrorCode(() -> service.delete(USER_ID + 1, List.of(concept)), ErrorCode.NOT_FOUND);
+        assertErrorCode(() -> service.delete(USER_ID, List.of(concept, 999_999L)), ErrorCode.NOT_FOUND);
+        // 没删除的不能撤销
+        assertErrorCode(() -> service.restore(USER_ID, List.of(systemDesign, concept)), ErrorCode.NOT_FOUND);
+
+        assertThat(knowledgePointMapper.selectById(concept).getStatus()).isEqualTo(KnowledgePointStatus.ACTIVE);
+        assertThat(knowledgePointMapper.selectById(concept).getDeletedAt()).isNull();
+        assertThat(knowledgePointMapper.selectById(systemDesign).getDeletedAt()).isNotNull();
+    }
+
+    @Test
+    void 没有选择知识点时400() {
+        assertErrorCode(() -> service.suspend(USER_ID, List.of()), ErrorCode.BAD_REQUEST);
+        assertErrorCode(() -> service.delete(USER_ID, null), ErrorCode.BAD_REQUEST);
+        assertErrorCode(() -> service.restore(USER_ID, Arrays.asList(concept, null)), ErrorCode.BAD_REQUEST);
     }
 }
