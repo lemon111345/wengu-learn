@@ -51,7 +51,7 @@ async function onCommand(command: string) {
     <template #dropdown>
       <el-dropdown-menu>
         <el-dropdown-item command="shortcuts">快捷键</el-dropdown-item>
-        <el-dropdown-item command="logout" class="logout" divided>退出登录</el-dropdown-item>
+        <el-dropdown-item command="logout" class="wg-danger" divided>退出登录</el-dropdown-item>
       </el-dropdown-menu>
     </template>
   </el-dropdown>
@@ -101,12 +101,5 @@ async function onCommand(command: string) {
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* 危险操作用 --wg-warn 色的文字（ui.md 第 3 节） */
-.logout {
-  --el-dropdown-menuItem-hover-color: var(--wg-warn);
-  --el-dropdown-menuItem-hover-fill: var(--wg-warn-soft);
-  color: var(--wg-warn);
 }
 </style>

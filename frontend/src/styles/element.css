@@ -63,6 +63,16 @@
   border-color: var(--wg-primary-line);
 }
 
+/*
+ * 菜单中的危险操作（退出登录、删除）用 --wg-warn 色的文字（ui.md 第 3 节）。
+ * 写在全局：下拉菜单项由 Element Plus 的内部组件渲染，组件中的 scoped 样式作用不到
+ */
+.el-dropdown-menu__item.wg-danger {
+  --el-dropdown-menuItem-hover-color: var(--wg-warn);
+  --el-dropdown-menuItem-hover-fill: var(--wg-warn-soft);
+  color: var(--wg-warn);
+}
+
 /* 次按钮：白底，深一点的描边 */
 .el-button--default {
   --el-button-border-color: var(--wg-border-strong);
