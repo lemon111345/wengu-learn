@@ -33,6 +33,9 @@ import java.util.stream.Collectors;
 
 /**
  * 知识点：创建、关联材料，以及抽取去重、每日计划、学习对话要用的查询。编辑、合并、暂停由 #25 添加。
+ * <p>
+ * 软删除（决策 029）：已删除的知识点（deleted_at 不为空，被合并的也是）在这里的查询中一律显式排除，
+ * 不用 MyBatis-Plus 的逻辑删除注解：撤销删除时要读出已删除的行，注解会挡住。
  */
 @Service
 public class KnowledgePointService {
@@ -67,7 +70,7 @@ public class KnowledgePointService {
 
     /**
      * 用户所有知识点的 id 和标题，按学习顺序排列，作为抽取的去重上下文（决策 014）。
-     * 暂停的知识点也算：暂停只是暂时不学，知识点还在，再抽一个重复的没有意义。
+     * 暂停的知识点也算：暂停只是暂时不学，知识点还在，再抽一个重复的没有意义。删除的不算。
      * <p>
      * userId 由调用方传入：抽取在后台线程中执行，读不到 CurrentUser（决策 013）。
      */
@@ -75,6 +78,7 @@ public class KnowledgePointService {
         return knowledgePointMapper.selectList(new LambdaQueryWrapper<KnowledgePoint>()
                         .select(KnowledgePoint::getId, KnowledgePoint::getTitle)
                         .eq(KnowledgePoint::getUserId, userId)
+                        .isNull(KnowledgePoint::getDeletedAt)
                         .orderByAsc(KnowledgePoint::getSortOrder)
                         .orderByAsc(KnowledgePoint::getId))
                 .stream()
@@ -127,7 +131,7 @@ public class KnowledgePointService {
 
     /**
      * 给已有知识点补上与材料的关联，例如新资料中的题被已有知识点覆盖时（决策 014）。
-     * 已经关联过的跳过；不属于该用户或已经不存在的知识点跳过。
+     * 已经关联过的跳过；不属于该用户、已经不存在或已删除的知识点跳过。
      */
     @Transactional
     public void linkToSource(long userId, long sourceId, Collection<Long> kpIds) {
@@ -137,6 +141,7 @@ public class KnowledgePointService {
         Set<Long> owned = knowledgePointMapper.selectList(new LambdaQueryWrapper<KnowledgePoint>()
                         .select(KnowledgePoint::getId)
                         .eq(KnowledgePoint::getUserId, userId)
+                        .isNull(KnowledgePoint::getDeletedAt)
                         .in(KnowledgePoint::getId, kpIds))
                 .stream().map(KnowledgePoint::getId).collect(Collectors.toSet());
         if (owned.isEmpty()) {
@@ -154,7 +159,7 @@ public class KnowledgePointService {
     }
 
     /**
-     * 每日计划第 6 步：从给定的 id 中去掉暂停的，按学习顺序（sort_order、id）排列（决策 002 第 6 条）。
+     * 每日计划第 6 步：从给定的 id 中去掉暂停的和删除的，按学习顺序（sort_order、id）排列（决策 002 第 6 条）。
      * 候选 id 来自 review，这里只读 knowledge 自己的表；不属于该用户的 id 直接忽略。
      * <p>
      * 用 IN 查询、在数据库中排序，MVP 只有几百个知识点，足够快；到几千个以后再改。
@@ -167,6 +172,7 @@ public class KnowledgePointService {
                         .select(KnowledgePoint::getId, KnowledgePoint::getTitle, KnowledgePoint::getType)
                         .eq(KnowledgePoint::getUserId, userId)
                         .eq(KnowledgePoint::getStatus, KnowledgePointStatus.ACTIVE)
+                        .isNull(KnowledgePoint::getDeletedAt)
                         .in(KnowledgePoint::getId, kpIds)
                         .orderByAsc(KnowledgePoint::getSortOrder)
                         .orderByAsc(KnowledgePoint::getId))
@@ -177,7 +183,7 @@ public class KnowledgePointService {
 
     /**
      * 按 id 查标题和类型，供每日计划显示今天已完成的条目（#48）。
-     * 暂停的也返回：“今天学过”是已经发生的事，暂停不改变它；以后有了软删除（#25），删除的不返回。
+     * 暂停的也返回：“今天学过”是已经发生的事，暂停不改变它；删除的不返回，知识点没了，今天页也不再显示。
      * 不属于该用户的 id 不在结果中。
      */
     public Map<Long, KnowledgePointSummary> summaries(long userId, Collection<Long> kpIds) {
@@ -187,6 +193,7 @@ public class KnowledgePointService {
         return knowledgePointMapper.selectList(new LambdaQueryWrapper<KnowledgePoint>()
                         .select(KnowledgePoint::getId, KnowledgePoint::getTitle, KnowledgePoint::getType)
                         .eq(KnowledgePoint::getUserId, userId)
+                        .isNull(KnowledgePoint::getDeletedAt)
                         .in(KnowledgePoint::getId, kpIds))
                 .stream()
                 .collect(Collectors.toMap(KnowledgePoint::getId,
@@ -198,11 +205,11 @@ public class KnowledgePointService {
      * 来源面试题按“知识点 → 草稿条目 → 草稿的材料”找到，题号来自条目的 source_question_ids。
      * 暂停的知识点也能取：用户从知识库直接打开时照样可以学。
      *
-     * @throws BusinessException 知识点不存在或不属于这个用户时为 NOT_FOUND
+     * @throws BusinessException 知识点不存在、不属于这个用户或已删除时为 NOT_FOUND
      */
     public StudyMaterial studyMaterial(long userId, long kpId) {
         KnowledgePoint kp = knowledgePointMapper.selectById(kpId);
-        if (kp == null || kp.getUserId() != userId) {
+        if (kp == null || kp.getUserId() != userId || kp.getDeletedAt() != null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "知识点不存在");
         }
         return new StudyMaterial(kp.getId(), kp.getTitle(), kp.getType(), kp.getSummary(),
@@ -234,13 +241,17 @@ public class KnowledgePointService {
                 .toList();
     }
 
-    /** 用户的知识点总数，暂停的也算。今天页据此判断是否显示空状态（#49）。 */
+    /** 用户的知识点总数，暂停的也算，删除的不算。今天页据此判断是否显示空状态（#49）。 */
     public int count(long userId) {
         return Math.toIntExact(knowledgePointMapper.selectCount(new LambdaQueryWrapper<KnowledgePoint>()
-                .eq(KnowledgePoint::getUserId, userId)));
+                .eq(KnowledgePoint::getUserId, userId)
+                .isNull(KnowledgePoint::getDeletedAt)));
     }
 
-    /** 用户已有知识点中最大的 sort_order，没有知识点时为 0。 */
+    /**
+     * 用户已有知识点中最大的 sort_order，没有知识点时为 0。
+     * 删除的也算：否则新知识点会用上删除的那个的序号，撤销删除后两个排序相同。
+     */
     private int maxSortOrder(long userId) {
         KnowledgePoint last = knowledgePointMapper.selectOne(new LambdaQueryWrapper<KnowledgePoint>()
                 .select(KnowledgePoint::getSortOrder)

@@ -6,7 +6,7 @@ import com.wengu.knowledge.dto.KnowledgePointType;
 
 import java.time.Instant;
 
-/** 知识点，对应 knowledge_point 表（V1）。确认草稿时写入（#17）。 */
+/** 知识点，对应 knowledge_point 表（V1）。确认草稿时写入（#17），在知识库中编辑、删除、合并（#25）。 */
 public class KnowledgePoint {
 
     @TableId(type = IdType.AUTO)
@@ -21,6 +21,10 @@ public class KnowledgePoint {
     private Integer sortOrder;
     /** 来自哪个草稿条目（#9 对比用）；合并或手动新建的知识点为空 */
     private Long draftItemId;
+    /** 软删除的时间，为空表示没删（V11，决策 029） */
+    private Instant deletedAt;
+    /** 被合并时指向主知识点，同时写 deletedAt */
+    private Long mergedInto;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -86,6 +90,22 @@ public class KnowledgePoint {
 
     public void setDraftItemId(Long draftItemId) {
         this.draftItemId = draftItemId;
+    }
+
+    public Instant getDeletedAt() {
+        return deletedAt;
+    }
+
+    public void setDeletedAt(Instant deletedAt) {
+        this.deletedAt = deletedAt;
+    }
+
+    public Long getMergedInto() {
+        return mergedInto;
+    }
+
+    public void setMergedInto(Long mergedInto) {
+        this.mergedInto = mergedInto;
     }
 
     public Instant getCreatedAt() {
