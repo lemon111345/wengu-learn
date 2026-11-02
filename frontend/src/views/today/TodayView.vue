@@ -1,0 +1,172 @@
+<script setup lang="ts">
+// 今天页（ui.md 5.2）：取计划和草稿列表，按状态显示
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { fetchDrafts, type DraftSummary } from '@/api/drafts'
+import { fetchTodayPlan, type TodayPlan } from '@/api/plan'
+import PageHeader from '@/components/PageHeader.vue'
+import { useShortcut } from '@/shortcuts/useShortcut'
+import { formatStudyDate } from '@/utils/date'
+import AskInput from './AskInput.vue'
+import OverviewPanel from './OverviewPanel.vue'
+import PendingBanner from './PendingBanner.vue'
+import PlanList from './PlanList.vue'
+import UpcomingPanel from './UpcomingPanel.vue'
+import { nextItem } from './summary'
+
+const router = useRouter()
+
+const plan = ref<TodayPlan | null>(null)
+const drafts = ref<DraftSummary[]>([])
+
+async function load() {
+  // 草稿列表只用于提示条，取不到时不影响计划的显示
+  const [planResult, draftsResult] = await Promise.allSettled([fetchTodayPlan(), fetchDrafts()])
+  if (planResult.status === 'fulfilled') {
+    plan.value = planResult.value
+  }
+  drafts.value = draftsResult.status === 'fulfilled' ? draftsResult.value : []
+}
+
+onMounted(load)
+
+const next = computed(() => (plan.value ? nextItem(plan.value) : null))
+
+function start(kpId: number) {
+  void router.push(`/study/${kpId}`)
+}
+
+useShortcut('Enter', () => {
+  if (next.value) {
+    start(next.value.kpId)
+  }
+})
+
+// 每天新学数保存后，新知识的名额变了，重新取计划
+async function onDailyNewSaved() {
+  plan.value = await fetchTodayPlan()
+}
+</script>
+
+<template>
+  <PageHeader>
+    <template #start>
+      <span class="date">{{ plan ? formatStudyDate(plan.date) : '' }}</span>
+    </template>
+  </PageHeader>
+  <div v-if="plan" class="wg-page-body today">
+    <main class="main">
+      <OverviewPanel :plan="plan" @start="start" />
+      <section class="ask">
+        <label for="ask-start">从一个问题开始</label>
+        <AskInput id="ask-start" />
+      </section>
+      <PendingBanner :drafts="drafts" />
+      <div class="lists">
+        <PlanList
+          class="new-list"
+          title="新学"
+          :completed="plan.completed.filter((c) => c.firstReview)"
+          :pending="plan.newItems"
+          :next-kp-id="next?.kpId"
+          empty-text="今天没有新知识"
+        />
+        <PlanList
+          class="review-list"
+          title="复习"
+          :completed="plan.completed.filter((c) => !c.firstReview)"
+          :pending="plan.reviews"
+          :next-kp-id="next?.kpId"
+          empty-text="今天没有到期的复习"
+        />
+      </div>
+    </main>
+    <aside class="side">
+      <UpcomingPanel :days="plan.upcomingReviews" :daily-new-limit="plan.dailyNewLimit" @saved="onDailyNewSaved" />
+    </aside>
+  </div>
+</template>
+
+<style scoped>
+.date {
+  color: var(--wg-text-muted);
+  font-size: 15px;
+}
+
+.today {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 28px;
+  padding-top: 32px;
+}
+
+.main {
+  flex: 999 1 620px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.side {
+  flex: 1 1 320px;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ask {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 8px 8px 8px 20px;
+  border: 1px solid var(--wg-border);
+  border-radius: var(--wg-radius-panel);
+}
+
+.ask label {
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.lists {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.new-list {
+  flex: 1 1 320px;
+}
+
+.review-list {
+  flex: 1.4 1 400px;
+}
+
+/* 窄屏：右侧栏换到主列下方，撑满宽度 */
+@media (max-width: 980px) {
+  .side {
+    max-width: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .today {
+    padding-top: 20px;
+  }
+
+  .main {
+    flex-basis: 100%;
+  }
+
+  .new-list,
+  .review-list {
+    flex-basis: 100%;
+  }
+}
+</style>
