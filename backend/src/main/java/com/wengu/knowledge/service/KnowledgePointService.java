@@ -37,7 +37,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 知识点：创建、关联材料，以及抽取去重、每日计划、学习对话要用的查询。编辑、合并、暂停由 #25 添加。
+ * 知识点：创建、关联材料，以及抽取去重、每日计划、学习对话要用的查询；知识库中的编辑、暂停、删除、合并（#25）。
  * <p>
  * 软删除（决策 029）：已删除的知识点（deleted_at 不为空，被合并的也是）在这里的查询中一律显式排除，
  * 不用 MyBatis-Plus 的逻辑删除注解：撤销删除时要读出已删除的行，注解会挡住。
@@ -354,6 +354,51 @@ public class KnowledgePointService {
         knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
                 .set(KnowledgePoint::getDeletedAt, null)
                 .in(KnowledgePoint::getId, selected));
+    }
+
+    /**
+     * 合并（决策 029）：主知识点的标题、要点、类型、排序、复习进度都不变；被合并的来源（kp_source）补关联到主知识点上，
+     * 然后软删除，并在 merged_into 记下主知识点。
+     * <ul>
+     *   <li>被合并的学习记录（review_log、会话）和调度状态留在原知识点上，不搬：那是另一张卡自己的复习序列，
+     *       搬过来会和主知识点的混在一起。#50 的详情通过 merged_into 把它们一起显示</li>
+     *   <li>之前并进被合并者的，merged_into 改指向新的主知识点，被合并的始终指向一个还在的知识点</li>
+     *   <li>合并没有撤销</li>
+     * </ul>
+     *
+     * @throws BusinessException 没有选择主知识点或被合并的、被合并的包含主知识点时为 BAD_REQUEST；
+     *                           任何一个不存在、不属于这个用户或已删除时为 NOT_FOUND，都不执行
+     */
+    @Transactional
+    public void merge(long userId, Long primaryId, Collection<Long> mergedIds) {
+        if (primaryId == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "没有选择主知识点");
+        }
+        owned(userId, primaryId);
+        Set<Long> merged = requireAll(userId, mergedIds, false);
+        if (merged.contains(primaryId)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "主知识点不能同时被合并");
+        }
+
+        Set<Long> primarySources = kpSourceMapper.selectList(new LambdaQueryWrapper<KpSource>()
+                        .eq(KpSource::getKpId, primaryId))
+                .stream().map(KpSource::getSourceId).collect(Collectors.toSet());
+        for (KpSource link : kpSourceMapper.selectList(new LambdaQueryWrapper<KpSource>()
+                .in(KpSource::getKpId, merged))) {
+            // 被合并的几个可能来自同一份材料，加进集合后不会重复关联
+            if (primarySources.add(link.getSourceId())) {
+                kpSourceMapper.insert(KpSource.of(primaryId, link.getSourceId(), userId));
+            }
+        }
+
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getMergedInto, primaryId)
+                .eq(KnowledgePoint::getUserId, userId)
+                .in(KnowledgePoint::getMergedInto, merged));
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getDeletedAt, Instant.now(clock))
+                .set(KnowledgePoint::getMergedInto, primaryId)
+                .in(KnowledgePoint::getId, merged));
     }
 
     /**

@@ -152,4 +152,18 @@ class KnowledgePointControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("没有选择知识点"));
     }
+
+    @Test
+    void 合并() throws Exception {
+        long userId = knowledgePointMapper.selectById(kpId).getUserId();
+        long other = knowledgePointService.create(userId, null, List.of(new KnowledgePointService.NewKnowledgePoint(
+                KnowledgePointType.CONCEPT, "volatile 有什么用？", "要点", null))).getFirst();
+
+        mockMvc.perform(post("/api/knowledge-points/merge").session(login).with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"primaryId\": " + kpId + ", \"mergedIds\": [" + other + "]}"))
+                .andExpect(status().isOk());
+
+        assertThat(knowledgePointMapper.selectById(other).getMergedInto()).isEqualTo(kpId);
+    }
 }

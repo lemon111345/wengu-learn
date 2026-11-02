@@ -3,6 +3,7 @@ package com.wengu.knowledge.controller;
 import com.wengu.common.context.CurrentUser;
 import com.wengu.common.result.Result;
 import com.wengu.knowledge.dto.KnowledgePointIdsRequest;
+import com.wengu.knowledge.dto.MergeKnowledgePointsRequest;
 import com.wengu.knowledge.dto.UpdateKnowledgePointRequest;
 import com.wengu.knowledge.service.KnowledgePointService;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -61,6 +62,13 @@ public class KnowledgePointController {
     @PostMapping("/restore")
     public Result<Void> restore(@RequestBody KnowledgePointIdsRequest request) {
         knowledgePointService.restore(currentUser.id(), request.ids());
+        return Result.ok();
+    }
+
+    /** 合并：保留主知识点的标题、要点和复习进度，其他的来源并到主知识点上，然后删除（不能撤销）。 */
+    @PostMapping("/merge")
+    public Result<Void> merge(@RequestBody MergeKnowledgePointsRequest request) {
+        knowledgePointService.merge(currentUser.id(), request.primaryId(), request.mergedIds());
         return Result.ok();
     }
 }

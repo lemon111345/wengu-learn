@@ -15,8 +15,10 @@ import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.knowledge.mapper.KpRevisionMapper;
 import com.wengu.knowledge.mapper.KpSourceMapper;
 import com.wengu.review.entity.CardState;
+import com.wengu.review.entity.ReviewLog;
 import com.wengu.review.fsrs.Rating;
 import com.wengu.review.mapper.CardStateMapper;
+import com.wengu.review.mapper.ReviewLogMapper;
 import com.wengu.review.service.ReviewService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,6 +61,9 @@ class KnowledgePointServiceTest {
     @Autowired
     private ReviewService reviewService;
 
+    @Autowired
+    private ReviewLogMapper reviewLogMapper;
+
     /** 按顺序建好的三个知识点：原理机制、原子概念、系统设计（只收录） */
     private long mechanism;
     private long concept;
@@ -67,6 +72,7 @@ class KnowledgePointServiceTest {
     @BeforeEach
     void setUp() {
         cardStateMapper.delete(null);
+        reviewLogMapper.delete(null);
         revisionMapper.delete(null);
         kpSourceMapper.delete(null);
         knowledgePointMapper.delete(null);
@@ -284,5 +290,77 @@ class KnowledgePointServiceTest {
         assertErrorCode(() -> service.suspend(USER_ID, List.of()), ErrorCode.BAD_REQUEST);
         assertErrorCode(() -> service.delete(USER_ID, null), ErrorCode.BAD_REQUEST);
         assertErrorCode(() -> service.restore(USER_ID, Arrays.asList(concept, null)), ErrorCode.BAD_REQUEST);
+    }
+    private List<Long> sourcesOf(long kpId) {
+        return kpSourceMapper.selectList(new LambdaQueryWrapper<KpSource>().eq(KpSource::getKpId, kpId))
+                .stream().map(KpSource::getSourceId).sorted().toList();
+    }
+
+    @Test
+    void 合并后来源并到主知识点_被合并的删除并记下去向() {
+        kpSourceMapper.insert(KpSource.of(concept, 901L, USER_ID));
+        kpSourceMapper.insert(KpSource.of(systemDesign, 901L, USER_ID));
+        kpSourceMapper.insert(KpSource.of(systemDesign, 902L, USER_ID));
+        KnowledgePoint before = knowledgePointMapper.selectById(mechanism);
+
+        service.merge(USER_ID, mechanism, List.of(concept, systemDesign));
+
+        // 三个本来都来自 900；901 两个都有，只关联一次
+        assertThat(sourcesOf(mechanism)).containsExactly(SOURCE_ID, 901L, 902L);
+        for (long id : List.of(concept, systemDesign)) {
+            KnowledgePoint kp = knowledgePointMapper.selectById(id);
+            assertThat(kp.getDeletedAt()).isNotNull();
+            assertThat(kp.getMergedInto()).isEqualTo(mechanism);
+        }
+        KnowledgePoint primary = knowledgePointMapper.selectById(mechanism);
+        assertThat(primary.getTitle()).isEqualTo(before.getTitle());
+        assertThat(primary.getSummary()).isEqualTo(before.getSummary());
+        assertThat(primary.getSortOrder()).isEqualTo(before.getSortOrder());
+        assertThat(primary.getDeletedAt()).isNull();
+        assertThat(service.listTitles(USER_ID)).extracting(DedupContext.Existing::id).containsExactly(mechanism);
+        // 合并没有撤销
+        assertErrorCode(() -> service.restore(USER_ID, List.of(concept)), ErrorCode.NOT_FOUND);
+    }
+
+    @Test
+    void 合并保留主知识点的进度_被合并的学习记录不搬() {
+        reviewService.rate(USER_ID, mechanism, null, Rating.GOOD, null);
+        reviewService.rate(USER_ID, concept, null, Rating.AGAIN, null);
+        CardState primaryCard = cardStateMapper.selectById(mechanism);
+
+        service.merge(USER_ID, mechanism, List.of(concept));
+
+        assertThat(cardStateMapper.selectById(mechanism).getDue()).isEqualTo(primaryCard.getDue());
+        assertThat(reviewLogMapper.selectList(new LambdaQueryWrapper<ReviewLog>().eq(ReviewLog::getKpId, concept)))
+                .hasSize(1);
+        assertThat(reviewLogMapper.selectList(new LambdaQueryWrapper<ReviewLog>().eq(ReviewLog::getKpId, mechanism)))
+                .hasSize(1);
+        // 被合并的不再进每日计划
+        assertThat(service.activeInOrder(USER_ID, List.of(mechanism, concept)))
+                .extracting(KnowledgePointSummary::id).containsExactly(mechanism);
+    }
+
+    @Test
+    void 再次合并时之前并进来的改指向新的主知识点() {
+        service.merge(USER_ID, mechanism, List.of(concept));
+
+        service.merge(USER_ID, systemDesign, List.of(mechanism));
+
+        assertThat(knowledgePointMapper.selectById(concept).getMergedInto()).isEqualTo(systemDesign);
+        assertThat(knowledgePointMapper.selectById(mechanism).getMergedInto()).isEqualTo(systemDesign);
+    }
+
+    @Test
+    void 合并的参数不对时都不执行() {
+        assertErrorCode(() -> service.merge(USER_ID, null, List.of(concept)), ErrorCode.BAD_REQUEST);
+        assertErrorCode(() -> service.merge(USER_ID, mechanism, List.of()), ErrorCode.BAD_REQUEST);
+        assertErrorCode(() -> service.merge(USER_ID, mechanism, List.of(concept, mechanism)), ErrorCode.BAD_REQUEST);
+        assertErrorCode(() -> service.merge(USER_ID + 1, mechanism, List.of(concept)), ErrorCode.NOT_FOUND);
+        markDeleted(systemDesign);
+        assertErrorCode(() -> service.merge(USER_ID, systemDesign, List.of(concept)), ErrorCode.NOT_FOUND);
+        assertErrorCode(() -> service.merge(USER_ID, mechanism, List.of(concept, systemDesign)), ErrorCode.NOT_FOUND);
+
+        assertThat(knowledgePointMapper.selectById(concept).getDeletedAt()).isNull();
+        assertThat(sourcesOf(mechanism)).containsExactly(SOURCE_ID);
     }
 }

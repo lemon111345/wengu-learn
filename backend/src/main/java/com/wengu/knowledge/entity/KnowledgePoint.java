@@ -19,7 +19,7 @@ public class KnowledgePoint {
     private KnowledgePointStatus status;
     /** 新知识按 sort_order、id 派发 */
     private Integer sortOrder;
-    /** 来自哪个草稿条目（#9 对比用）；合并或手动新建的知识点为空 */
+    /** 来自哪个草稿条目（#9 对比用，“恢复 AI 版本”的原文也从它取）；手动新建的知识点为空。合并保留主知识点自己的 */
     private Long draftItemId;
     /** 软删除的时间，为空表示没删（V11，决策 029） */
     private Instant deletedAt;
