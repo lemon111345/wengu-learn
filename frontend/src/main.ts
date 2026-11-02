@@ -9,5 +9,6 @@ import './styles/tokens.css'
 import './styles/base.css'
 import './styles/element.css'
 import App from './App.vue'
+import router from './router'
 
-createApp(App).use(ElementPlus, { locale: zhCn }).mount('#app')
+createApp(App).use(ElementPlus, { locale: zhCn }).use(router).mount('#app')

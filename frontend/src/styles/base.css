@@ -45,6 +45,24 @@ a:hover {
   color: var(--wg-primary-hover);
 }
 
+/* 应用框架中顶栏以下的页面主体：最宽 1400，居中（ui.md 4.1） */
+.wg-page-body {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px 40px 72px;
+}
+
+@media (max-width: 600px) {
+  .wg-page-body {
+    padding: 20px 16px 48px;
+  }
+}
+
+.wg-muted {
+  color: var(--wg-text-muted);
+}
+
 /* 宋体：知识点标题、“温故”标识等 */
 .wg-serif {
   font-family: var(--wg-font-serif);
