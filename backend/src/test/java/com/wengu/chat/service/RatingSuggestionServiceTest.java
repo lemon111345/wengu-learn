@@ -19,6 +19,7 @@ import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.llm.dto.LlmResult;
+import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmOutputParseException;
 import com.wengu.llm.service.LlmService;
 import com.wengu.review.fsrs.Rating;
@@ -123,6 +124,22 @@ class RatingSuggestionServiceTest {
     private void modelReturns(RatingSuggestionResult content) {
         when(llmService.call(anyString(), anyString(), eq(RatingSuggestionResult.class), any()))
                 .thenReturn(result(content));
+    }
+
+    @Test
+    void 模型调用失败时提示中带上原因() {
+        long sessionId = session(SessionType.STUDY, true);
+        when(llmService.call(anyString(), anyString(), eq(RatingSuggestionResult.class), any()))
+                .thenThrow(new LlmException(ErrorCode.LLM_AUTH_FAILED));
+
+        // 返回码仍是 RATING_SUGGESTION_FAILED：前端据此知道可以直接评分（决策 032）
+        assertThatThrownBy(() -> suggestionService.suggest(USER_ID, sessionId))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.RATING_SUGGESTION_FAILED);
+                    assertThat(e.getMessage()).isEqualTo("AI 评分建议没有生成出来："
+                            + ErrorCode.LLM_AUTH_FAILED.getMessage() + "。也可以直接评分");
+                });
+        verify(llmService, times(1)).call(anyString(), anyString(), eq(RatingSuggestionResult.class), any());
     }
 
     private static void assertError(Runnable call, ErrorCode code) {

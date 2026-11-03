@@ -11,6 +11,7 @@ import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.knowledge.service.KnowledgePointService;
 import com.wengu.llm.dto.LlmResult;
+import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmOutputParseException;
 import com.wengu.llm.service.LlmService;
 import com.wengu.review.fsrs.Rating;
@@ -123,6 +124,11 @@ public class RatingSuggestionService {
                 log.warn("会话 {} 的评分建议第 {} 次没有给出评分", sessionId, attempt);
             } catch (LlmOutputParseException e) {
                 log.warn("会话 {} 的评分建议第 {} 次解析失败：{}", sessionId, attempt, e.getMessage());
+            } catch (LlmException e) {
+                // 返回码仍是 RATING_SUGGESTION_FAILED：前端据此知道可以直接评分；提示中带上模型出错的原因（决策 032）
+                log.warn("会话 {} 的评分建议调用模型失败：{}", sessionId, e.getErrorCode());
+                throw new BusinessException(ErrorCode.RATING_SUGGESTION_FAILED,
+                        "AI 评分建议没有生成出来：" + e.getMessage() + "。也可以直接评分", e);
             } catch (RuntimeException e) {
                 log.warn("会话 {} 的评分建议调用模型失败：{}", sessionId, e.toString());
                 throw new BusinessException(ErrorCode.RATING_SUGGESTION_FAILED);

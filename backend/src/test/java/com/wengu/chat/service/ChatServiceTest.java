@@ -18,6 +18,7 @@ import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.llm.dto.ChatTurn;
+import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -244,6 +245,31 @@ class ChatServiceTest {
                         .singleElement()
                         .satisfies(m -> assertThat(m.content()).isEqualTo("第一段第二段第三段")));
         assertThat(sessionService.get(USER_ID, sessionId).generating()).isFalse();
+    }
+
+    @Test
+    void 模型调用失败时推送分好类的提示() {
+        when(llmService.stream(anyString(), anyList(), any()))
+                .thenReturn(Flux.error(new LlmException(ErrorCode.LLM_TIMEOUT)));
+
+        List<ServerSentEvent<Object>> failed = collect(chatService.reply(USER_ID, sessionId));
+
+        assertThat(failed).singleElement().satisfies(e ->
+                assertThat(((ChatEvents.Error) e.data()).message()).isEqualTo(ErrorCode.LLM_TIMEOUT.getMessage()));
+        assertThat(sessionService.get(USER_ID, sessionId).messages()).isEmpty();
+    }
+
+    @Test
+    void 去掉标记后没有正文时按空正文提示() {
+        modelReplies("【学习结束】");
+
+        List<ServerSentEvent<Object>> failed = collect(chatService.reply(USER_ID, sessionId));
+
+        assertThat(failed).last().satisfies(e -> {
+            assertThat(e.event()).isEqualTo("error");
+            assertThat(((ChatEvents.Error) e.data()).message()).isEqualTo(ErrorCode.LLM_EMPTY_RESPONSE.getMessage());
+        });
+        assertThat(sessionService.get(USER_ID, sessionId).messages()).isEmpty();
     }
 
     @Test

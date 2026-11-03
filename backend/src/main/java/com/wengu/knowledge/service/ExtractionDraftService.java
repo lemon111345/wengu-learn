@@ -415,7 +415,8 @@ public class ExtractionDraftService {
                 }
             }
             batchViews.add(new BatchView(batch.getBatchNo(), batch.getStatus(),
-                    questions.stream().map(ExtractionQuestion::id).toList()));
+                    questions.stream().map(ExtractionQuestion::id).toList(),
+                    BatchView.failureReason(batch.getStatus(), batch.getErrorCode())));
         }
         List<DraftItemView> itemViews = new ArrayList<>();
         for (ExtractionDraftItem item : items) {

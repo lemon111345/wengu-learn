@@ -2,6 +2,7 @@ package com.wengu.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.ExtractedKnowledgePoint;
 import com.wengu.knowledge.dto.ExtractionQuestion;
 import com.wengu.knowledge.dto.ExtractionResult;
@@ -11,6 +12,7 @@ import com.wengu.knowledge.entity.ExtractionDraftItem;
 import com.wengu.knowledge.mapper.ExtractionBatchMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
 import com.wengu.llm.dto.LlmResult;
+import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmOutputParseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -110,7 +112,7 @@ public class ExtractionWorker {
                 continue;
             }
             if (!callSucceeded) {
-                skipPending(draftId);
+                skipPending(draftId, batch.getErrorCode());
                 return;
             }
         }
@@ -144,11 +146,16 @@ public class ExtractionWorker {
         try {
             result = extractWithRetry(questions, context, batch);
         } catch (RuntimeException e) {
-            // 模型调用本身出错，重试也没用
+            // 模型调用本身出错，重试也没用。给用户看的原因按 LlmService 的分类（决策 032）
             batch.setError(e.getClass().getSimpleName() + ": " + e.getMessage());
+            batch.setErrorCode((e instanceof LlmException llm ? llm.getErrorCode() : ErrorCode.LLM_FAILED).name());
             log.error("知识点抽取调用模型失败: batchId={}", batch.getId(), e);
             result = null;
             callSucceeded = false;
+        }
+        if (result == null && callSucceeded) {
+            // 模型有回应，但重试后输出仍不合格
+            batch.setErrorCode(ErrorCode.LLM_INVALID_OUTPUT.name());
         }
         batch.setStatus(result == null ? BatchStatus.FAILED : BatchStatus.READY);
         batch.setFinishedAt(Instant.now(clock));
@@ -187,13 +194,17 @@ public class ExtractionWorker {
         return DedupContext.of(knowledgePointService.listTitles(batch.getUserId()), items);
     }
 
-    /** 前面一批调用模型出错时，把草稿中还在排队的批次标为失败。 */
-    private void skipPending(long draftId) {
+    /**
+     * 前面一批调用模型出错时，把草稿中还在排队的批次标为失败。
+     * 失败原因用前面那一批的：这几批没有执行，原因就是模型调用出了那个错（决策 032）
+     */
+    private void skipPending(long draftId, String errorCode) {
         batchMapper.update(new LambdaUpdateWrapper<ExtractionBatch>()
                 .eq(ExtractionBatch::getDraftId, draftId)
                 .eq(ExtractionBatch::getStatus, BatchStatus.PENDING)
                 .set(ExtractionBatch::getStatus, BatchStatus.FAILED)
                 .set(ExtractionBatch::getError, SKIPPED)
+                .set(ExtractionBatch::getErrorCode, errorCode)
                 .set(ExtractionBatch::getFinishedAt, Instant.now(clock)));
     }
 
