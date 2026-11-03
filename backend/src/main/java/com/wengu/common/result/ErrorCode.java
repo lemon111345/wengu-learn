@@ -37,7 +37,7 @@ public enum ErrorCode {
     /** 401、403 */
     LLM_AUTH_FAILED(HttpStatus.BAD_GATEWAY, "AI 模型拒绝了请求，可能是 API Key 不对或已经失效"),
     /** 404：模型名不对，或本地模型还没下载 */
-    LLM_MODEL_NOT_FOUND(HttpStatus.BAD_GATEWAY, "找不到配置的 AI 模型，可能是模型名不对"),
+    LLM_MODEL_NOT_FOUND(HttpStatus.BAD_GATEWAY, "找不到配置的 AI 模型，可能是模型名不对，或者还没有下载"),
     /** 429 */
     LLM_RATE_LIMITED(HttpStatus.BAD_GATEWAY, "AI 模型的调用太频繁或额度用完了，请稍后再试"),
     LLM_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "AI 模型太久没有回应，可以重试"),
