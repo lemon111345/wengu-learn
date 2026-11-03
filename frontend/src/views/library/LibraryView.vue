@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 知识库（ui.md 5.9，决策 031）：筛选、排序、列表、右侧详情、批量操作。
 // 筛选和排序交给后端（决策 030），每次切换重新取列表；任何操作完成后也重新取列表和详情
-import { computed, onMounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ApiError } from '@/api/http'
 import {
@@ -18,6 +18,7 @@ import {
 } from '@/api/knowledgePoints'
 import type { KnowledgePointType } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
+import { modKeyLabel, useShortcut } from '@/shortcuts/useShortcut'
 import DetailPanel from './DetailPanel.vue'
 import KnowledgeTable from './KnowledgeTable.vue'
 import LibraryFilters from './LibraryFilters.vue'
@@ -25,6 +26,7 @@ import MergeDialog from './MergeDialog.vue'
 import UndoToast from './UndoToast.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 const mastery = ref<Mastery | null>(null)
 const type = ref<KnowledgePointType | null>(null)
@@ -213,16 +215,51 @@ async function undo() {
   await load()
 }
 
-const filtered = computed(() => mastery.value !== null || type.value !== null)
+// 搜索（ui.md 第 6 节、决策 031）：M1 在前端按标题过滤当前列表，叠加在两种筛选之上，不区分大小写
+const search = ref('')
+const searchInput = ref<{ focus: () => void } | null>(null)
+
+const visibleItems = computed(() => {
+  const items = library.value?.items ?? []
+  const keyword = search.value.trim().toLowerCase()
+  return keyword === '' ? items : items.filter((i) => i.title.toLowerCase().includes(keyword))
+})
+
+const filtered = computed(() => mastery.value !== null || type.value !== null || search.value.trim() !== '')
 
 function clearFilters() {
   mastery.value = null
   type.value = null
+  search.value = ''
 }
+
+// Ctrl+K 聚焦搜索框；在其他页面按 Ctrl+K 时，AppLayout 带上 ?search 跳过来
+useShortcut('Mod+k', () => searchInput.value?.focus())
+
+onMounted(async () => {
+  if (route.query.search !== undefined) {
+    await nextTick()
+    searchInput.value?.focus()
+    void router.replace({ query: {} })
+  }
+})
 </script>
 
 <template>
   <PageHeader title="知识库">
+    <el-input
+      ref="searchInput"
+      v-model="search"
+      class="search"
+      placeholder="搜索知识点"
+      aria-label="搜索知识点"
+      clearable
+    >
+      <!-- 不用 type="search"：浏览器会再加一个清除按钮。输入后隐藏快捷键提示，给清除按钮让位 -->
+      <template v-if="search === ''" #suffix>
+        <span class="search-keys" aria-hidden="true"><kbd>{{ modKeyLabel }}</kbd><kbd>K</kbd></span>
+      </template>
+    </el-input>
     <el-button type="primary" @click="router.push('/import')">导入资料</el-button>
   </PageHeader>
   <div v-if="loadError && !library" class="wg-page-body">
@@ -264,8 +301,8 @@ function clearFilters() {
         </div>
       </div>
       <KnowledgeTable
-        v-if="library.items.length > 0"
-        :items="library.items"
+        v-if="visibleItems.length > 0"
+        :items="visibleItems"
         :selected-id="selectedId"
         :checked="checkedIds"
         :sort="sort"
@@ -279,7 +316,7 @@ function clearFilters() {
         <el-button @click="clearFilters">清除筛选</el-button>
       </section>
       <p class="foot">
-        显示 {{ library.items.length }} 个，共 {{ library.total }} 个<template v-if="filtered">（已筛选）</template>
+        显示 {{ visibleItems.length }} 个，共 {{ library.total }} 个<template v-if="filtered">（已筛选）</template>
       </p>
     </main>
     <div v-if="selectedId !== null" class="side">
@@ -333,6 +370,15 @@ function clearFilters() {
   flex-wrap: wrap;
   gap: 12px 20px;
   padding: 24px 28px;
+}
+
+.search {
+  width: 240px;
+}
+
+.search-keys {
+  display: inline-flex;
+  gap: 2px;
 }
 
 /* 批量操作条：主色浅底（ui.md 5.9），按钮高 40 */
