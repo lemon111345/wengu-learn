@@ -26,6 +26,19 @@ export function formatMonthDay(date: string): string {
   return `${d.getUTCMonth() + 1}月${d.getUTCDate()}日`
 }
 
+/** 某个时刻（UTC 的 ISO 字符串）距现在多久，如“刚刚”“10 分钟前”“3 小时前”“2 天前” */
+export function timeAgo(instant: string, now = Date.now()): string {
+  const minutes = Math.floor((now - new Date(instant).getTime()) / 60_000)
+  if (minutes < 1) {
+    return '刚刚'
+  }
+  if (minutes < 60) {
+    return `${minutes} 分钟前`
+  }
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? `${hours} 小时前` : `${Math.floor(hours / 24)} 天前`
+}
+
 /** 距今天几个学习日的说法：1 天是“明天”，其他是“3 天后” */
 export function daysLater(days: number): string {
   return days === 1 ? '明天' : `${days} 天后`

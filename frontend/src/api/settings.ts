@@ -9,6 +9,10 @@ export interface Settings {
   dailyNewLimit: number
 }
 
+/** 每天新学的范围，和后端 UpdateSettingsRequest 的校验一致 */
+export const DAILY_NEW_MIN = 0
+export const DAILY_NEW_MAX = 50
+
 export function fetchSettings() {
   return get<Settings>('/api/settings')
 }

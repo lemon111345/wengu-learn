@@ -17,8 +17,10 @@ import java.util.List;
  * @param knowledgePointCount 知识点总数，暂停的和不参与调度的也算；为 0 时今天页显示空状态。
  *                            不能只看上面几个列表是否为空：知识点都在很多天后到期、或者只有不参与调度的类型时，列表也是空的
  * @param studiedMinutesToday 今天的有效学习时长（分钟，不足一分钟的舍去），来自今天开始的学习会话（决策 025）
+ * @param daysToFinish    按现在的每天新学数，还要几个学习日学完全部待学的新知识（含今天）；
+ *                        每天新学为 0 或没有待学的新知识时为 null。设置页“还要 X 天学完”用它（#52）
  */
 public record TodayPlan(LocalDate date, int dailyNewLimit, int newLearnedToday, List<PlanItem> reviews,
                         List<PlanItem> newItems, List<CompletedItem> completed, List<UpcomingDay> upcomingReviews,
-                        int knowledgePointCount, int studiedMinutesToday) {
+                        int knowledgePointCount, int studiedMinutesToday, Integer daysToFinish) {
 }

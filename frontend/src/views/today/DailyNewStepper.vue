@@ -3,12 +3,9 @@
 // 这个数一改，今天的新知识列表就跟着变，自动保存会让列表随着点击来回跳
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import NumberStepper from '@/components/NumberStepper.vue'
 import { ApiError } from '@/api/http'
-import { updateSettings } from '@/api/settings'
-
-// 和后端 UpdateSettingsRequest 的校验一致
-const MIN = 0
-const MAX = 50
+import { DAILY_NEW_MAX, DAILY_NEW_MIN, updateSettings } from '@/api/settings'
 
 const props = withDefaults(
   defineProps<{
@@ -29,10 +26,6 @@ watch(
   (v) => (draft.value = v),
 )
 
-function change(delta: number) {
-  draft.value = Math.min(MAX, Math.max(MIN, draft.value + delta))
-}
-
 async function save() {
   saving.value = true
   try {
@@ -48,11 +41,7 @@ async function save() {
 
 <template>
   <div class="stepper" :class="`align-${align}`">
-    <div class="controls">
-      <button type="button" class="step" aria-label="减少一个" :disabled="draft <= MIN" @click="change(-1)">−</button>
-      <span class="value" aria-live="polite">{{ draft }}</span>
-      <button type="button" class="step" aria-label="增加一个" :disabled="draft >= MAX" @click="change(1)">+</button>
-    </div>
+    <NumberStepper v-model="draft" :min="DAILY_NEW_MIN" :max="DAILY_NEW_MAX" label="每天新学" />
     <div v-if="draft !== value" class="confirm">
       <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       <el-button text :disabled="saving" @click="draft = value">取消</el-button>
@@ -73,40 +62,6 @@ async function save() {
 
 .align-end {
   align-items: flex-end;
-}
-
-.controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.step {
-  width: 44px;
-  height: 44px;
-  border: 1px solid var(--wg-border);
-  border-radius: var(--wg-radius-control);
-  background: var(--wg-bg);
-  color: var(--wg-text);
-  font: inherit;
-  font-size: 20px;
-  cursor: pointer;
-}
-
-.step:hover:not(:disabled) {
-  border-color: var(--wg-border-strong);
-}
-
-.step:disabled {
-  color: var(--wg-border-strong);
-  cursor: not-allowed;
-}
-
-.value {
-  min-width: 28px;
-  font-size: 22px;
-  font-weight: 700;
-  text-align: center;
 }
 
 .confirm {
