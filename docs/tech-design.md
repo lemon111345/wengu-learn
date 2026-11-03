@@ -133,7 +133,7 @@ frontend/src
 | rating_suggestion | AI 评分建议，每个学习会话一条（V10） | session_id（主键）、user_id、rating、analysis、weak_points（JSON，#21 用）、out_of_scope_gaps（JSON，#31 用）、model、prompt_version、prompt_tokens、completion_tokens、created_at，见决策 026 |
 | study_day_completion | “当天完成”的记录（V10） | id、user_id、study_date（学习日）、completed_at；(user_id, study_date) 唯一。计划变空且今天学过时写入，是事实不是计划快照，见决策 020、026 |
 | extraction_draft | 一次抽取，用户确认后才生成知识点（V3 添加，V4 精简） | id、user_id、source_id（会话来源由 #31 添加，见决策 008）、created_at、confirmed_at（V6 添加）；状态不存库：确认后为 CONFIRMED，之前由批次推算（RUNNING / READY / FAILED），见决策 012、013、015 |
-| extraction_batch | 草稿中的一批，每批调用一次抽取（V4 添加） | id、user_id、draft_id、batch_no（重试时新增一行、批号不变，旧行保留）、status（PENDING / RUNNING / READY / FAILED）、questions（发给模型的题目）、context（这一批用的去重上下文，V5 添加）、covered（被已有内容覆盖的题，换回了知识点 id 或条目 id，带标题快照，V5 添加，见决策 014）、raw_output、error（不返回前端）、attempts、prompt_version、model、prompt_tokens、completion_tokens（多次调用累加）、created_at、started_at、finished_at，见决策 013 |
+| extraction_batch | 草稿中的一批，每批调用一次抽取（V4 添加） | id、user_id、draft_id、batch_no（重试时新增一行、批号不变，旧行保留）、status（PENDING / RUNNING / READY / FAILED）、questions（发给模型的题目）、context（这一批用的去重上下文，V5 添加）、covered（被已有内容覆盖的题，换回了知识点 id 或条目 id，带标题快照，V5 添加，见决策 014）、raw_output、error（原始信息，不返回前端）、error_code（失败原因的返回码，V12 添加，见决策 032）、attempts、prompt_version、model、prompt_tokens、completion_tokens（多次调用累加）、created_at、started_at、finished_at，见决策 013 |
 | extraction_draft_item | 草稿中的一个知识点（V3 添加） | id、user_id、draft_id、batch_id（V4 添加）、item_order（批内顺序）、title、summary、type、source_question_ids（如 "1,3,5"，对应 source 中的题号）、decision（确认时的处理：ACCEPTED / REJECTED，V6 添加，见决策 015） |
 | model_config | 模型配置（M3；M1 用环境变量，见决策 007） | user_id、base_url、model、api_key_encrypted |
 
@@ -269,10 +269,23 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 
 除了标“不需要登录”的，所有接口都要求登录，没有登录时返回 401 `UNAUTHORIZED`。POST、PATCH 等修改类请求要带 CSRF 令牌：从 Cookie `XSRF-TOKEN` 中读出，放进请求头 `X-XSRF-TOKEN`，缺失或不对时返回 403 `FORBIDDEN`。见决策 022。
 
+**大模型调用失败**（决策 032）：`LlmService` 把 SDK 的异常按原因分类，调用模型的接口统一返回下面的返回码，`message` 可以直接显示。题目切分直接返回它们；抽取批次把它们记在 `error_code`，草稿的批次返回 `failureReason`；学习对话的 `error` 事件用它们的提示；评分建议仍返回 `RATING_SUGGESTION_FAILED`，提示中带上原因。空正文不自动重试。
+
+| 返回码 | 状态码 | 原因 |
+| --- | --- | --- |
+| `LLM_AUTH_FAILED` | 502 | 401、403：Key 不对或已经失效 |
+| `LLM_MODEL_NOT_FOUND` | 502 | 404：模型名不对，或本地模型还没下载 |
+| `LLM_RATE_LIMITED` | 502 | 429：调用太频繁或额度用完 |
+| `LLM_TIMEOUT` | 504 | 超过 `WENGU_LLM_TIMEOUT` |
+| `LLM_EMPTY_RESPONSE` | 502 | 正常结束但没有正文，多见于把回答放进思考内容的推理模型 |
+| `LLM_UNAVAILABLE` | 502 | 连不上、网络错误、5xx |
+| `LLM_FAILED` | 502 | 其他调用错误 |
+| `LLM_INVALID_OUTPUT` | — | 只用作抽取批次的失败原因：输出重试后仍不合格 |
+
 | 接口 | 作用 | 请求 | 返回 data | 说明 |
 | --- | --- | --- | --- | --- |
-| `POST /api/sources` | 导入面试题并切分（#15、#16） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 同步调用模型，只有题目时几秒到几十秒，10 万字带答案的资料最长约 95 秒；原文不超过 100000 字、切分后不超过 200 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`。见决策 011 |
-| `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, sourceName, status, batches: [{no, status, questionIds}], items: [{id, order, title, summary, type, sourceQuestionIds, decision}], covered: [{questionId, titles}], uncovered: [{questionId, text}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；covered 是被已有知识点或同一草稿中其他批次覆盖的题（决策 014）；uncovered 是成功批次中既没有条目、也不在 covered 中的题及原文，最后一次尝试只漏了题时这一批照样成功（决策 028）；sourceName 是资料名称；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。见决策 012、013 |
+| `POST /api/sources` | 导入面试题并切分（#15、#16） | `{name, content}` | `{id, name, questions: [{id, text, followUps}]}` | 同步调用模型，只有题目时几秒到几十秒，10 万字带答案的资料最长约 95 秒；原文不超过 100000 字、切分后不超过 200 题，否则返回 400 和处理建议；切分重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`；模型调用失败返回对应的 `LLM_*`（见下文“大模型调用失败”）。见决策 011 |
+| `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, sourceName, status, batches: [{no, status, questionIds, failureReason}], items: [{id, order, title, summary, type, sourceQuestionIds, decision}], covered: [{questionId, titles}], uncovered: [{questionId, text}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；covered 是被已有知识点或同一草稿中其他批次覆盖的题（决策 014）；uncovered 是成功批次中既没有条目、也不在 covered 中的题及原文，最后一次尝试只漏了题时这一批照样成功（决策 028）；sourceName 是资料名称；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。见决策 012、013 |
 | `GET /api/drafts` | 草稿列表（#48） | — | `[{id, sourceId, sourceName, status, itemCount, createdAt}]` | 未确认的全部返回，已确认的只返回最近 10 份，新的在前，不分页；status 和详情的算法相同；itemCount 是成功批次中的条目数。见决策 024 |
 | `GET /api/drafts/{id}` | 查看草稿和抽取进度（#15、#16） | — | 同上 | 不存在或不属于当前用户 404 |
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中或已确认 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
@@ -294,6 +307,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `POST /api/sessions/{id}/rating-suggestion` | AI 评分建议（#20） | — | `{rating, analysis, weakPoints, outOfScopeGaps}` | 学完后调用；第一次调用模型（十几到二十几秒）并存库，之后直接返回。不是学习会话 400，还没学完 409，模型出错或结果不可用 502 `RATING_SUGGESTION_FAILED`。评分不依赖它。见决策 026 |
 | `GET /api/sessions/{id}/rating-preview` | 评分预览（#20） | — | `[{rating, date, days}]`，按 AGAIN、HARD、GOOD、EASY 排列 | date 是下次复习的学习日，days 是距今天几个学习日；不保存。不是学习会话 400，还没学完或已经评过分 409 |
 | `POST /api/sessions/{id}/rating` | 确认评分（#20） | `{rating}` | `{rating, date, days}` | 更新 card_state、写 review_log（AI 建议已生成时记下 rating_ai）；日期和预览一致（fuzz 的随机数固定）。评分为空 400，不是学习会话 400，还没学完或已经评过分 409。见决策 026 |
+| `GET /api/llm/status` | 模型状态（#27） | — | `{model, lastCall: {ok, code, message, at} \| null}` | 最近一次调用的结果，存在内存中，重启后为 null；所有用户共用一套模型配置，状态也是全局的。不返回服务地址和 Key，不为此真实调用模型。头像上的红点、设置页的 AI 模型卡片用它。见决策 032 |
 | `GET /api/settings` | 读取用户设置（#18） | — | `{timezone, dayStartHour, dailyNewLimit}` | |
 | `PATCH /api/settings` | 修改用户设置（#18） | 只传要改的字段，如 `{dailyNewLimit: 5}` | 同上 | timezone 为合法时区，dayStartHour 0～23，dailyNewLimit 0～50，否则 400；修改后立即生效。见决策 016 |
 | `GET /api/auth/registration` | 注册是否开放（#46），不需要登录 | — | `{open}` | 由 `WENGU_ALLOW_REGISTRATION` 控制，默认开放 |
@@ -323,7 +337,6 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 需要的接口 | 内容 | 页面 |
 | --- | --- | --- |
 | 草稿列表补充 | 候选知识点的草稿（#31） | 今天、导入资料 |
-| 模型状态 | 模型名、最近一次调用的结果和时间；不返回服务地址和 Key，不为此真实调用模型 | 设置、账户区的红点 |
 | 知识点详情补充 | 来源“接着问：<原知识点标题>”（#31 有了学习会话产生的草稿之后） | 知识库 |
 
 ## 待补充
