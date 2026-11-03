@@ -3,6 +3,8 @@ package com.wengu.review.service;
 import com.wengu.TestcontainersConfiguration;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
+import com.wengu.review.dto.CardProgress;
+import com.wengu.review.dto.ReviewRecord;
 import com.wengu.review.dto.ReviewResult;
 import com.wengu.review.entity.CardState;
 import com.wengu.review.entity.ReviewLog;
@@ -122,6 +124,46 @@ class ReviewServiceTest {
         log(306, 2, true, NOW);
 
         assertThat(reviewService.countFirstReviews(1, start, end)).isEqualTo(2);
+    }
+
+    @Test
+    void 知识库的复习进度只返回该用户有调度状态的知识点() {
+        reviewedCard(401, 1, NOW.plus(Duration.ofDays(5)));
+        reviewService.initCards(1, List.of(402L));
+        reviewedCard(403, 2, NOW);
+
+        Map<Long, CardProgress> progress = reviewService.progressOf(1, List.of(401L, 402L, 403L, 404L));
+
+        assertThat(progress).containsOnlyKeys(401L, 402L);
+        assertThat(progress.get(401L).due()).isEqualTo(NOW.plus(Duration.ofDays(5)));
+        assertThat(progress.get(401L).lastReview()).isNotNull();
+        assertThat(progress.get(402L).lastReview()).isNull();
+        assertThat(progress.get(402L).stability()).isNull();
+        assertThat(reviewService.progressOf(1, List.of())).isEmpty();
+    }
+
+    @Test
+    void 学习记录按时间倒序并带上AI建议() {
+        log(501, 1, true, NOW.minus(Duration.ofDays(3)));
+        log(502, 1, true, NOW.minus(Duration.ofDays(2)));
+        ReviewLog withAi = new ReviewLog();
+        withAi.setUserId(1L);
+        withAi.setKpId(501L);
+        withAi.setRatingUser(Rating.HARD);
+        withAi.setRatingAi(Rating.AGAIN);
+        withAi.setStateBefore(State.REVIEW);
+        withAi.setFirstReview(false);
+        withAi.setReviewedAt(NOW);
+        reviewLogMapper.insert(withAi);
+        log(503, 1, true, NOW);
+        log(501, 2, true, NOW);
+
+        List<ReviewRecord> records = reviewService.reviewsOf(1, List.of(501L, 502L));
+
+        assertThat(records).extracting(ReviewRecord::kpId).containsExactly(501L, 502L, 501L);
+        assertThat(records.getFirst()).isEqualTo(new ReviewRecord(501, Rating.HARD, Rating.AGAIN, false, NOW));
+        assertThat(records.get(2).ratingAi()).isNull();
+        assertThat(reviewService.reviewsOf(1, List.of())).isEmpty();
     }
 
     @Test

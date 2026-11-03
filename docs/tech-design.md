@@ -78,6 +78,7 @@ flowchart TB
     knowledge --> source
     knowledge --> llm
     knowledge --> review
+    knowledge --> user
     source --> llm
 ```
 
@@ -250,6 +251,17 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 - `weakPoints` 供复习时针对性提问（#21）；`outOfScopeGaps` 和“接着问”中的新内容在学完后成为候选知识点，复用草稿确认流程（#15、#17）
 - 用户确认的评分为准，AI 建议的评分同时记录
 
+## 掌握程度
+
+知识库的筛选和“掌握”一列（ui.md 5.9），由 knowledge 的 `Mastery.of(type, status, card)` 按先后顺序判断，阈值写成常量，见 [决策 030](./decisions/030-知识库列表与详情.md)：
+
+1. 类型不参与调度 → 只收录（RECORD_ONLY）
+2. 暂停 → 暂停（SUSPENDED）
+3. 没有 card_state 或 last_review 为空 → 待学（NEW）
+4. 按 FSRS 稳定性分档，含下限、不含上限：≥ 21 天牢固（SOLID），7～21 天熟悉（FAMILIAR），2～7 天一般（FAIR），< 2 天生疏（SHAKY）
+
+不按最近一次评分（太粗），也不按可提取率（每天都在变，标签会跳）。只有第 4 类有“下次复习”；按掌握程度或下次复习排序时，待学、暂停、只收录依次排在最后。
+
 ## 接口
 
 所有接口返回统一格式 `{code, message, data}`（决策 001）。每个 issue 完成后把自己的接口补到这里。
@@ -264,6 +276,8 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `GET /api/drafts/{id}` | 查看草稿和抽取进度（#15、#16） | — | 同上 | 不存在或不属于当前用户 404 |
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中或已确认 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
 | `POST /api/drafts/{id}/confirm` | 确认草稿，生成知识点（#17） | `{rejectedItemIds?}`，取消勾选的条目 id，不传则全部接受 | 同上，status 为 CONFIRMED，每个条目的 decision 为 ACCEPTED 或 REJECTED | 一个事务中生成知识点（sort_order 接在已有之后）、关联材料、初始化 card_state（SYSTEM_DESIGN、EXPERIENCE 不初始化）；covered 引用的已有知识点也关联到这份材料。草稿不是 READY 或已确认 409，条目不属于这份草稿 400。见决策 015 |
+| `GET /api/knowledge-points?mastery=&type=&sort=&direction=` | 知识库列表（#50） | mastery、type 各选一个，不传为全部；sort 为 ORDER（默认，学习顺序）/ MASTERY / NEXT_REVIEW；direction 为 ASC（默认）/ DESC | `{total, counts: {SOLID, FAMILIAR, FAIR, SHAKY, NEW, SUSPENDED, RECORD_ONLY}, items: [{id, title, type, mastery, nextReview: {date, days}}]}` | total 是全部没删除的知识点数；counts 只受类型筛选影响；items 两种筛选都生效。掌握程度见上文“掌握程度”。MASTERY 按稳定性（ASC 生疏在前），NEXT_REVIEW 按到期时间；两种下待学、暂停、只收录都依次排在最后，方向只影响学过的；ORDER 不分方向。nextReview 只有学过的才有，date 是学习日，days 为 1 是明天、≤ 0 是已经到期。不分页。参数不合法 400。见决策 030 |
+| `GET /api/knowledge-points/{id}` | 知识点详情（#50） | — | `{id, title, type, status, mastery, nextReview, summary, aiSummary, summaryEdited, reviews: [{date, firstReview, rating, ratingAi, mergedFrom}], sources: [{sourceId, name, questionIds}]}` | aiSummary 是草稿条目中的 AI 原文（不是从草稿来的为 null），summaryEdited 是要点和它不同（忽略首尾空白）；reviews 最近的在前，包括并进来的知识点的（mergedFrom 为它的标题）；sources 来自 kp_source，题号来自自己和并进来的知识点的草稿条目，去重时补关联的材料没有题号。不存在、不属于当前用户、已删除或被合并 404。见决策 030 |
 | `PATCH /api/knowledge-points/{id}` | 编辑知识点（#25） | `{title?, type?, summary?}`，只改传了的字段 | — | 有改动时先存修改前的快照（kp_revision）；改成只收录的类型时保留 card_state，改成参与调度的类型时没有 card_state 的才初始化。标题或要点为空、标题超过 500 字 400；不存在、不属于当前用户或已删除 404。“恢复 AI 版本”也走这里。见决策 029 |
 | `POST /api/knowledge-points/suspend`、`/resume` | 暂停、恢复复习（#25） | `{ids}` | — | 只改 status，复习进度不动。批量：没有选择 400；有一个不存在、不属于当前用户或已删除时整批 404，都不执行 |
 | `POST /api/knowledge-points/delete` | 删除（#25） | `{ids}` | — | 软删除，只写 deleted_at，状态、card_state、学习记录、来源都不动。批量规则同上 |
@@ -309,10 +323,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | --- | --- | --- |
 | 草稿列表补充 | 候选知识点的草稿（#31） | 今天、导入资料 |
 | 模型状态 | 模型名、最近一次调用的结果和时间；不返回服务地址和 Key，不为此真实调用模型 | 设置、账户区的红点 |
-| 知识库列表 | 按掌握程度和类型筛选（同时生效）；各掌握程度的数量随类型筛选变化；排序：默认学习顺序，可按掌握程度、下次复习 | 知识库 |
-| 知识点详情 | 掌握程度、下次复习、要点是否改过（和草稿条目的原文对比）、AI 的原文（“恢复 AI 版本”用）、学习记录（包括 merged_into 指向它的知识点的）、来源 | 知识库 |
-
-**掌握程度**按 FSRS 稳定性分档，写成常量：稳定性 ≥ 21 天为牢固，7～21 天为熟悉，2～7 天为一般，< 2 天为生疏（区间含下限、不含上限）；另有待学（还没学过）、暂停、只收录（不参与调度的类型）。不按最近一次评分（太粗），也不按可提取率（每天都在变，标签会跳）。按掌握程度排序时按稳定性排，待学、暂停、只收录排在最后。
+| 知识点详情补充 | 来源“接着问：<原知识点标题>”（#31 有了学习会话产生的草稿之后） | 知识库 |
 
 ## 待补充
 
