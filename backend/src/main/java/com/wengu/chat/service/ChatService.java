@@ -17,6 +17,8 @@ import com.wengu.knowledge.service.KnowledgePointService;
 import com.wengu.llm.dto.ChatTurn;
 import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmService;
+import com.wengu.review.dto.ReviewRecord;
+import com.wengu.review.service.ReviewService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.codec.ServerSentEvent;
@@ -57,6 +59,8 @@ public class ChatService {
     private final StudySessionMapper sessionMapper;
     private final MessageMapper messageMapper;
     private final KnowledgePointService knowledgePointService;
+    private final ReviewService reviewService;
+    private final RatingSuggestionService suggestions;
     private final LlmService llmService;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
@@ -64,12 +68,15 @@ public class ChatService {
     private final String followUpPrompt = FollowUpPrompt.system();
 
     public ChatService(StudySessionService sessions, StudySessionMapper sessionMapper, MessageMapper messageMapper,
-                       KnowledgePointService knowledgePointService, LlmService llmService,
+                       KnowledgePointService knowledgePointService, ReviewService reviewService,
+                       RatingSuggestionService suggestions, LlmService llmService,
                        TransactionTemplate transactionTemplate, Clock clock) {
         this.sessions = sessions;
         this.sessionMapper = sessionMapper;
         this.messageMapper = messageMapper;
         this.knowledgePointService = knowledgePointService;
+        this.reviewService = reviewService;
+        this.suggestions = suggestions;
         this.llmService = llmService;
         this.transactionTemplate = transactionTemplate;
         this.clock = clock;
@@ -209,13 +216,37 @@ public class ChatService {
     private Rules rules(StudySession session, List<Message> messages) {
         StudyMaterial material = knowledgePointService.studyMaterial(session.getUserId(), session.getKpId());
         return switch (session.getType()) {
-            case STUDY -> new Rules(studyPrompt, LearningChatPrompt.history(material, messages),
+            case STUDY -> new Rules(studyPrompt, LearningChatPrompt.history(material, review(session), messages),
                     LearningChatPrompt.TEMPERATURE, LearningChatPrompt.MAX_ANSWERS, true);
             case FOLLOW_UP -> new Rules(followUpPrompt,
                     FollowUpPrompt.history(material, sessions.messages(session.getParentSessionId()), messages),
                     FollowUpPrompt.TEMPERATURE, FollowUpPrompt.MAX_QUESTIONS, false);
             case QUESTION -> throw new BusinessException(ErrorCode.BAD_REQUEST, "从一个问题开始还没有实现");
         };
+    }
+
+    /** 复习时参考最近几次学习会话中问过的问题 */
+    static final int REVIEW_SESSIONS = 3;
+
+    /**
+     * 复习时附在第一条消息里的学习情况（#21，决策 035）；这个知识点还没评过分、是第一次学习时为 null。
+     * 每一轮都重新算，不存库：只看这次之前的会话，算出来的结果不会变。
+     */
+    private LearningChatPrompt.Review review(StudySession session) {
+        List<ReviewRecord> ratings = reviewService.reviewsOf(session.getUserId(), List.of(session.getKpId()));
+        if (ratings.isEmpty()) {
+            return null;
+        }
+        List<StudySession> earlier = sessions.earlierStudySessions(session, REVIEW_SESSIONS);
+        // 要求完整作答和收尾的回复每次都一样，不算“问过的问题”
+        List<String> teacherReplies = earlier.reversed().stream()
+                .flatMap(s -> sessions.messages(s.getId()).stream())
+                .filter(m -> m.getRole() == MessageRole.ASSISTANT && m.getMarker() == null)
+                .map(Message::getContent)
+                .toList();
+        List<String> weakPoints = earlier.isEmpty() ? List.of() : suggestions.weakPoints(earlier.getFirst().getId());
+        return new LearningChatPrompt.Review(ratings.size(), ratings.getFirst().rating(),
+                LearningChatPrompt.askedQuestions(teacherReplies), weakPoints);
     }
 
     /** 调用模型生成回复：推给前端的是去掉标记的文字，生成完存库并推送 done；出错推送 error。 */

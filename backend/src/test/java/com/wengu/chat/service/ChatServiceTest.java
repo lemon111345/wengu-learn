@@ -4,12 +4,15 @@ import com.wengu.MutableClock;
 import com.wengu.TestcontainersConfiguration;
 import com.wengu.chat.dto.ChatEvents;
 import com.wengu.chat.dto.MessageView;
+import com.wengu.chat.dto.RateRequest;
 import com.wengu.chat.dto.SendMessageRequest;
 import com.wengu.chat.dto.SessionView;
 import com.wengu.chat.dto.StartSessionRequest;
 import com.wengu.chat.entity.Marker;
 import com.wengu.chat.entity.MessageRole;
+import com.wengu.chat.entity.RatingSuggestion;
 import com.wengu.chat.mapper.MessageMapper;
+import com.wengu.chat.mapper.RatingSuggestionMapper;
 import com.wengu.chat.mapper.StudySessionMapper;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
@@ -20,6 +23,10 @@ import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.llm.dto.ChatTurn;
 import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmService;
+import com.wengu.review.fsrs.Rating;
+import com.wengu.review.mapper.CardStateMapper;
+import com.wengu.review.mapper.ReviewLogMapper;
+import com.wengu.review.service.ReviewService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -27,6 +34,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import reactor.core.publisher.Flux;
@@ -162,6 +170,77 @@ class ChatServiceTest {
         assertThat(history).hasSize(3);
         assertThat(history.getFirst().content()).startsWith("知识点标题：HashMap 的扩容机制是怎样的？");
         assertThat(history.getLast()).isEqualTo(ChatTurn.user("是 0.75"));
+    }
+
+    @Autowired
+    private ReviewService reviewService;
+
+    @Autowired
+    private RatingService ratingService;
+
+    @Autowired
+    private RatingSuggestionMapper suggestionMapper;
+
+    @Autowired
+    private ReviewLogMapper reviewLogMapper;
+
+    @Autowired
+    private CardStateMapper cardStateMapper;
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
+    @Test
+    void 复习时第一条消息带上以前问过的问题和没掌握的点() {
+        // 第一次学习：第一条消息里没有复习的内容
+        modelReplies("你知道负载因子吗？");
+        collect(chatService.reply(USER_ID, sessionId));
+        assertThat(lastHistory().getFirst().content()).doesNotContain("这是复习");
+        modelReplies("对。**那扩容时元素怎么迁移？**");
+        collect(chatService.send(USER_ID, sessionId, new SendMessageRequest("0.75")));
+        modelReplies("请完整回答原题。\n【完整作答】");
+        collect(chatService.send(USER_ID, sessionId, new SendMessageRequest("重新计算下标")));
+        modelReplies("还漏了高低位拆分。\n【学习结束】");
+        collect(chatService.send(USER_ID, sessionId, new SendMessageRequest("容量翻倍，重新计算下标")));
+
+        // 评分：评分建议存好，用户评“困难”
+        long kpId = sessionMapper.selectById(sessionId).getKpId();
+        jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
+                + " VALUES (1, 3, 'Asia/Shanghai', 4)");
+        cardStateMapper.delete(null);
+        reviewLogMapper.delete(null);
+        suggestionMapper.delete(null);
+        reviewService.initCards(USER_ID, List.of(kpId));
+        RatingSuggestion suggestion = new RatingSuggestion();
+        suggestion.setSessionId(sessionId);
+        suggestion.setUserId(USER_ID);
+        suggestion.setRating(Rating.HARD);
+        suggestion.setAnalysis("依据");
+        suggestion.setWeakPoints("[\"迁移时的高低位拆分\"]");
+        suggestion.setOutOfScopeGaps("[]");
+        suggestion.setPromptVersion("v3");
+        suggestion.setCreatedAt(NOW);
+        suggestionMapper.insert(suggestion);
+        ratingService.rate(USER_ID, sessionId, new RateRequest(Rating.HARD));
+
+        // 复习：开一个新会话
+        long reviewId = sessionService.start(USER_ID, new StartSessionRequest(kpId)).id();
+        assertThat(reviewId).isNotEqualTo(sessionId);
+        modelReplies("换个角度的问题？");
+        collect(chatService.reply(USER_ID, reviewId));
+
+        String kickoff = lastHistory().getFirst().content();
+        assertThat(kickoff).contains(
+                "这是复习：这个知识点以前学过 1 次，上次的评分是“困难”。",
+                "上次没掌握的（开场优先围绕其中一点提问）：\n- 迁移时的高低位拆分",
+                "以前问过的问题（换一个角度，不要重复，也不要只是换个说法）：\n- 你知道负载因子吗？\n- 那扩容时元素怎么迁移？");
+        // 要求完整作答和收尾的回复不算问过的问题
+        assertThat(kickoff).doesNotContain("请完整回答原题", "还漏了高低位拆分");
+
+        // 后面每一轮发给模型的第一条消息都一样
+        modelReplies("继续追问？");
+        collect(chatService.send(USER_ID, reviewId, new SendMessageRequest("回答")));
+        assertThat(lastHistory().getFirst().content()).isEqualTo(kickoff);
     }
 
     @Test

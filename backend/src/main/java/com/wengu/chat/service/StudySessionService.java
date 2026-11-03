@@ -167,6 +167,20 @@ public class StudySessionService {
         return session;
     }
 
+    /**
+     * 同一个知识点在这次之前的学习会话，最近的在前，最多 limit 个（#21 复习时取以前问过的问题）。
+     * 新会话只在上一个评过分之后才开（见 start），所以这些会话都已经学完、评过分。
+     */
+    List<StudySession> earlierStudySessions(StudySession session, int limit) {
+        return sessionMapper.selectList(new LambdaQueryWrapper<StudySession>()
+                .eq(StudySession::getUserId, session.getUserId())
+                .eq(StudySession::getType, SessionType.STUDY)
+                .eq(StudySession::getKpId, session.getKpId())
+                .lt(StudySession::getId, session.getId())
+                .orderByDesc(StudySession::getId)
+                .last("LIMIT " + limit));
+    }
+
     /** 会话的全部消息，按时间排列。 */
     List<Message> messages(long sessionId) {
         return messageMapper.selectList(new LambdaQueryWrapper<Message>()

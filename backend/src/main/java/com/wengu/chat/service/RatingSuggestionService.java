@@ -107,6 +107,12 @@ public class RatingSuggestionService {
         return view(suggestion);
     }
 
+    /** 这次学习的评分建议中“没掌握的”，还没有生成建议时为空。复习时针对它们提问（#21） */
+    List<String> weakPoints(long sessionId) {
+        RatingSuggestion saved = suggestionMapper.selectById(sessionId);
+        return saved == null ? List.of() : jsonMapper.readValue(saved.getWeakPoints(), STRING_LIST);
+    }
+
     /** 这次学习的 AI 建议评分，还没有生成时为 null。评分时记进流水的 rating_ai */
     public Rating suggestedRating(long sessionId) {
         RatingSuggestion saved = suggestionMapper.selectById(sessionId);
