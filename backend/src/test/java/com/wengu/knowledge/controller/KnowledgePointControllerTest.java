@@ -23,14 +23,15 @@ import java.util.UUID;
 
 import static com.wengu.TestCsrf.csrfToken;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 知识点操作的 HTTP 接口（#25）：完整的过滤器链（登录、CSRF）、错误时返回统一格式。
- * 业务规则的各种情况在 KnowledgePointServiceTest 中测；各个测试的用户名随机生成，互不影响。
+ * 知识库和知识点操作的 HTTP 接口（#50、#25）：完整的过滤器链（登录、CSRF）、错误时返回统一格式。
+ * 业务规则的各种情况在 KnowledgeLibraryServiceTest、KnowledgePointServiceTest 中测；各个测试的用户名随机生成，互不影响。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -64,6 +65,37 @@ class KnowledgePointControllerTest {
         long userId = jsonMapper.readTree(result.getResponse().getContentAsString()).get("data").get("id").asLong();
         kpId = knowledgePointService.create(userId, null, List.of(new KnowledgePointService.NewKnowledgePoint(
                 KnowledgePointType.CONCEPT, "什么是 volatile？", "要点", null))).getFirst();
+    }
+
+    @Test
+    void 知识库列表() throws Exception {
+        mockMvc.perform(get("/api/knowledge-points").session(login)
+                        .param("type", "CONCEPT").param("sort", "MASTERY").param("direction", "DESC"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.counts.NEW").value(1))
+                .andExpect(jsonPath("$.data.counts.SOLID").value(0))
+                .andExpect(jsonPath("$.data.items[0].id").value(kpId))
+                .andExpect(jsonPath("$.data.items[0].title").value("什么是 volatile？"))
+                .andExpect(jsonPath("$.data.items[0].type").value("CONCEPT"))
+                .andExpect(jsonPath("$.data.items[0].mastery").value("NEW"))
+                .andExpect(jsonPath("$.data.items[0].nextReview").isEmpty());
+    }
+
+    @Test
+    void 列表参数不合法时返回400() throws Exception {
+        for (String[] param : List.of(new String[]{"mastery", "GOOD"}, new String[]{"type", "QUIZ"},
+                new String[]{"sort", "TITLE"}, new String[]{"direction", "UP"})) {
+            mockMvc.perform(get("/api/knowledge-points").session(login).param(param[0], param[1]))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+        }
+    }
+
+    @Test
+    void 没有登录时不能看列表() throws Exception {
+        mockMvc.perform(get("/api/knowledge-points"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
