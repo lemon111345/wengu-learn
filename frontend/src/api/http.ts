@@ -54,7 +54,9 @@ export async function errorOf(response: Response, options: RequestOptions = {}):
 
 export async function request<T>(method: string, url: string, options: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = method === 'GET' ? {} : csrfHeaders()
-  if (options.body !== undefined) {
+  // 上传文件用 FormData：原样发送，Content-Type 由浏览器填（要带上 multipart 的分隔符）
+  const formData = options.body instanceof FormData
+  if (options.body !== undefined && !formData) {
     headers['Content-Type'] = 'application/json'
   }
 
@@ -63,7 +65,7 @@ export async function request<T>(method: string, url: string, options: RequestOp
     response = await fetch(url, {
       method,
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body: options.body === undefined ? undefined : formData ? (options.body as FormData) : JSON.stringify(options.body),
     })
   } catch {
     throw new ApiError(0, 'NETWORK_ERROR', '连不上服务器，请检查网络后重试')

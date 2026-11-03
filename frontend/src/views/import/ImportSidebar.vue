@@ -26,6 +26,7 @@ const statusLabels: Record<DraftStatus, string> = {
     <section class="panel">
       <h2>导入之后会发生什么</h2>
       <p>AI 会把题目拆成知识点：问法不同但考同一件事的题合成一个，大题按追问拆成几个。每个知识点写成一个问题，附一段要点。</p>
+      <p>笔记、文章这类讲解资料，会先根据内容整理出面试题，再拆成知识点。</p>
       <p>拆完后你会逐条看一遍，确认了才会加入每日计划。</p>
     </section>
     <section class="panel">

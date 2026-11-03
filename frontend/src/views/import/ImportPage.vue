@@ -1,12 +1,19 @@
 <script setup lang="ts">
-// 导入资料 /import（ui.md 5.7）的第 1、2 步：粘贴原文 → 识别题目 → 勾选题目 → 开始抽取。
+// 导入资料 /import（ui.md 5.7）的第 1、2 步：粘贴原文或上传文件 → 识别（或整理）题目 → 勾选题目 → 开始抽取。
 // 开始抽取后换成 /drafts/:id，第 3 步的进度在那里显示，刷新、离开后再回来都能接着看（决策 028）。
 // 第 1、2 步只在页面内存中：确认题目时刷新，识别结果会丢，要重新识别
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { createDraft } from '@/api/drafts'
 import { ApiError } from '@/api/http'
-import { importQuestions, type ImportedSource } from '@/api/sources'
+import {
+  importSource,
+  MAX_UPLOAD_BYTES,
+  UPLOAD_ACCEPT,
+  uploadSource,
+  type ImportedSource,
+  type SourceType,
+} from '@/api/sources'
 import PageHeader from '@/components/PageHeader.vue'
 import { modKeyLabel, useShortcut } from '@/shortcuts/useShortcut'
 import ImportSidebar from './ImportSidebar.vue'
@@ -14,8 +21,14 @@ import ImportSteps from './ImportSteps.vue'
 
 const router = useRouter()
 
+/** 粘贴文本还是上传文件 */
+const mode = ref<'paste' | 'upload'>('paste')
+/** 资料类型（#26，决策 037）：题目清单从原文中识别题目，讲解资料根据内容整理题目 */
+const type = ref<SourceType>('QUESTION')
 const name = ref('')
 const content = ref('')
+const file = ref<File | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
 /** 识别出的题；为 null 时在第 1 步 */
 const source = ref<ImportedSource | null>(null)
 const selected = ref<Set<number>>(new Set())
@@ -23,24 +36,57 @@ const busy = ref(false)
 const error = ref<string | null>(null)
 
 const step = computed(() => (source.value ? 2 : 1))
+const isDocument = computed(() => type.value === 'DOCUMENT')
+/** 第 1 步主按钮和第 2 步标题里的动作：识别（逐字找出原题）或整理（根据内容出题） */
+const verb = computed(() => (isDocument.value ? '整理' : '识别'))
+
+function pickFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const picked = input.files?.[0] ?? null
+  // 清空 input：移除后再选同一个文件也能触发 change
+  input.value = ''
+  if (picked && picked.size > MAX_UPLOAD_BYTES) {
+    error.value = '文件不能超过 10 MB'
+    return
+  }
+  file.value = picked
+  error.value = null
+}
+
+function formatSize(bytes: number): string {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** 第 1 步缺什么时的提示；齐了返回 null */
+function missing(): string | null {
+  if (mode.value === 'upload') {
+    return file.value ? null : '请选择要上传的文件'
+  }
+  if (name.value.trim() === '') {
+    return '请填写资料名称'
+  }
+  return content.value.trim() === '' ? (isDocument.value ? '请粘贴资料内容' : '请粘贴面试题') : null
+}
 
 async function recognize() {
   if (busy.value) {
     return
   }
-  if (name.value.trim() === '' || content.value.trim() === '') {
-    error.value = name.value.trim() === '' ? '请填写资料名称' : '请粘贴面试题'
+  error.value = missing()
+  if (error.value) {
     return
   }
   busy.value = true
-  error.value = null
   try {
-    const imported = await importQuestions(name.value.trim(), content.value)
+    const imported =
+      mode.value === 'upload' && file.value
+        ? await uploadSource(file.value, name.value, type.value)
+        : await importSource(name.value.trim(), content.value, type.value)
     source.value = imported
     selected.value = new Set(imported.questions.map((q) => q.id))
   } catch (e) {
-    // 识别失败、原文过长等，后端的提示已经写清楚了怎么办
-    error.value = e instanceof ApiError ? e.message : '题目识别失败，可以重试一次，或检查原文格式'
+    // 识别失败、原文过长、文件读不出文字等，后端的提示已经写清楚了怎么办
+    error.value = e instanceof ApiError ? e.message : `题目${verb.value}失败，可以重试一次`
   } finally {
     busy.value = false
   }
@@ -56,7 +102,7 @@ function toggle(id: number, checked: boolean) {
   selected.value = next
 }
 
-/** 回去改原文：原文还在，改完再识别一次 */
+/** 回到第 1 步：原文和选好的文件都还在，改完再识别一次 */
 function backToPaste() {
   source.value = null
   error.value = null
@@ -101,19 +147,53 @@ useShortcut('Enter', () => {
       <!-- 第 1 步：粘贴或上传 -->
       <section v-if="!source" class="panel">
         <div class="segmented" role="tablist" aria-label="导入方式">
-          <button type="button" role="tab" class="segment active" aria-selected="true">粘贴文本</button>
-          <el-tooltip content="即将开放" placement="top">
-            <!-- 上传文件由 #26 实现；禁用的按钮不触发鼠标事件，提示挂在外面一层 -->
-            <span tabindex="0">
-              <button type="button" role="tab" class="segment" aria-selected="false" disabled>上传文件</button>
-            </span>
-          </el-tooltip>
+          <button
+            v-for="m in [{ value: 'paste', label: '粘贴文本' }, { value: 'upload', label: '上传文件' }] as const"
+            :key="m.value"
+            type="button"
+            role="tab"
+            class="segment"
+            :class="{ active: mode === m.value }"
+            :aria-selected="mode === m.value"
+            @click="(mode = m.value), (error = null)"
+          >
+            {{ m.label }}
+          </button>
+        </div>
+        <div class="field">
+          <span id="source-type-label" class="label">资料类型</span>
+          <div class="segmented" role="radiogroup" aria-labelledby="source-type-label">
+            <button
+              v-for="t in [{ value: 'QUESTION', label: '题目清单' }, { value: 'DOCUMENT', label: '讲解资料（笔记、文章）' }] as const"
+              :key="t.value"
+              type="button"
+              role="radio"
+              class="segment"
+              :class="{ active: type === t.value }"
+              :aria-checked="type === t.value"
+              @click="type = t.value"
+            >
+              {{ t.label }}
+            </button>
+          </div>
+          <p class="hint">
+            {{
+              isDocument
+                ? '没有现成题目的笔记、技术文章、书的章节：会根据内容整理出面试题，每道题都能用资料回答，下一步可以挑选。'
+                : '一行一题、带答案、表格、从网页复制的都可以，会自动识别出题目。答案会保存下来，但抽取时只看题目。'
+            }}
+          </p>
         </div>
         <div class="field">
           <label for="source-name">资料名称</label>
-          <el-input id="source-name" v-model="name" placeholder="如：Java 后端面试题（第一批）" maxlength="255" />
+          <el-input
+            id="source-name"
+            v-model="name"
+            :placeholder="mode === 'upload' ? '不填时用文件名' : isDocument ? '如：线程池学习笔记' : '如：Java 后端面试题（第一批）'"
+            maxlength="255"
+          />
         </div>
-        <div class="field">
+        <div v-if="mode === 'paste'" class="field">
           <label for="source-content">内容</label>
           <el-input
             id="source-content"
@@ -121,16 +201,28 @@ useShortcut('Enter', () => {
             type="textarea"
             :rows="14"
             resize="vertical"
-            placeholder="把面试题粘贴到这里"
+            :placeholder="isDocument ? '把笔记或文章粘贴到这里' : '把面试题粘贴到这里'"
           />
-          <p class="hint">一行一题、带答案、表格、从网页复制的都可以，会自动识别出题目。答案会保存下来，但抽取时只看题目。</p>
+        </div>
+        <div v-else class="field">
+          <span class="label">文件</span>
+          <input ref="fileInput" type="file" class="file-input" :accept="UPLOAD_ACCEPT" @change="pickFile" />
+          <div v-if="file" class="file">
+            <span class="file-name">{{ file.name }}</span>
+            <span class="hint">{{ formatSize(file.size) }}</span>
+            <button type="button" class="remove" @click="file = null">移除</button>
+          </div>
+          <el-button v-else class="pick" @click="fileInput?.click()">选择文件</el-button>
+          <p class="hint">支持 PDF、Word（.docx）、Markdown 和 txt，最大 10 MB。扫描件（图片）的 PDF 暂不支持。</p>
         </div>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <div class="row">
           <el-button type="primary" class="primary" :loading="busy" @click="recognize">
-            识别题目<kbd>{{ modKeyLabel }} Enter</kbd>
+            {{ verb }}题目<kbd>{{ modKeyLabel }} Enter</kbd>
           </el-button>
-          <span v-if="busy" class="hint">正在识别题目，题目多时要一两分钟</span>
+          <span v-if="busy" class="hint">
+            {{ isDocument ? '正在根据内容整理题目，资料长时要一两分钟' : '正在识别题目，题目多时要一两分钟' }}
+          </span>
         </div>
       </section>
 
@@ -138,10 +230,16 @@ useShortcut('Enter', () => {
       <template v-else>
         <section class="panel">
           <div class="questions-head">
-            <h2>识别出 {{ source.questions.length }} 道题</h2>
+            <h2>{{ source.type === 'DOCUMENT' ? '整理' : '识别' }}出 {{ source.questions.length }} 道题</h2>
             <span class="hint">已选 {{ selected.size }} 道</span>
           </div>
-          <p class="hint">不是题目的去掉勾选就行。漏了题或者识别错了，可以回去改原文再识别一次。</p>
+          <p class="hint">
+            {{
+              source.type === 'DOCUMENT'
+                ? '这些题是根据资料内容整理的，不想学的去掉勾选就行。不满意可以回上一步再整理一次。'
+                : '不是题目的去掉勾选就行。漏了题或者识别错了，可以回去改原文再识别一次。'
+            }}
+          </p>
           <ul class="questions">
             <li v-for="q in source.questions" :key="q.id" class="question">
               <el-checkbox
@@ -161,7 +259,7 @@ useShortcut('Enter', () => {
         </section>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <div class="row between">
-          <el-button class="back" @click="backToPaste">← 回去改原文</el-button>
+          <el-button class="back" @click="backToPaste">{{ mode === 'paste' ? '← 回去改原文' : '← 回上一步' }}</el-button>
           <el-button
             type="primary"
             class="primary"
@@ -232,19 +330,63 @@ useShortcut('Enter', () => {
   font-weight: 700;
 }
 
-.segment:disabled {
-  cursor: not-allowed;
-}
-
 .field {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-label {
+label,
+.label {
   font-size: 14px;
   font-weight: 700;
+}
+
+.field .segmented {
+  align-self: flex-start;
+}
+
+/* 原生的文件选择框不好看，藏起来，用“选择文件”按钮触发 */
+.file-input {
+  display: none;
+}
+
+.pick {
+  align-self: flex-start;
+  height: 44px;
+}
+
+.file {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--wg-border-strong);
+  border-radius: var(--wg-radius-control);
+}
+
+.file-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+
+.remove {
+  margin-left: auto;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--wg-radius-control);
+  background: none;
+  color: var(--wg-warn);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.remove:hover {
+  background: var(--wg-warn-soft);
 }
 
 .hint {
