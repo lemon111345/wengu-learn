@@ -4,6 +4,65 @@
 
 > 项目处于早期开发阶段（M1 自部署闭环）。需求见 [docs/prd.md](docs/prd.md)，技术方案见 [docs/tech-design.md](docs/tech-design.md)。
 
+## 部署（Docker Compose）
+
+只需要 Docker（Windows、macOS 用 Docker Desktop），不用安装 JDK 和 Node，编译都在 Docker 里完成。
+
+```bash
+git clone https://github.com/lemon111345/wengu-learn.git
+cd wengu-learn
+cp .env.example .env          # Windows PowerShell：Copy-Item .env.example .env
+# 编辑 .env，填写 WENGU_LLM_API_KEY；其他选项见文件中的说明
+docker compose up -d --build
+```
+
+第一次启动要下载基础镜像和依赖、编译后端和前端，需要几分钟。完成后打开 http://localhost:8000 （端口可在 `.env` 中用 `WENGU_PORT` 修改）。
+
+启动了三个容器：
+
+| 容器 | 作用 |
+| --- | --- |
+| `web` | Nginx：提供前端页面，并把 `/api` 转给后端 |
+| `backend` | 后端，不直接对外开放 |
+| `mysql` | 数据库，数据保存在 Docker 卷 `mysql-data` 中；只对本机开放端口 3307（`WENGU_DB_PORT`），供备份使用 |
+
+**第一次使用：**先注册自己的账号。不打算让别人注册的话，在 `.env` 中加上 `WENGU_ALLOW_REGISTRATION=false`，再执行一次 `docker compose up -d`（只会重建后端）。
+
+**修改配置：**改完 `.env` 后执行 `docker compose up -d`。**注意后端重建或重启后需要重新登录**：登录状态保存在后端的内存中。
+
+**升级：**
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+数据库结构由后端启动时自动升级（Flyway）。升级前建议先备份。
+
+**备份与恢复：**
+
+```bash
+# 备份（密码是 .env 中的 WENGU_DB_PASSWORD，默认 wengu）
+docker compose exec -T mysql mysqldump -uwengu -pwengu --single-transaction wengu > wengu-backup.sql
+# 恢复
+docker compose exec -T mysql mysql -uwengu -pwengu wengu < wengu-backup.sql
+```
+
+**停止：**`docker compose down`。数据保留在卷中；加上 `-v` 会连数据一起删除。
+
+### 连接 Ollama
+
+Ollama 运行在宿主机上（不放进 compose）。在 `.env` 中写：
+
+```
+WENGU_LLM_BASE_URL=http://host.docker.internal:11434/v1
+WENGU_LLM_MODEL=qwen2.5:7b
+```
+
+- Ollama 的上下文长度必须设到至少 16384，见下面“配置大模型”中的说明
+- Windows、macOS（Docker Desktop）上实测可以直接连上
+- Linux 上 Ollama 默认只监听 127.0.0.1，容器连不到，需要在 Ollama 的服务配置中设置 `OLLAMA_HOST=0.0.0.0` 后重启 Ollama（这会让局域网也能访问 Ollama，注意防火墙）。这一点还没有实测
+
 ## 本地开发
 
 需要 JDK 21 和 Docker。Maven 不用单独安装，使用项目自带的 Maven Wrapper：
@@ -57,7 +116,7 @@ npm run build   # 类型检查并打包到 frontend/dist
 
 ### 配置大模型
 
-后端通过兼容 OpenAI 格式的接口调用大模型，配置**只从环境变量读取**，不写进任何配置文件：
+后端通过兼容 OpenAI 格式的接口调用大模型，配置**只从环境变量读取**，不写进仓库中的任何配置文件（用 Docker Compose 部署时写在不提交的 `.env` 中）：
 
 | 环境变量 | 说明 | 默认值 |
 | --- | --- | --- |
