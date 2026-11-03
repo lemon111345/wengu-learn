@@ -39,6 +39,8 @@ export interface TodayPlan {
   knowledgePointCount: number
   /** 今天的有效学习时长（分钟） */
   studiedMinutesToday: number
+  /** 按现在的每天新学数还要几天学完（含今天）；每天新学为 0 或没有待学时为 null */
+  daysToFinish: number | null
 }
 
 export function fetchTodayPlan() {

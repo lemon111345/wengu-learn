@@ -69,10 +69,9 @@ public class PlanService {
         int learned = reviewService.countFirstReviews(userId, day.start(), day.end());
         int remaining = Math.max(0, settings.dailyNewLimit() - learned);
 
-        // 5、6. 新知识：去掉暂停的，按学习顺序取前 remaining 个
-        List<PlanItem> newItems = remaining == 0 ? List.of()
-                : items(knowledgePointService.activeInOrder(userId, reviewService.newKpIds(userId)))
-                .stream().limit(remaining).toList();
+        // 5、6. 新知识：去掉暂停的，按学习顺序取前 remaining 个。全部待学的总数还要用来算“还要几天学完”
+        List<KnowledgePointSummary> allNew = knowledgePointService.activeInOrder(userId, reviewService.newKpIds(userId));
+        List<PlanItem> newItems = items(allNew).stream().limit(remaining).toList();
 
         // 7. 先复习，后新学；另附今天已完成的，供页面显示对勾、评分和进度
         List<CompletedItem> completed = completed(userId, day);
@@ -81,7 +80,25 @@ public class PlanService {
         }
         return new TodayPlan(day.date(), settings.dailyNewLimit(), learned, reviews, newItems,
                 completed, upcomingReviews(userId, day, settings), knowledgePointService.count(userId),
-                sessionService.activeSecondsBetween(userId, day.start(), day.end()) / 60);
+                sessionService.activeSecondsBetween(userId, day.start(), day.end()) / 60,
+                daysToFinish(allNew.size(), remaining, settings.dailyNewLimit()));
+    }
+
+    /**
+     * 还要几个学习日学完全部待学的新知识：今天剩下的名额先用掉（算一天），其余每天学 dailyNewLimit 个。
+     * 今天的名额已经用完时从明天算起。
+     *
+     * @param newCount       待学的新知识总数（不含暂停的），包括今天计划里还没学的
+     * @param remainingToday 今天还剩的新学名额
+     * @return 每天新学为 0 或没有待学时为 null
+     */
+    static Integer daysToFinish(int newCount, int remainingToday, int dailyNewLimit) {
+        if (newCount == 0 || dailyNewLimit == 0) {
+            return null;
+        }
+        int afterToday = Math.max(0, newCount - remainingToday);
+        int today = remainingToday > 0 ? 1 : 0;
+        return today + (afterToday + dailyNewLimit - 1) / dailyNewLimit;
     }
 
     /**

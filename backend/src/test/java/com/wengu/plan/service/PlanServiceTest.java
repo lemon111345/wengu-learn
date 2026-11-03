@@ -282,6 +282,37 @@ class PlanServiceTest {
     }
 
     @Test
+    void 还要几天学完_今天的名额先用掉_其余按每天新学数往后排() {
+        // 纯计算：(待学总数, 今天剩的名额, 每天新学数)
+        assertThat(PlanService.daysToFinish(7, 3, 3)).isEqualTo(3);  // 今天 3、明天 3、后天 1
+        assertThat(PlanService.daysToFinish(3, 3, 3)).isEqualTo(1);  // 今天就能学完
+        assertThat(PlanService.daysToFinish(2, 3, 3)).isEqualTo(1);
+        assertThat(PlanService.daysToFinish(4, 1, 3)).isEqualTo(2);  // 今天学了 2 个，剩 1 个名额
+        assertThat(PlanService.daysToFinish(3, 0, 3)).isEqualTo(1);  // 今天的名额用完了，从明天算起
+        assertThat(PlanService.daysToFinish(4, 0, 3)).isEqualTo(2);
+        assertThat(PlanService.daysToFinish(0, 3, 3)).isNull();      // 没有待学的
+        assertThat(PlanService.daysToFinish(5, 0, 0)).isNull();      // 每天新学为 0：永远学不完
+    }
+
+    @Test
+    void 还要几天学完不算暂停的_并扣除今天已学的() {
+        assertThat(planService.today(1).daysToFinish()).isNull();
+
+        KnowledgePoint learned = newKp("今天学的", 0);
+        for (int i = 1; i <= 7; i++) {
+            newKp("新知识 " + i, i);
+        }
+        newKp(1, "暂停的新知识", 8, KnowledgePointStatus.SUSPENDED);
+        firstReview(learned, NOW);
+
+        // 待学 7 个（暂停的和已学的不算），今天还剩 2 个名额：今天 2、明天 3、后天 2
+        assertThat(planService.today(1).daysToFinish()).isEqualTo(3);
+
+        settingsService.update(1, new UpdateSettingsRequest(null, null, 0));
+        assertThat(planService.today(1).daysToFinish()).isNull();
+    }
+
+    @Test
     void 暂停的知识点和其他用户的知识点被排除() {
         reviewedKp(1, "暂停的复习", 1, NOW, KnowledgePointStatus.SUSPENDED);
         newKp(1, "暂停的新知识", 2, KnowledgePointStatus.SUSPENDED);
