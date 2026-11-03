@@ -133,21 +133,33 @@ final class LearningChatPrompt {
     /** 句子的结束符：问句从上一个结束符之后开始 */
     private static final String SENTENCE_ENDS = "。！？!?\n";
 
-    /** 一条回复中最后一个问句，去掉 Markdown 的加粗和列表符号；没有问句时为 null */
+    /**
+     * 一条回复中最后一个问题，去掉 Markdown 的加粗和列表符号；没有问句时为 null。
+     * 老师常连着问两句（“……会发生什么？为什么要这样设计？”），同一行中紧挨着的问句一起取，只取最后一句会丢掉前面的场景
+     */
     static String lastQuestion(String reply) {
         int end = Math.max(reply.lastIndexOf('？'), reply.lastIndexOf('?'));
         if (end < 0) {
             return null;
         }
-        int start = end - 1;
-        while (start >= 0 && SENTENCE_ENDS.indexOf(reply.charAt(start)) < 0) {
-            start--;
+        int start = previousSentenceEnd(reply, end);
+        while (start >= 0 && (reply.charAt(start) == '？' || reply.charAt(start) == '?')) {
+            start = previousSentenceEnd(reply, start);
         }
         String question = reply.substring(start + 1, end + 1)
                 .replace("**", "")
                 .replaceFirst("^\\s*(?:[-*>]|\\d+[.、])\\s*", "")
                 .strip();
         return question.length() < 4 ? null : question;
+    }
+
+    /** pos 之前最近的句子结束符的位置，没有时为 -1 */
+    private static int previousSentenceEnd(String text, int pos) {
+        int i = pos - 1;
+        while (i >= 0 && SENTENCE_ENDS.indexOf(text.charAt(i)) < 0) {
+            i--;
+        }
+        return i;
     }
 
     /**

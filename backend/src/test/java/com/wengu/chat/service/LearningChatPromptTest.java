@@ -108,6 +108,10 @@ class LearningChatPromptTest {
         assertThat(LearningChatPrompt.lastQuestion("讲完了。\n\n- 如果容量不是 2 的幂会怎样？")).isEqualTo("如果容量不是 2 的幂会怎样？");
         assertThat(LearningChatPrompt.lastQuestion("你知道吗？我先讲一下。现在请想想：桶里的链表会怎样?"))
                 .isEqualTo("现在请想想：桶里的链表会怎样?");
+        // 连着问的两句一起取，不然只剩“为什么？”；换行之前的问句不算
+        assertThat(LearningChatPrompt.lastQuestion("讲完了。检验一下：删到只剩 3 个节点会发生什么？为什么要这样设计？"))
+                .isEqualTo("检验一下：删到只剩 3 个节点会发生什么？为什么要这样设计？");
+        assertThat(LearningChatPrompt.lastQuestion("上一段问过你吗？\n那么扩容会怎样？")).isEqualTo("那么扩容会怎样？");
         assertThat(LearningChatPrompt.lastQuestion("这一步讲完了，我们继续。")).isNull();
         assertThat(LearningChatPrompt.lastQuestion("对吗？")).isNull();
     }
