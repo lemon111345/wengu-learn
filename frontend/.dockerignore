@@ -1,0 +1,4 @@
+# 不进构建上下文：依赖和产物在镜像里重新生成；.env.local 是本机开发服务器的配置
+node_modules/
+dist/
+.env*

@@ -16,6 +16,8 @@ Thumbs.db
 # ===== 密钥与本地配置（API Key 永远不进仓库）=====
 .env
 .env.*
+# 部署配置的模板要提交（#24）
+!.env.example
 application-local.yml
 
 # ===== 私人数据（如付费平台题库，绝不提交）=====

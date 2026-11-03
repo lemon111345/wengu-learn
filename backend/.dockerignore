@@ -1,0 +1,6 @@
+# 不进构建上下文：编译产物和本地配置
+target/
+*.log
+.idea/
+*.iml
+application-local.yml

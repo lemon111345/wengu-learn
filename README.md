@@ -9,7 +9,7 @@
 需要 JDK 21 和 Docker。Maven 不用单独安装，使用项目自带的 Maven Wrapper：
 
 ```powershell
-docker compose up -d         # 在仓库根目录启动本地开发用的 MySQL 8.4（宿主机端口 3307）
+docker compose up -d mysql   # 在仓库根目录只启动 MySQL 8.4（宿主机端口 3307）；不带服务名会把整个应用都启动起来
 cd backend
 .\mvnw.cmd test              # 运行测试（测试会用 Testcontainers 另起一个 MySQL，需要 Docker 在运行）
 .\mvnw.cmd spring-boot:run   # 启动后端，健康检查：http://localhost:8080/api/health（不需要登录）
