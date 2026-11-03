@@ -10,6 +10,8 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -44,6 +46,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<Result<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
         return build(ErrorCode.BAD_REQUEST, "参数类型错误: " + e.getName());
+    }
+
+    /** 上传的文件超过 spring.servlet.multipart.max-file-size（#26） */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Result<Void>> handleUploadTooLarge(MaxUploadSizeExceededException e) {
+        return build(ErrorCode.BAD_REQUEST, "文件不能超过 10 MB");
+    }
+
+    /** multipart 请求中缺少某个部分，如没有选择文件（#26） */
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<Result<Void>> handleMissingPart(MissingServletRequestPartException e) {
+        return build(ErrorCode.BAD_REQUEST, "缺少参数: " + e.getRequestPartName());
     }
 
     /** 请求的路径没有对应的接口。 */

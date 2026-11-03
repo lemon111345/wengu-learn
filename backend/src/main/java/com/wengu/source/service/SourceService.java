@@ -73,6 +73,29 @@ public class SourceService {
     }
 
     /**
+     * 导入上传的文件（#26）：先提取文字（{@link DocumentTextExtractor}），之后和粘贴的原文一样处理，见 {@link #importContent}。
+     *
+     * @param filename 原始文件名，按扩展名判断格式；没填材料名称时用去掉扩展名的文件名
+     * @param name     材料名称，可以为空
+     */
+    public ImportedSource importFile(long userId, String filename, byte[] bytes, String name, SourceType type) {
+        if (bytes == null || bytes.length == 0) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请选择要上传的文件");
+        }
+        String content = DocumentTextExtractor.extract(filename, bytes);
+        String sourceName = name == null || name.isBlank() ? baseName(filename) : name;
+        return importContent(userId, sourceName, content, type);
+    }
+
+    /** 去掉路径和扩展名的文件名，最长 {@link #NAME_MAX_LENGTH} 个字 */
+    static String baseName(String filename) {
+        String base = filename == null ? "" : filename.replaceAll(".*[/\\\\]", "");
+        int dot = base.lastIndexOf('.');
+        base = (dot > 0 ? base.substring(0, dot) : base).strip();
+        return base.length() > NAME_MAX_LENGTH ? base.substring(0, NAME_MAX_LENGTH) : base;
+    }
+
+    /**
      * 导入资料：题目清单从原文中识别题目（决策 011），讲解资料根据内容整理题目（#26，决策 037），成功后才保存。
      * 失败时什么都不保存，用户改好原文重新提交即可。上传的文件提取出文字后也走这里。
      * <p>
