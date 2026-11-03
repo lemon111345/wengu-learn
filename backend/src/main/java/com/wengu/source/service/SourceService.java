@@ -5,6 +5,7 @@ import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.llm.dto.LlmResult;
 import com.wengu.llm.service.LlmOutputParseException;
+import com.wengu.source.dto.GenerateResult;
 import com.wengu.source.dto.ImportQuestionsRequest;
 import com.wengu.source.dto.ImportedSource;
 import com.wengu.source.dto.SourceQuestion;
@@ -53,25 +54,37 @@ public class SourceService {
 
     private final SourceMapper sourceMapper;
     private final QuestionSplitService splitService;
+    private final QuestionGenerateService generateService;
     private final Clock clock;
     private final JsonMapper jsonMapper;
 
-    public SourceService(SourceMapper sourceMapper, QuestionSplitService splitService, Clock clock,
-                         JsonMapper jsonMapper) {
+    public SourceService(SourceMapper sourceMapper, QuestionSplitService splitService,
+                         QuestionGenerateService generateService, Clock clock, JsonMapper jsonMapper) {
         this.sourceMapper = sourceMapper;
         this.splitService = splitService;
+        this.generateService = generateService;
         this.clock = clock;
         this.jsonMapper = jsonMapper;
     }
 
-    /**
-     * 导入面试题：切分题目，切分成功后才保存。失败时什么都不保存，用户改好原文重新提交即可。
-     * <p>
-     * 调用模型要几秒到十几秒，方法不加事务，避免长时间占用数据库连接；保存只有一条 insert，不需要事务。
-     */
+    /** 导入粘贴的资料，见 {@link #importContent}。 */
     public ImportedSource importQuestions(long userId, ImportQuestionsRequest request) {
-        String name = request.name() == null ? "" : request.name().strip();
-        String content = request.content() == null ? "" : request.content().strip();
+        return importContent(userId, request.name(), request.content(), request.type());
+    }
+
+    /**
+     * 导入资料：题目清单从原文中识别题目（决策 011），讲解资料根据内容整理题目（#26，决策 037），成功后才保存。
+     * 失败时什么都不保存，用户改好原文重新提交即可。上传的文件提取出文字后也走这里。
+     * <p>
+     * 调用模型要几秒到几十秒，方法不加事务，避免长时间占用数据库连接；保存只有一条 insert，不需要事务。
+     *
+     * @param type 为 null 时按题目清单处理
+     */
+    public ImportedSource importContent(long userId, String rawName, String rawContent, SourceType type) {
+        SourceType sourceType = type == null ? SourceType.QUESTION : type;
+        boolean document = sourceType == SourceType.DOCUMENT;
+        String name = rawName == null ? "" : rawName.strip();
+        String content = rawContent == null ? "" : rawContent.strip();
         if (name.isEmpty()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "请填写材料名称");
         }
@@ -79,36 +92,37 @@ public class SourceService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "材料名称不能超过 " + NAME_MAX_LENGTH + " 个字");
         }
         if (content.isEmpty()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "请粘贴面试题");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, document ? "资料内容是空的" : "请粘贴面试题");
         }
         if (content.length() > MAX_CONTENT_LENGTH) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "内容有 " + content.length() + " 字，超过了 "
-                    + MAX_CONTENT_LENGTH + " 字的上限。可以删掉答案只保留题目，或者分成几批导入");
+                    + MAX_CONTENT_LENGTH + " 字的上限。" + (document ? "可以分成几批导入" : "可以删掉答案只保留题目，或者分成几批导入"));
         }
 
-        List<SplitQuestion> split = splitWithRetry(content);
-        if (split.isEmpty()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "没有识别到题目，请检查粘贴的内容");
+        List<SplitQuestion> found = document ? generateWithRetry(content) : splitWithRetry(content);
+        if (found.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST,
+                    document ? "没有从资料中整理出题目，请检查内容" : "没有识别到题目，请检查粘贴的内容");
         }
-        if (split.size() > MAX_QUESTIONS) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "识别到 " + split.size() + " 道题，一次最多导入 "
-                    + MAX_QUESTIONS + " 道，请分成几批导入");
+        if (found.size() > MAX_QUESTIONS) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, (document ? "整理出 " : "识别到 ") + found.size()
+                    + " 道题，一次最多导入 " + MAX_QUESTIONS + " 道，请分成几批导入");
         }
 
         List<SourceQuestion> questions = new ArrayList<>();
-        for (int i = 0; i < split.size(); i++) {
-            questions.add(new SourceQuestion(i + 1, split.get(i).text(), split.get(i).followUps()));
+        for (int i = 0; i < found.size(); i++) {
+            questions.add(new SourceQuestion(i + 1, found.get(i).text(), found.get(i).followUps()));
         }
 
         Source source = new Source();
         source.setUserId(userId);
-        source.setType(SourceType.QUESTION);
+        source.setType(sourceType);
         source.setName(name);
         source.setContent(content);
         source.setQuestions(jsonMapper.writeValueAsString(questions));
         source.setCreatedAt(Instant.now(clock));
         sourceMapper.insert(source);
-        return new ImportedSource(source.getId(), name, questions);
+        return new ImportedSource(source.getId(), name, sourceType, questions);
     }
 
     /**
@@ -162,5 +176,23 @@ public class SourceService {
             }
         }
         throw new BusinessException(ErrorCode.QUESTION_SPLIT_FAILED);
+    }
+
+    /** 根据讲解资料整理题目，重试规则同 {@link #splitWithRetry}；核对见 {@link GenerateValidator}。 */
+    private List<SplitQuestion> generateWithRetry(String content) {
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                LlmResult<GenerateResult> result = generateService.generate(content);
+                List<String> problems = GenerateValidator.validate(content, result.content());
+                if (problems.isEmpty()) {
+                    return GenerateValidator.toQuestions(result.content().questions());
+                }
+                log.warn("整理题目校验不通过（第 {} 次）: model={}, problems={}", attempt, result.model(), problems);
+            } catch (LlmOutputParseException e) {
+                log.warn("整理题目结果无法解析（第 {} 次）: {}, finishReason={}",
+                        attempt, e.getMessage(), e.getResult().finishReason());
+            }
+        }
+        throw new BusinessException(ErrorCode.QUESTION_GENERATE_FAILED);
     }
 }
