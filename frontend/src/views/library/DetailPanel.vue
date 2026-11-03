@@ -95,8 +95,11 @@ function restoreAiSummary() {
   }
 }
 
-/** 页面切换知识点、离开页面前问一下有没有没保存的修改 */
-defineExpose({ dirty })
+/**
+ * dirty：页面切换知识点、离开页面前问一下有没有没保存的修改；
+ * reload：批量操作改到了正在看的知识点时，页面让详情重新取一次
+ */
+defineExpose({ dirty, reload: load })
 
 async function run(action: () => Promise<void>, done: string, failed: string) {
   if (busy.value) {

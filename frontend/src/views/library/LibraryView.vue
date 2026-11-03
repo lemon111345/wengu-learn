@@ -8,7 +8,9 @@ import { ApiError } from '@/api/http'
 import {
   deleteKnowledgePoints,
   fetchLibrary,
+  mergeKnowledgePoints,
   restoreKnowledgePoints,
+  suspendKnowledgePoints,
   type LibrarySort,
   type LibraryView,
   type Mastery,
@@ -19,6 +21,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import DetailPanel from './DetailPanel.vue'
 import KnowledgeTable from './KnowledgeTable.vue'
 import LibraryFilters from './LibraryFilters.vue'
+import MergeDialog from './MergeDialog.vue'
 import UndoToast from './UndoToast.vue'
 
 const router = useRouter()
@@ -31,7 +34,14 @@ const direction = ref<SortDirection>('ASC')
 const library = ref<LibraryView | null>(null)
 const loadError = ref<string | null>(null)
 const selectedId = ref<number | null>(null)
-const checked = ref<Set<number>>(new Set())
+/**
+ * 勾选的知识点：id → 标题，按勾选顺序。切换筛选后勾选保留，
+ * 勾选的可能不在当前列表中，合并弹窗要显示它们的标题，所以记下来
+ */
+const checked = ref<Map<number, string>>(new Map())
+const checkedIds = computed(() => new Set(checked.value.keys()))
+const busy = ref(false)
+const mergeOpen = ref(false)
 const panel = ref<InstanceType<typeof DetailPanel> | null>(null)
 /** 删除后的撤销提示，带上删除的 id */
 const undoNotice = ref<{ text: string; ids: number[] } | null>(null)
@@ -78,13 +88,70 @@ function onSort(next: LibrarySort) {
 }
 
 function onToggle(id: number, on: boolean) {
-  const next = new Set(checked.value)
-  if (on) {
-    next.add(id)
+  const next = new Map(checked.value)
+  const item = library.value?.items.find((i) => i.id === id)
+  if (on && item) {
+    next.set(id, item.title)
   } else {
     next.delete(id)
   }
   checked.value = next
+}
+
+function uncheck(ids: number[]) {
+  const next = new Map(checked.value)
+  ids.forEach((id) => next.delete(id))
+  checked.value = next
+}
+
+/** 批量操作改到了正在看的知识点时，详情也重新取 */
+function reloadPanelIf(ids: number[]) {
+  if (selectedId.value !== null && ids.includes(selectedId.value)) {
+    void panel.value?.reload()
+  }
+}
+
+async function suspendChecked() {
+  const ids = [...checked.value.keys()]
+  if (busy.value || ids.length === 0) {
+    return
+  }
+  busy.value = true
+  try {
+    await suspendKnowledgePoints(ids)
+    ElMessage.success(`已暂停 ${ids.length} 个知识点`)
+    uncheck(ids)
+    reloadPanelIf(ids)
+    await load()
+  } catch (e) {
+    ElMessage.error(e instanceof ApiError ? e.message : '没有暂停成功，请重试')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function merge(primaryId: number) {
+  const ids = [...checked.value.keys()]
+  const mergedIds = ids.filter((id) => id !== primaryId)
+  busy.value = true
+  try {
+    await mergeKnowledgePoints(primaryId, mergedIds)
+  } catch (e) {
+    ElMessage.error(e instanceof ApiError ? e.message : '没有合并成功，请重试')
+    busy.value = false
+    return
+  }
+  busy.value = false
+  mergeOpen.value = false
+  ElMessage.success(`已合并 ${ids.length} 个知识点`)
+  uncheck(ids)
+  // 合并后打开主知识点，看到并过来的来源和学习记录
+  if (selectedId.value === primaryId) {
+    void panel.value?.reload()
+  } else if (await confirmDiscard()) {
+    selectedId.value = primaryId
+  }
+  await load()
 }
 
 /** 详情有没保存的修改时问一下；返回 true 表示可以继续 */
@@ -121,9 +188,7 @@ async function remove(ids: number[]) {
     return
   }
   undoNotice.value = { text: ids.length === 1 ? '已删除' : `已删除 ${ids.length} 个知识点`, ids }
-  const next = new Set(checked.value)
-  ids.forEach((id) => next.delete(id))
-  checked.value = next
+  uncheck(ids)
   if (selectedId.value !== null && ids.includes(selectedId.value)) {
     // 删掉的是正在看的：重新取列表后选中第一个
     selectedId.value = null
@@ -184,11 +249,25 @@ function clearFilters() {
   <div v-else class="wg-page-body layout">
     <main class="main">
       <LibraryFilters v-model:mastery="mastery" v-model:type="type" :counts="library.counts" />
+      <!-- 批量操作条：勾选后出现（ui.md 5.9） -->
+      <div v-if="checked.size > 0" class="batch-bar">
+        <span class="batch-count">已选 {{ checked.size }} 个</span>
+        <div class="batch-actions">
+          <button type="button" class="batch-btn" :disabled="checked.size < 2 || busy" @click="mergeOpen = true">
+            合并
+          </button>
+          <button type="button" class="batch-btn" :disabled="busy" @click="suspendChecked">暂停复习</button>
+          <button type="button" class="batch-btn danger" :disabled="busy" @click="remove([...checked.keys()])">
+            删除
+          </button>
+          <button type="button" class="batch-clear" @click="checked = new Map()">取消选择</button>
+        </div>
+      </div>
       <KnowledgeTable
         v-if="library.items.length > 0"
         :items="library.items"
         :selected-id="selectedId"
-        :checked="checked"
+        :checked="checkedIds"
         :sort="sort"
         :direction="direction"
         @select="select"
@@ -207,6 +286,12 @@ function clearFilters() {
       <DetailPanel ref="panel" :id="selectedId" @changed="load" @delete="(id) => remove([id])" />
     </div>
   </div>
+  <MergeDialog
+    v-model="mergeOpen"
+    :items="[...checked].map(([id, title]) => ({ id, title }))"
+    :busy="busy"
+    @confirm="merge"
+  />
   <UndoToast :notice="undoNotice" @undo="undo" @close="undoNotice = null" />
 </template>
 
@@ -248,6 +333,63 @@ function clearFilters() {
   flex-wrap: wrap;
   gap: 12px 20px;
   padding: 24px 28px;
+}
+
+/* 批量操作条：主色浅底（ui.md 5.9），按钮高 40 */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 8px 8px 18px;
+  border-radius: var(--wg-radius-card);
+  background: var(--wg-primary-soft);
+}
+
+.batch-count {
+  color: var(--wg-primary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.batch-btn {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--wg-primary-line);
+  border-radius: var(--wg-radius-control);
+  background: var(--wg-bg);
+  color: var(--wg-text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.batch-btn.danger {
+  color: var(--wg-warn);
+}
+
+.batch-btn:disabled {
+  color: var(--wg-text-muted);
+  opacity: 0.6;
+  cursor: default;
+}
+
+.batch-clear {
+  min-height: 40px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  color: var(--wg-text-muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
 }
 
 .foot {
