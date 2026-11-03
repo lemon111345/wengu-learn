@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
+import com.wengu.review.dto.CardProgress;
 import com.wengu.review.dto.DueCard;
 import com.wengu.review.dto.ReviewRecord;
 import com.wengu.review.dto.ReviewResult;
@@ -20,17 +21,19 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Random;
+import java.util.stream.Collectors;
 
 /**
  * 评分与调度。只通过 kp_id 工作，不知道知识点是什么、属于哪种类型（决策 002）。
  * <p>
- * 初始化调度状态、评分与预览（#20），以及每日计划要用的查询。
+ * 初始化调度状态、评分与预览（#20），以及每日计划、知识库（#50）要用的查询。
  */
 @Service
 public class ReviewService {
@@ -222,18 +225,63 @@ public class ReviewService {
 
     /** [start, end) 之间的评分，按评分时间排列。每日计划用它显示今天已完成的条目（#48）。 */
     public List<ReviewRecord> reviewsBetween(long userId, Instant start, Instant end) {
-        return reviewLogMapper.selectList(new LambdaQueryWrapper<ReviewLog>()
-                        .select(ReviewLog::getKpId, ReviewLog::getRatingUser, ReviewLog::getFirstReview,
-                                ReviewLog::getReviewedAt)
-                        .eq(ReviewLog::getUserId, userId)
+        return reviewLogMapper.selectList(recordQuery(userId)
                         .ge(ReviewLog::getReviewedAt, start)
                         .lt(ReviewLog::getReviewedAt, end)
                         .orderByAsc(ReviewLog::getReviewedAt)
                         .orderByAsc(ReviewLog::getId))
                 .stream()
-                .map(log -> new ReviewRecord(log.getKpId(), log.getRatingUser(), log.getFirstReview(),
-                        log.getReviewedAt()))
+                .map(ReviewService::toRecord)
                 .toList();
+    }
+
+    /**
+     * 这些知识点的全部评分，最近的在前（#50 知识库详情的学习记录）。
+     * 合并时学习记录留在被合并的知识点上（决策 029），由 knowledge 把它们的 id 一起传进来；review 不知道合并。
+     * 不属于该用户的 id 查不到。
+     */
+    public List<ReviewRecord> reviewsOf(long userId, Collection<Long> kpIds) {
+        if (kpIds.isEmpty()) {
+            return List.of();
+        }
+        return reviewLogMapper.selectList(recordQuery(userId)
+                        .in(ReviewLog::getKpId, kpIds)
+                        .orderByDesc(ReviewLog::getReviewedAt)
+                        .orderByDesc(ReviewLog::getId))
+                .stream()
+                .map(ReviewService::toRecord)
+                .toList();
+    }
+
+    /** 某个用户的评分流水，只取 {@link ReviewRecord} 用到的列 */
+    private static LambdaQueryWrapper<ReviewLog> recordQuery(long userId) {
+        return new LambdaQueryWrapper<ReviewLog>()
+                .select(ReviewLog::getKpId, ReviewLog::getRatingUser, ReviewLog::getRatingAi,
+                        ReviewLog::getFirstReview, ReviewLog::getReviewedAt)
+                .eq(ReviewLog::getUserId, userId);
+    }
+
+    private static ReviewRecord toRecord(ReviewLog log) {
+        return new ReviewRecord(log.getKpId(), log.getRatingUser(), log.getRatingAi(), log.getFirstReview(),
+                log.getReviewedAt());
+    }
+
+    /**
+     * 这些知识点的复习进度（#50 知识库的掌握程度和下次复习），按 kp_id 查。
+     * 没有调度状态的（只收录的类型）不在结果中；不属于该用户的 id 也查不到。
+     */
+    public Map<Long, CardProgress> progressOf(long userId, Collection<Long> kpIds) {
+        if (kpIds.isEmpty()) {
+            return Map.of();
+        }
+        return cardStateMapper.selectList(new LambdaQueryWrapper<CardState>()
+                        .select(CardState::getKpId, CardState::getStability, CardState::getDue,
+                                CardState::getLastReview)
+                        .eq(CardState::getUserId, userId)
+                        .in(CardState::getKpId, kpIds))
+                .stream()
+                .collect(Collectors.toMap(CardState::getKpId,
+                        cs -> new CardProgress(cs.getKpId(), cs.getStability(), cs.getDue(), cs.getLastReview())));
     }
 
     private List<Long> kpIds(LambdaQueryWrapper<CardState> query) {
