@@ -1,19 +1,23 @@
 package com.wengu.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.StudyMaterial;
+import com.wengu.knowledge.dto.UpdateKnowledgePointRequest;
 import com.wengu.knowledge.entity.ExtractionDraft;
 import com.wengu.knowledge.entity.ExtractionDraftItem;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
+import com.wengu.knowledge.entity.KpRevision;
 import com.wengu.knowledge.entity.KpSource;
 import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftMapper;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.knowledge.mapper.KpRevisionMapper;
 import com.wengu.knowledge.mapper.KpSourceMapper;
 import com.wengu.review.service.ReviewService;
 import com.wengu.source.dto.SourceQuestion;
@@ -28,17 +32,25 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 知识点：创建、关联材料，以及抽取去重、每日计划、学习对话要用的查询。编辑、合并、暂停由 #25 添加。
+ * 知识点：创建、关联材料，以及抽取去重、每日计划、学习对话要用的查询；知识库中的编辑、暂停、删除、合并（#25）。
+ * <p>
+ * 软删除（决策 029）：已删除的知识点（deleted_at 不为空，被合并的也是）在这里的查询中一律显式排除，
+ * 不用 MyBatis-Plus 的逻辑删除注解：撤销删除时要读出已删除的行，注解会挡住。
  */
 @Service
 public class KnowledgePointService {
 
+    /** 标题最长 500 字，和 knowledge_point.title 的列宽一致 */
+    private static final int MAX_TITLE_LENGTH = 500;
+
     private final KnowledgePointMapper knowledgePointMapper;
     private final KpSourceMapper kpSourceMapper;
+    private final KpRevisionMapper revisionMapper;
     private final ExtractionDraftItemMapper draftItemMapper;
     private final ExtractionDraftMapper draftMapper;
     private final ReviewService reviewService;
@@ -46,10 +58,11 @@ public class KnowledgePointService {
     private final Clock clock;
 
     public KnowledgePointService(KnowledgePointMapper knowledgePointMapper, KpSourceMapper kpSourceMapper,
-                                 ExtractionDraftItemMapper draftItemMapper, ExtractionDraftMapper draftMapper,
+                                 KpRevisionMapper revisionMapper, ExtractionDraftItemMapper draftItemMapper, ExtractionDraftMapper draftMapper,
                                  ReviewService reviewService, SourceService sourceService, Clock clock) {
         this.knowledgePointMapper = knowledgePointMapper;
         this.kpSourceMapper = kpSourceMapper;
+        this.revisionMapper = revisionMapper;
         this.draftItemMapper = draftItemMapper;
         this.draftMapper = draftMapper;
         this.reviewService = reviewService;
@@ -67,7 +80,7 @@ public class KnowledgePointService {
 
     /**
      * 用户所有知识点的 id 和标题，按学习顺序排列，作为抽取的去重上下文（决策 014）。
-     * 暂停的知识点也算：暂停只是暂时不学，知识点还在，再抽一个重复的没有意义。
+     * 暂停的知识点也算：暂停只是暂时不学，知识点还在，再抽一个重复的没有意义。删除的不算。
      * <p>
      * userId 由调用方传入：抽取在后台线程中执行，读不到 CurrentUser（决策 013）。
      */
@@ -75,6 +88,7 @@ public class KnowledgePointService {
         return knowledgePointMapper.selectList(new LambdaQueryWrapper<KnowledgePoint>()
                         .select(KnowledgePoint::getId, KnowledgePoint::getTitle)
                         .eq(KnowledgePoint::getUserId, userId)
+                        .isNull(KnowledgePoint::getDeletedAt)
                         .orderByAsc(KnowledgePoint::getSortOrder)
                         .orderByAsc(KnowledgePoint::getId))
                 .stream()
@@ -127,7 +141,7 @@ public class KnowledgePointService {
 
     /**
      * 给已有知识点补上与材料的关联，例如新资料中的题被已有知识点覆盖时（决策 014）。
-     * 已经关联过的跳过；不属于该用户或已经不存在的知识点跳过。
+     * 已经关联过的跳过；不属于该用户、已经不存在或已删除的知识点跳过。
      */
     @Transactional
     public void linkToSource(long userId, long sourceId, Collection<Long> kpIds) {
@@ -137,6 +151,7 @@ public class KnowledgePointService {
         Set<Long> owned = knowledgePointMapper.selectList(new LambdaQueryWrapper<KnowledgePoint>()
                         .select(KnowledgePoint::getId)
                         .eq(KnowledgePoint::getUserId, userId)
+                        .isNull(KnowledgePoint::getDeletedAt)
                         .in(KnowledgePoint::getId, kpIds))
                 .stream().map(KnowledgePoint::getId).collect(Collectors.toSet());
         if (owned.isEmpty()) {
@@ -154,7 +169,8 @@ public class KnowledgePointService {
     }
 
     /**
-     * 每日计划第 6 步：从给定的 id 中去掉暂停的，按学习顺序（sort_order、id）排列（决策 002 第 6 条）。
+     * 每日计划第 6 步：从给定的 id 中去掉暂停的、删除的、只收录类型的，按学习顺序（sort_order、id）排列（决策 002 第 6 条）。
+     * 只收录的类型本来没有调度状态；从别的类型改过来的保留了调度状态，在这里排除（决策 029）。
      * 候选 id 来自 review，这里只读 knowledge 自己的表；不属于该用户的 id 直接忽略。
      * <p>
      * 用 IN 查询、在数据库中排序，MVP 只有几百个知识点，足够快；到几千个以后再改。
@@ -167,6 +183,8 @@ public class KnowledgePointService {
                         .select(KnowledgePoint::getId, KnowledgePoint::getTitle, KnowledgePoint::getType)
                         .eq(KnowledgePoint::getUserId, userId)
                         .eq(KnowledgePoint::getStatus, KnowledgePointStatus.ACTIVE)
+                        .isNull(KnowledgePoint::getDeletedAt)
+                        .in(KnowledgePoint::getType, KnowledgePointType.scheduledTypes())
                         .in(KnowledgePoint::getId, kpIds)
                         .orderByAsc(KnowledgePoint::getSortOrder)
                         .orderByAsc(KnowledgePoint::getId))
@@ -177,7 +195,7 @@ public class KnowledgePointService {
 
     /**
      * 按 id 查标题和类型，供每日计划显示今天已完成的条目（#48）。
-     * 暂停的也返回：“今天学过”是已经发生的事，暂停不改变它；以后有了软删除（#25），删除的不返回。
+     * 暂停的也返回：“今天学过”是已经发生的事，暂停不改变它；删除的不返回，知识点没了，今天页也不再显示。
      * 不属于该用户的 id 不在结果中。
      */
     public Map<Long, KnowledgePointSummary> summaries(long userId, Collection<Long> kpIds) {
@@ -187,6 +205,7 @@ public class KnowledgePointService {
         return knowledgePointMapper.selectList(new LambdaQueryWrapper<KnowledgePoint>()
                         .select(KnowledgePoint::getId, KnowledgePoint::getTitle, KnowledgePoint::getType)
                         .eq(KnowledgePoint::getUserId, userId)
+                        .isNull(KnowledgePoint::getDeletedAt)
                         .in(KnowledgePoint::getId, kpIds))
                 .stream()
                 .collect(Collectors.toMap(KnowledgePoint::getId,
@@ -198,13 +217,10 @@ public class KnowledgePointService {
      * 来源面试题按“知识点 → 草稿条目 → 草稿的材料”找到，题号来自条目的 source_question_ids。
      * 暂停的知识点也能取：用户从知识库直接打开时照样可以学。
      *
-     * @throws BusinessException 知识点不存在或不属于这个用户时为 NOT_FOUND
+     * @throws BusinessException 知识点不存在、不属于这个用户或已删除时为 NOT_FOUND
      */
     public StudyMaterial studyMaterial(long userId, long kpId) {
-        KnowledgePoint kp = knowledgePointMapper.selectById(kpId);
-        if (kp == null || kp.getUserId() != userId) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "知识点不存在");
-        }
+        KnowledgePoint kp = owned(userId, kpId);
         return new StudyMaterial(kp.getId(), kp.getTitle(), kp.getType(), kp.getSummary(),
                 sourceQuestions(userId, kp.getDraftItemId()));
     }
@@ -234,13 +250,202 @@ public class KnowledgePointService {
                 .toList();
     }
 
-    /** 用户的知识点总数，暂停的也算。今天页据此判断是否显示空状态（#49）。 */
-    public int count(long userId) {
-        return Math.toIntExact(knowledgePointMapper.selectCount(new LambdaQueryWrapper<KnowledgePoint>()
-                .eq(KnowledgePoint::getUserId, userId)));
+    /**
+     * 编辑标题、类型、要点（#25），只改传了的字段。确实有改动时，先把修改前的内容存一份快照（kp_revision），再更新。
+     * <p>
+     * 改类型时的调度状态（决策 029）：
+     * <ul>
+     *   <li>改成参与调度的类型：还没有调度状态的初始化成新卡，已经有的接着用</li>
+     *   <li>改成只收录的类型：调度状态保留，每日计划按类型排除（{@link #activeInOrder}）；改回来时进度还在</li>
+     * </ul>
+     *
+     * @throws BusinessException 知识点不存在、不属于这个用户或已删除时为 NOT_FOUND；
+     *                           标题或要点为空、标题过长时为 BAD_REQUEST
+     */
+    @Transactional
+    public void update(long userId, long kpId, UpdateKnowledgePointRequest request) {
+        KnowledgePoint kp = owned(userId, kpId);
+        String title = request.title() == null ? kp.getTitle() : validTitle(request.title());
+        KnowledgePointType type = request.type() == null ? kp.getType() : request.type();
+        String summary = request.summary() == null ? kp.getSummary() : validSummary(request.summary());
+        if (title.equals(kp.getTitle()) && type == kp.getType() && summary.equals(kp.getSummary())) {
+            // 没有改动不留记录，前端可以放心地整份提交
+            return;
+        }
+        Instant now = Instant.now(clock);
+        revisionMapper.insert(KpRevision.before(kp, now));
+        if (type != kp.getType() && type.isScheduled()) {
+            reviewService.ensureCard(userId, kpId);
+        }
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getTitle, title)
+                .set(KnowledgePoint::getType, type)
+                .set(KnowledgePoint::getSummary, summary)
+                .set(KnowledgePoint::getUpdatedAt, now)
+                .eq(KnowledgePoint::getId, kpId));
     }
 
-    /** 用户已有知识点中最大的 sort_order，没有知识点时为 0。 */
+    private static String validTitle(String title) {
+        String stripped = title.strip();
+        if (stripped.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "标题不能为空");
+        }
+        if (stripped.length() > MAX_TITLE_LENGTH) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "标题最长 " + MAX_TITLE_LENGTH + " 字");
+        }
+        return stripped;
+    }
+
+    private static String validSummary(String summary) {
+        String stripped = summary.strip();
+        if (stripped.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "要点不能为空");
+        }
+        return stripped;
+    }
+
+    /**
+     * 暂停复习（#25）：不再进每日计划，调度状态不动。已经暂停的照样成功。
+     * 恢复后，暂停期间到期的会马上作为到期复习出现。
+     *
+     * @throws BusinessException 没有选择知识点时为 BAD_REQUEST；有任何一个不存在、不属于这个用户或已删除时为 NOT_FOUND，整批不执行
+     */
+    @Transactional
+    public void suspend(long userId, Collection<Long> ids) {
+        setStatus(userId, ids, KnowledgePointStatus.SUSPENDED);
+    }
+
+    /** 恢复复习，规则同 {@link #suspend}。 */
+    @Transactional
+    public void resume(long userId, Collection<Long> ids) {
+        setStatus(userId, ids, KnowledgePointStatus.ACTIVE);
+    }
+
+    private void setStatus(long userId, Collection<Long> ids, KnowledgePointStatus status) {
+        Set<Long> selected = requireAll(userId, ids, false);
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getStatus, status)
+                .set(KnowledgePoint::getUpdatedAt, Instant.now(clock))
+                .in(KnowledgePoint::getId, selected));
+    }
+
+    /**
+     * 删除（软删除，决策 029）：只写 deleted_at。status、调度状态、学习记录、来源都不动，撤销后原样回来。
+     *
+     * @throws BusinessException 规则同 {@link #suspend}
+     */
+    @Transactional
+    public void delete(long userId, Collection<Long> ids) {
+        Set<Long> selected = requireAll(userId, ids, false);
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getDeletedAt, Instant.now(clock))
+                .in(KnowledgePoint::getId, selected));
+    }
+
+    /**
+     * 撤销删除：清空 deleted_at。后端不限时间，前端只在删除后的几秒钟内提供入口。
+     * 被合并的不能撤销：合并没有撤销，恢复出来会和主知识点重复。
+     *
+     * @throws BusinessException 没有选择知识点时为 BAD_REQUEST；有任何一个不存在、不属于这个用户、没有删除或是被合并的时为 NOT_FOUND
+     */
+    @Transactional
+    public void restore(long userId, Collection<Long> ids) {
+        Set<Long> selected = requireAll(userId, ids, true);
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getDeletedAt, null)
+                .in(KnowledgePoint::getId, selected));
+    }
+
+    /**
+     * 合并（决策 029）：主知识点的标题、要点、类型、排序、复习进度都不变；被合并的来源（kp_source）补关联到主知识点上，
+     * 然后软删除，并在 merged_into 记下主知识点。
+     * <ul>
+     *   <li>被合并的学习记录（review_log、会话）和调度状态留在原知识点上，不搬：那是另一张卡自己的复习序列，
+     *       搬过来会和主知识点的混在一起。#50 的详情通过 merged_into 把它们一起显示</li>
+     *   <li>之前并进被合并者的，merged_into 改指向新的主知识点，被合并的始终指向一个还在的知识点</li>
+     *   <li>合并没有撤销</li>
+     * </ul>
+     *
+     * @throws BusinessException 没有选择主知识点或被合并的、被合并的包含主知识点时为 BAD_REQUEST；
+     *                           任何一个不存在、不属于这个用户或已删除时为 NOT_FOUND，都不执行
+     */
+    @Transactional
+    public void merge(long userId, Long primaryId, Collection<Long> mergedIds) {
+        if (primaryId == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "没有选择主知识点");
+        }
+        owned(userId, primaryId);
+        Set<Long> merged = requireAll(userId, mergedIds, false);
+        if (merged.contains(primaryId)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "主知识点不能同时被合并");
+        }
+
+        Set<Long> primarySources = kpSourceMapper.selectList(new LambdaQueryWrapper<KpSource>()
+                        .eq(KpSource::getKpId, primaryId))
+                .stream().map(KpSource::getSourceId).collect(Collectors.toSet());
+        for (KpSource link : kpSourceMapper.selectList(new LambdaQueryWrapper<KpSource>()
+                .in(KpSource::getKpId, merged))) {
+            // 被合并的几个可能来自同一份材料，加进集合后不会重复关联
+            if (primarySources.add(link.getSourceId())) {
+                kpSourceMapper.insert(KpSource.of(primaryId, link.getSourceId(), userId));
+            }
+        }
+
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getMergedInto, primaryId)
+                .eq(KnowledgePoint::getUserId, userId)
+                .in(KnowledgePoint::getMergedInto, merged));
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getDeletedAt, Instant.now(clock))
+                .set(KnowledgePoint::getMergedInto, primaryId)
+                .in(KnowledgePoint::getId, merged));
+    }
+
+    /**
+     * 批量操作的检查：ids 不能为空，而且每一个都属于这个用户、处于要求的删除状态，否则整批都不执行。
+     *
+     * @param deleted false 要求都没删除；true 要求都是删除的、且不是被合并的
+     * @return 去重后的 id
+     */
+    private Set<Long> requireAll(long userId, Collection<Long> ids, boolean deleted) {
+        if (ids == null || ids.isEmpty() || ids.stream().anyMatch(Objects::isNull)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "没有选择知识点");
+        }
+        Set<Long> selected = Set.copyOf(ids);
+        LambdaQueryWrapper<KnowledgePoint> query = new LambdaQueryWrapper<KnowledgePoint>()
+                .eq(KnowledgePoint::getUserId, userId)
+                .in(KnowledgePoint::getId, selected);
+        if (deleted) {
+            query.isNotNull(KnowledgePoint::getDeletedAt).isNull(KnowledgePoint::getMergedInto);
+        } else {
+            query.isNull(KnowledgePoint::getDeletedAt);
+        }
+        if (knowledgePointMapper.selectCount(query) != selected.size()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "知识点不存在");
+        }
+        return selected;
+    }
+
+    /** 属于这个用户、没有删除的知识点；否则 NOT_FOUND，不区分是哪种情况，免得别人试探出 id */
+    private KnowledgePoint owned(long userId, long kpId) {
+        KnowledgePoint kp = knowledgePointMapper.selectById(kpId);
+        if (kp == null || kp.getUserId() != userId || kp.getDeletedAt() != null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "知识点不存在");
+        }
+        return kp;
+    }
+
+    /** 用户的知识点总数，暂停的也算，删除的不算。今天页据此判断是否显示空状态（#49）。 */
+    public int count(long userId) {
+        return Math.toIntExact(knowledgePointMapper.selectCount(new LambdaQueryWrapper<KnowledgePoint>()
+                .eq(KnowledgePoint::getUserId, userId)
+                .isNull(KnowledgePoint::getDeletedAt)));
+    }
+
+    /**
+     * 用户已有知识点中最大的 sort_order，没有知识点时为 0。
+     * 删除的也算：否则新知识点会用上删除的那个的序号，撤销删除后两个排序相同。
+     */
     private int maxSortOrder(long userId) {
         KnowledgePoint last = knowledgePointMapper.selectOne(new LambdaQueryWrapper<KnowledgePoint>()
                 .select(KnowledgePoint::getSortOrder)

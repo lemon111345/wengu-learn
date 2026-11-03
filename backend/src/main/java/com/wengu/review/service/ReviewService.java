@@ -63,6 +63,19 @@ public class ReviewService {
     }
 
     /**
+     * 知识点改成参与调度的类型时（#25）：还没有调度状态的初始化成新卡；已经有的不动，原来的复习进度接着用。
+     * 和 {@link #initCards} 分开：那里重复初始化说明确认草稿出了错，应该失败；这里“已经有了”是正常情况。
+     * <p>
+     * 改成只收录的类型时不删调度状态，由 knowledge 在每日计划中按类型排除（决策 029）。
+     */
+    @Transactional
+    public void ensureCard(long userId, long kpId) {
+        if (cardStateMapper.selectById(kpId) == null) {
+            cardStateMapper.insert(CardState.of(kpId, userId, Card.newCard(Instant.now(clock))));
+        }
+    }
+
+    /**
      * 评分预览：四种评分分别算出下次复习的时间，不保存（#20）。
      *
      * @throws BusinessException 这个知识点没有调度状态（不存在、不属于该用户、或者是只收录的类型）时为 NOT_FOUND

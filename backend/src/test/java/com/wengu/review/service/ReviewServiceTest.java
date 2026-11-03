@@ -134,6 +134,22 @@ class ReviewServiceTest {
         assertThat(cardStateMapper.selectById(102L)).isNull();
     }
 
+    @Test
+    void 改成参与调度的类型时只给还没有调度状态的初始化() {
+        reviewService.initCards(1, List.of(101L));
+        reviewService.rate(1, 101L, null, Rating.GOOD, null);
+        CardState reviewed = cardStateMapper.selectById(101L);
+
+        reviewService.ensureCard(1, 101L);
+        reviewService.ensureCard(1, 102L);
+
+        // 已经有的不动，复习进度接着用
+        assertThat(cardStateMapper.selectById(101L).getLastReview()).isEqualTo(reviewed.getLastReview());
+        assertThat(cardStateMapper.selectById(101L).getDue()).isEqualTo(reviewed.getDue());
+        // 没有的初始化成新卡
+        assertThat(cardStateMapper.selectById(102L).getLastReview()).isNull();
+    }
+
     /** 测试中直接调用 Scheduler 的结果：随机数的种子和 ReviewService 一样，由知识点 id 和上次复习时间决定（决策 026） */
     private static Card expected(long kpId, Card before, Rating rating) {
         Random random = new Random(Objects.hash(kpId, before.lastReview()));

@@ -6,6 +6,7 @@ import com.wengu.chat.entity.SessionType;
 import com.wengu.chat.entity.StudySession;
 import com.wengu.chat.mapper.MessageMapper;
 import com.wengu.chat.mapper.StudySessionMapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
@@ -412,6 +413,61 @@ class PlanServiceTest {
         reviewedKp("正常的", 2, DAY_END);
 
         assertThat(counts(planService.today(1))).containsExactly(1, 0, 0, 0, 0, 0, 0);
+    }
+
+    /** 知识库中删除（#25）；mergedInto 不为空时是被合并的 */
+    private void delete(KnowledgePoint kp, Long mergedInto) {
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getDeletedAt, NOW)
+                .set(KnowledgePoint::getMergedInto, mergedInto)
+                .eq(KnowledgePoint::getId, kp.getId()));
+    }
+
+    /** 知识库中改类型（#25）：改成只收录的类型时 card_state 保留 */
+    private void changeType(KnowledgePoint kp, KnowledgePointType type) {
+        knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                .set(KnowledgePoint::getType, type)
+                .eq(KnowledgePoint::getId, kp.getId()));
+    }
+
+    @Test
+    void 删除的_被合并的_改成只收录的不进今天的计划和接下来7天() {
+        KnowledgePoint normalReview = reviewedKp("正常的复习", 1, NOW);
+        KnowledgePoint normalNew = newKp("正常的新知识", 2);
+        reviewedKp("正常的明天到期", 3, DAY_END);
+        delete(reviewedKp("删除的复习", 4, NOW), null);
+        delete(newKp("删除的新知识", 5), null);
+        delete(reviewedKp("删除的明天到期", 6, DAY_END), null);
+        delete(reviewedKp("被合并的复习", 7, NOW), normalReview.getId());
+        delete(reviewedKp("被合并的明天到期", 8, DAY_END), normalNew.getId());
+        changeType(reviewedKp("改成个人经历的复习", 9, NOW), KnowledgePointType.EXPERIENCE);
+        changeType(newKp("改成系统设计的新知识", 10), KnowledgePointType.SYSTEM_DESIGN);
+        changeType(reviewedKp("改成系统设计的明天到期", 11, DAY_END), KnowledgePointType.SYSTEM_DESIGN);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(titles(plan.reviews())).containsExactly("正常的复习");
+        assertThat(titles(plan.newItems())).containsExactly("正常的新知识");
+        assertThat(counts(plan)).containsExactly(1, 0, 0, 0, 0, 0, 0);
+        // 知识点总数不算删除和被合并的，算只收录的
+        assertThat(plan.knowledgePointCount()).isEqualTo(6);
+    }
+
+    @Test
+    void 今天学过的新知识删除后不再显示_但仍占用今天的名额() {
+        KnowledgePoint learned = newKp("学完后删除的", 1);
+        firstReview(learned, NOW.minus(Duration.ofHours(1)));
+        newKp("新知识一", 2);
+        newKp("新知识二", 3);
+        newKp("新知识三", 4);
+        delete(learned, null);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.completed()).isEmpty();
+        // 学过是已经发生的事，删掉不会退回名额：每天新学 3 个，今天已经学了 1 个
+        assertThat(plan.newLearnedToday()).isEqualTo(1);
+        assertThat(titles(plan.newItems())).containsExactly("新知识一", "新知识二");
     }
 
     @Test

@@ -121,8 +121,9 @@ frontend/src
 | user | 用户 | id、username（唯一，按数据库排序规则比较，不区分大小写）、password_hash（bcrypt，带 `{bcrypt}` 前缀，见决策 022） |
 | user_settings | 用户设置 | user_id、daily_new_limit（每天新学数量，默认 3）、timezone（注册时取浏览器时区，读不到或不合法时用环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点） |
 | source | 导入的学习材料 | id、user_id、type（题目 / 源码 / 文档 / 截图）、name、content（用户粘贴的原文，包括答案）、questions（切分出的题目 JSON，V2 添加，见决策 011） |
-| knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（ACTIVE / SUSPENDED）、sort_order（新知识按 sort_order、id 派发；确认草稿时接在已有知识点之后）、draft_item_id（来自哪个草稿条目，V6 添加，见决策 015） |
+| knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（ACTIVE / SUSPENDED）、sort_order（新知识按 sort_order、id 派发；确认草稿时接在已有知识点之后）、draft_item_id（来自哪个草稿条目，V6 添加，见决策 015）、deleted_at（软删除，为空表示没删）、merged_into（被合并时指向主知识点，同时写 deleted_at）（V11 添加，见决策 029） |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id、user_id |
+| kp_revision | 知识点每次修改前的快照（V11） | id、user_id、kp_id、type、title、summary、created_at；只在确实有改动时写。AI 的原文在草稿条目中，加上快照每一版都能拼出来（#9 的数据），见决策 029 |
 | card_state | 调度状态（每次复习都更新） | kp_id、user_id（冗余）、state（学习中 / 复习 / 重学）、step（学习步或重学步序号，复习状态为空）、due、stability、difficulty、last_review（为空表示新知识） |
 | study_session | 一次学习会话，也是自动计时的来源 | id、user_id、type（STUDY / FOLLOW_UP / QUESTION）、kp_id（从一个问题开始时为空）、parent_session_id（接着问指向原来的学习会话，V9 添加）、started_at、ended_at（学习结束或回答到上限时写入）、skipped_explanation、active_seconds（两次活动之间最多算 10 分钟）、last_active_at、prompt_version（V8 添加），见决策 025 |
 | message | 会话中的对话消息 | id、user_id、session_id、role、content（不含标记）、marker（RESTATE / END）、model_note（附在学生消息后、只给模型看的提示）、created_at（V8 添加 marker、model_note）。学习对话的第一条消息（知识点信息）不存，每次现拼，见决策 025 |
@@ -143,7 +144,8 @@ frontend/src
 调度状态说明：
 
 - state 与 FSRS-6 一致，只有学习中、复习、重学三种，没有单独的“新”状态。**新知识 = card_state 中 last_review 为空**（知识点创建时由 knowledge 调用 review 初始化，此时 state 为学习中）
-- 不参与调度的类型不初始化 card_state，由 knowledge 在创建时决定：SYSTEM_DESIGN；M1 中还有 EXPERIENCE（见决策 007）
+- 不参与调度的类型不初始化 card_state，由 knowledge 在创建时决定：SYSTEM_DESIGN；M1 中还有 EXPERIENCE（见决策 007）。在知识库中改成这两种类型时 card_state 保留、每日计划按类型排除；改成参与调度的类型时，没有 card_state 的才初始化（决策 029）。所以参与调度看类型，不看有没有 card_state
+- 暂停、删除、合并都不动 card_state 和 review_log；被合并的学习记录留在原知识点上（决策 029）
 - 复习次数、遗忘次数不单独存储，需要时从 review_log 统计
 - 项目默认没有学习步和重学步，每个知识点一天最多出现一次，见 [决策 003](./decisions/003-FSRS移植.md)
 
@@ -158,7 +160,7 @@ frontend/src
 3. 今天已学的新知识数：review 查 review_log 中今天范围内、**is_first_review 为真**的记录条数。不能用 state_before 判断：新卡片的 state 也是“学习中”。
 4. 剩余新知识名额 = daily_new_limit − 第 3 步的数量，小于 0 时取 0。
 5. 新知识候选：review 查 card_state 中 last_review 为空的 kp_id。
-6. 过滤与排序：plan 把第 2、5 步的 kp_id 交给 knowledge，在内存中排除暂停的知识点、按排序字段排序；新知识取前“剩余名额”个。
+6. 过滤与排序：plan 把第 2、5 步的 kp_id 交给 knowledge，排除暂停的、删除的和只收录类型的知识点，按排序字段排序；新知识取前“剩余名额”个。
 7. 返回：到期复习列表 + 新知识列表，先复习后新学。另附今天已完成的条目（今天范围内的 review_log，同一知识点取最后一次，暂停的也显示）和接下来 7 个学习日每天到期的复习数（从明天起，不算暂停的），见 [决策 024](./decisions/024-今天页的补充数据.md)。
 
 第 3 步是防止重复派发的关键：如果不扣除今天已学的新知识，用户下午再打开页面时会被重新分配一批新知识，每日上限就失效了。
@@ -169,7 +171,7 @@ frontend/src
 
 “今天”按用户时区的 day_start_hour 划分（学习日），实现细节和接口见 [决策 016](./decisions/016-每日计划与用户设置.md)。
 
-查询分在 review 和 knowledge 两个模块中完成，各自只读自己的表；SYSTEM_DESIGN（M1 中还有 EXPERIENCE）没有 card_state，自然不会进入计划。第 6 步在内存中处理，是 MVP 只有几百个知识点时的取舍，见[决策 002](./decisions/002-模块依赖边界.md)。
+查询分在 review 和 knowledge 两个模块中完成，各自只读自己的表；SYSTEM_DESIGN（M1 中还有 EXPERIENCE）一般没有 card_state，不会进入计划；从别的类型改过来的保留了 card_state，在第 6 步按类型排除（决策 029）。第 6 步在内存中处理，是 MVP 只有几百个知识点时的取舍，见[决策 002](./decisions/002-模块依赖边界.md)。
 
 ## 关键设计决策
 
@@ -262,6 +264,11 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `GET /api/drafts/{id}` | 查看草稿和抽取进度（#15、#16） | — | 同上 | 不存在或不属于当前用户 404 |
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中或已确认 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
 | `POST /api/drafts/{id}/confirm` | 确认草稿，生成知识点（#17） | `{rejectedItemIds?}`，取消勾选的条目 id，不传则全部接受 | 同上，status 为 CONFIRMED，每个条目的 decision 为 ACCEPTED 或 REJECTED | 一个事务中生成知识点（sort_order 接在已有之后）、关联材料、初始化 card_state（SYSTEM_DESIGN、EXPERIENCE 不初始化）；covered 引用的已有知识点也关联到这份材料。草稿不是 READY 或已确认 409，条目不属于这份草稿 400。见决策 015 |
+| `PATCH /api/knowledge-points/{id}` | 编辑知识点（#25） | `{title?, type?, summary?}`，只改传了的字段 | — | 有改动时先存修改前的快照（kp_revision）；改成只收录的类型时保留 card_state，改成参与调度的类型时没有 card_state 的才初始化。标题或要点为空、标题超过 500 字 400；不存在、不属于当前用户或已删除 404。“恢复 AI 版本”也走这里。见决策 029 |
+| `POST /api/knowledge-points/suspend`、`/resume` | 暂停、恢复复习（#25） | `{ids}` | — | 只改 status，复习进度不动。批量：没有选择 400；有一个不存在、不属于当前用户或已删除时整批 404，都不执行 |
+| `POST /api/knowledge-points/delete` | 删除（#25） | `{ids}` | — | 软删除，只写 deleted_at，状态、card_state、学习记录、来源都不动。批量规则同上 |
+| `POST /api/knowledge-points/restore` | 撤销删除（#25） | `{ids}` | — | 清空 deleted_at，删除前的状态和进度原样回来；后端不限时间。有一个没删除或是被合并的整批 404 |
+| `POST /api/knowledge-points/merge` | 合并（#25） | `{primaryId, mergedIds}` | — | 主知识点的标题、要点、复习进度不变；被合并的来源并到主知识点，然后软删除、merged_into 指向主知识点，之前并进它们的也改指向主知识点；学习记录不搬；不能撤销。没有选择或 mergedIds 包含主知识点 400；有一个不存在、不属于当前用户或已删除 404。见决策 029 |
 | `GET /api/plan/today` | 今天的计划（#18、#48、#49、#19） | — | `{date, dailyNewLimit, newLearnedToday, reviews: [{kpId, title, type}], newItems: [...], completed: [{kpId, title, type, rating, firstReview}], upcomingReviews: [{date, count}], knowledgePointCount, studiedMinutesToday}` | 实时计算：先复习后新学，各自按学习顺序；新知识最多“每天新学数 − 今天已学数”个；date 是学习日（按时区和 day_start_hour）。completed 是今天已完成的，按完成时间排列，同一知识点取最后一次评分，暂停的也在内；upcomingReviews 是从明天起 7 个学习日每天到期的复习数，今天和已过期的在 reviews 中，不算暂停的。knowledgePointCount 是知识点总数（暂停的、不参与调度的也算），为 0 时今天页显示空状态：只看上面几个列表会把“都在很多天后到期”“只有只收录的”误判为空。studiedMinutesToday 是今天学习日内开始的会话的有效时长之和（分钟，不足一分钟舍去）。见决策 016、024、025 |
 | `POST /api/sessions` | 开始学习一个知识点（#19、#23） | `{kpId}` | `{id, type, kpId, parentSessionId, kpTitle, ended, skippedExplanation, generating, activeSeconds, rating, messages: [{id, role, content, marker, createdAt}]}` | 只创建会话，不调用模型，老师的第一句由 reply 生成；这个知识点最近的会话还没走完时返回那个会话：没结束的接着学，学完但还没评分的回去评分。知识点不存在 404，只收录的类型 400。见决策 025、027 |
 | `GET /api/sessions/{id}` | 会话和全部消息，刷新后恢复（#19、#23） | — | 同上 | messages 不含发给模型的知识点信息和附加提示；generating 为 true 表示上一条回复还在后台生成；activeSeconds 是有效时长；rating 是已评的分 `{rating, date, days}`，没评分或接着问时为 null。不存在或不属于当前用户 404 |
@@ -294,7 +301,6 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 表 | 需要的内容 | 来源 |
 | --- | --- | --- |
 | user_settings | 老师的称呼 | ui.md 5.10 |
-| knowledge_point | 软删除；要点的修改记录。来源草稿条目已有（V6 的 draft_item_id），“恢复 AI 版本”的原文从它取 | ui.md 5.9 |
 | extraction_draft / extraction_draft_item | 候选知识点的草稿：来源是学习会话；勾选与取消复用条目的 decision 字段（决策 015） | 决策 019 |
 
 **接口：**
@@ -304,7 +310,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 草稿列表补充 | 候选知识点的草稿（#31） | 今天、导入资料 |
 | 模型状态 | 模型名、最近一次调用的结果和时间；不返回服务地址和 Key，不为此真实调用模型 | 设置、账户区的红点 |
 | 知识库列表 | 按掌握程度和类型筛选（同时生效）；各掌握程度的数量随类型筛选变化；排序：默认学习顺序，可按掌握程度、下次复习 | 知识库 |
-| 知识点详情 | 掌握程度、下次复习、要点是否改过、学习记录、来源 | 知识库 |
+| 知识点详情 | 掌握程度、下次复习、要点是否改过（和草稿条目的原文对比）、AI 的原文（“恢复 AI 版本”用）、学习记录（包括 merged_into 指向它的知识点的）、来源 | 知识库 |
 
 **掌握程度**按 FSRS 稳定性分档，写成常量：稳定性 ≥ 21 天为牢固，7～21 天为熟悉，2～7 天为一般，< 2 天为生疏（区间含下限、不含上限）；另有待学（还没学过）、暂停、只收录（不参与调度的类型）。不按最近一次评分（太粗），也不按可提取率（每天都在变，标签会跳）。按掌握程度排序时按稳定性排，待学、暂停、只收录排在最后。
 
