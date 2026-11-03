@@ -34,7 +34,7 @@ const router = createRouter({
         { path: 'import', component: () => import('@/views/import/ImportPage.vue') },
         // 草稿：抽取进度、确认知识点、已确认的结果，按状态显示（决策 028）
         { path: 'drafts/:id', component: () => import('@/views/import/DraftPage.vue'), props: true },
-        { path: 'settings', component: () => import('@/views/SettingsView.vue') },
+        { path: 'settings', component: () => import('@/views/settings/SettingsView.vue') },
       ],
     },
     {
