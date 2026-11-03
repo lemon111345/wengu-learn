@@ -4,6 +4,7 @@ import com.wengu.chat.entity.Message;
 import com.wengu.chat.entity.MessageRole;
 import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.llm.dto.ChatTurn;
+import com.wengu.review.fsrs.Rating;
 import org.springframework.core.io.ClassPathResource;
 
 import java.io.IOException;
@@ -11,6 +12,8 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -21,7 +24,8 @@ import java.util.stream.Collectors;
  */
 final class LearningChatPrompt {
 
-    static final String VERSION = "v3";
+    /** v4：新增“复习”流程，复习时第一条消息带上以前的学习情况（#21，决策 035） */
+    static final String VERSION = "v4";
 
     /** 模型的随机性：讲解要有些变化，和 #14 实验一致 */
     static final double TEMPERATURE = 0.7;
@@ -57,19 +61,93 @@ final class LearningChatPrompt {
         }
     }
 
+    /** 复习时最多带上多少个以前问过的问题：太多会让第一条消息过长，最近的最有参考价值 */
+    static final int MAX_ASKED_QUESTIONS = 15;
+
+    /**
+     * 复习时附在第一条消息里的学习情况（#21）。第一次学习时没有，为 null。
+     *
+     * @param timesRated     以前评过几次分（第一次学习也算一次）
+     * @param lastRating     最近一次的评分
+     * @param askedQuestions 以前的学习会话中老师问过的问题，按时间先后，最多 {@link #MAX_ASKED_QUESTIONS} 个
+     * @param weakPoints     最近一次评分建议中“没掌握的”，没有时为空
+     */
+    record Review(int timesRated, Rating lastRating, List<String> askedQuestions, List<String> weakPoints) {
+    }
+
     /** 对话的第一条用户消息：知识点信息，格式和 #14 实验一致。 */
     static String kickoff(StudyMaterial material) {
+        return kickoff(material, null);
+    }
+
+    /** 复习时在知识点信息后面加上以前的学习情况，见 prompt 的“复习”一节 */
+    static String kickoff(StudyMaterial material, Review review) {
         String questions = material.sourceQuestions().isEmpty() ? "- （无）"
-                : material.sourceQuestions().stream().map(q -> "- " + q).collect(Collectors.joining("\n"));
-        return """
+                : bullets(material.sourceQuestions());
+        String info = """
                 知识点标题：%s
                 类型：%s（%s）
                 要点（写给你的参考，不要照着念）：%s
                 来源面试题：
-                %s
-
-                请开始。""".formatted(material.title(), material.type().name(), material.type().label(),
+                %s""".formatted(material.title(), material.type().name(), material.type().label(),
                 material.summary(), questions);
+        return review == null ? info + "\n\n请开始。" : info + "\n\n" + reviewSection(review) + "\n\n请开始。";
+    }
+
+    private static String reviewSection(Review review) {
+        StringBuilder text = new StringBuilder("这是复习：这个知识点以前学过 %d 次，上次的评分是“%s”。"
+                .formatted(review.timesRated(), RATING_LABELS.get(review.lastRating())));
+        if (!review.weakPoints().isEmpty()) {
+            text.append("\n上次没掌握的（开场优先围绕其中一点提问）：\n").append(bullets(review.weakPoints()));
+        }
+        if (!review.askedQuestions().isEmpty()) {
+            text.append("\n以前问过的问题（换一个角度，不要重复，也不要只是换个说法）：\n")
+                    .append(bullets(review.askedQuestions()));
+        }
+        return text.toString();
+    }
+
+    /** 和界面上的说法一致（PRD“忘了 / 困难 / 良好 / 简单”） */
+    private static final Map<Rating, String> RATING_LABELS = Map.of(
+            Rating.AGAIN, "忘了", Rating.HARD, "困难", Rating.GOOD, "良好", Rating.EASY, "简单");
+
+    private static String bullets(List<String> items) {
+        return items.stream().map(item -> "- " + item).collect(Collectors.joining("\n"));
+    }
+
+    /**
+     * 从老师的回复中取出问过的问题：prompt 要求“每次只问一个问题，放在回复的最后”，所以取每条回复中最后一个问句。
+     * 同样的问题只留一个；超过 {@link #MAX_ASKED_QUESTIONS} 个时留最近的。
+     *
+     * @param teacherReplies 老师的回复，按时间先后；调用方去掉要求完整作答和收尾的回复，它们每次都一样，不算“问过”
+     */
+    static List<String> askedQuestions(List<String> teacherReplies) {
+        List<String> questions = teacherReplies.stream()
+                .map(LearningChatPrompt::lastQuestion)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        return questions.subList(Math.max(0, questions.size() - MAX_ASKED_QUESTIONS), questions.size());
+    }
+
+    /** 句子的结束符：问句从上一个结束符之后开始 */
+    private static final String SENTENCE_ENDS = "。！？!?\n";
+
+    /** 一条回复中最后一个问句，去掉 Markdown 的加粗和列表符号；没有问句时为 null */
+    static String lastQuestion(String reply) {
+        int end = Math.max(reply.lastIndexOf('？'), reply.lastIndexOf('?'));
+        if (end < 0) {
+            return null;
+        }
+        int start = end - 1;
+        while (start >= 0 && SENTENCE_ENDS.indexOf(reply.charAt(start)) < 0) {
+            start--;
+        }
+        String question = reply.substring(start + 1, end + 1)
+                .replace("**", "")
+                .replaceFirst("^\\s*(?:[-*>]|\\d+[.、])\\s*", "")
+                .strip();
+        return question.length() < 4 ? null : question;
     }
 
     /**
@@ -89,8 +167,13 @@ final class LearningChatPrompt {
      * 学生消息带上当时附的提示；老师的回复把识别时去掉的标记补回去，和模型当时的输出一致。
      */
     static List<ChatTurn> history(StudyMaterial material, List<Message> messages) {
+        return history(material, null, messages);
+    }
+
+    /** 同上，复习时第一条消息带上以前的学习情况 */
+    static List<ChatTurn> history(StudyMaterial material, Review review, List<Message> messages) {
         List<ChatTurn> turns = new ArrayList<>();
-        turns.add(ChatTurn.user(kickoff(material)));
+        turns.add(ChatTurn.user(kickoff(material, review)));
         messages.forEach(m -> turns.add(turn(m)));
         return turns;
     }
