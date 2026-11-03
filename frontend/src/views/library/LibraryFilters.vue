@@ -119,6 +119,11 @@ const typeValue = computed({
   font-size: 14px;
 }
 
+/* “全部类型”是占位文字，但它是一个正常的选项，不用浅灰色 */
+.type-select :deep(.el-select__placeholder) {
+  color: var(--wg-text);
+}
+
 /* 类型筛选生效时：主色描边和浅底（ui.md 5.9） */
 .type-select.on :deep(.el-select__wrapper) {
   background: var(--wg-primary-soft);
