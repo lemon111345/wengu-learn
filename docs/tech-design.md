@@ -99,7 +99,7 @@ frontend/src
 ├── components/     跨页面的组件，如 PageHeader、FormField
 ├── shortcuts/      useShortcut、快捷键列表、快捷键弹窗
 ├── utils/          日期、类型和评分的名称、老师回复的格式渲染（markdown.ts）
-└── views/          各页面；auth/ 下是注册与登录，today/ 是今天页，study/ 是学习、收尾与评分、接着问，import/ 是导入资料和草稿（抽取进度、确认知识点）
+└── views/          各页面；auth/ 下是注册与登录，today/ 是今天页，study/ 是学习、收尾与评分、接着问，import/ 是导入资料和草稿（抽取进度、确认知识点），library/ 是知识库（列表、详情、批量操作）
 ```
 
 约定：
@@ -110,6 +110,7 @@ frontend/src
 - 路由默认要求登录；`meta.guest` 只给没登录的人看，`meta.public` 谁都能看
 - 流式回复用 `api/sse.ts`（fetch 发 POST、自己读流），对话逻辑用 `views/study/useChat.ts`，每次回复结束都重新取会话，以后端为准；老师的回复用 `utils/markdown.ts` 渲染，先整体转义再识别格式（决策 027）
 - 导入的第 1、2 步只在 `/import` 页面内存中；开始抽取后换成 `/drafts/:id`，按草稿状态显示进度、确认或结果摘要，抽取中每 3 秒取一次草稿（决策 028）
+- 知识库的筛选和排序交给后端，每次切换重新取列表；搜索在前端按标题过滤（Ctrl+K 聚焦顶栏搜索框）；操作完成后重新取列表和详情；有没保存的修改时切换或离开先确认；删除后底部提示 6 秒的撤销（决策 031）
 - 快捷键用 `useShortcut` 注册，单键快捷键在输入框和弹窗中自动不生效；新快捷键同时加进 `shortcuts/list.ts`
 - 开发时 Vite 把 `/api` 转发给后端（`WENGU_API_TARGET`，默认 `http://localhost:8080`），页面和接口同源，后端不开 CORS
 

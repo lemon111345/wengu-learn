@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { useShortcut } from '@/shortcuts/useShortcut'
 import AccountMenu from './AccountMenu.vue'
 
 // 图标路径来自设计稿（mockups/03-today.dc.html），24×24 的线条图标
@@ -11,6 +12,15 @@ const navItems = [
 ]
 
 const route = useRoute()
+const router = useRouter()
+
+// Ctrl+K 搜索知识点（ui.md 第 6 节）：M1 是知识库顶栏的搜索框（决策 031）。
+// 在知识库中由页面自己聚焦；在其他页面跳到知识库，带上 ?search 让它打开后聚焦
+useShortcut('Mod+k', () => {
+  if (route.path !== '/library') {
+    void router.push({ path: '/library', query: { search: '' } })
+  }
+})
 
 // “今天”只在首页亮；其他导航项在自己的子页面（如以后的知识点详情）也亮
 function isActive(to: string) {
