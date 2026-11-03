@@ -74,7 +74,11 @@ npm run build   # 类型检查并打包到 frontend/dist
 | --- | --- | --- | --- |
 | DeepSeek | `https://api.deepseek.com`（默认，可不设） | `deepseek-flash`（默认）或 `deepseek-v4-pro` | 必填 |
 | OpenAI | `https://api.openai.com/v1` | 如 `gpt-4o-mini` | 必填 |
-| 本地 Ollama | `http://localhost:11434/v1` | 已拉取的模型，如 `qwen3:8b` | 不设（空值表示不发送认证头） |
+| 本地 Ollama | `http://localhost:11434/v1` | 已拉取的模型，如 `qwen2.5:7b`（实测过） | 不设（空值表示不发送认证头） |
+
+> **关于本地 Ollama**：可用于自部署和离线试用，效果明显弱于云端模型，不作为推荐配置（实测 qwen2.5:7b：学习对话中会替学生讲答案，评分偏宽松）。
+>
+> 使用时**必须把 Ollama 的上下文长度设到至少 16384**。Ollama 默认按显存决定上下文长度，常常只有 4096；超出的提示词会被悄悄截断，抽取知识点会失败，提示“输出不符合要求”。设置方法：在运行 Ollama 的机器上设环境变量 `OLLAMA_CONTEXT_LENGTH=16384`，然后重启 Ollama。温故走的是 OpenAI 兼容接口，不能在请求里指定上下文长度。详见[决策 032](docs/decisions/032-大模型错误提示与模型状态.md) 第 6 节。
 
 设置方式（Windows PowerShell）：
 
