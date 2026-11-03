@@ -25,6 +25,8 @@ public class ExtractionBatch {
     private String covered;
     private String rawOutput;
     private String error;
+    /** 失败原因的返回码（ErrorCode 的名称，V12，决策 032），给用户看的提示由它得出；之前失败的批次为空 */
+    private String errorCode;
     private Integer attempts;
     private String promptVersion;
     private String model;
@@ -112,6 +114,14 @@ public class ExtractionBatch {
 
     public void setError(String error) {
         this.error = error;
+    }
+
+    public String getErrorCode() {
+        return errorCode;
+    }
+
+    public void setErrorCode(String errorCode) {
+        this.errorCode = errorCode;
     }
 
     public Integer getAttempts() {

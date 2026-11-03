@@ -4,6 +4,7 @@ import com.wengu.TestcontainersConfiguration;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.llm.dto.LlmResult;
+import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmOutputParseException;
 import com.wengu.source.dto.ImportQuestionsRequest;
 import com.wengu.source.dto.ImportedSource;
@@ -142,6 +143,18 @@ class SourceServiceTest {
 
         assertThatThrownBy(() -> sourceService.importQuestions(USER_ID, request(CONTENT)))
                 .isInstanceOf(IllegalStateException.class);
+        verify(splitService, times(1)).split(anyString());
+        assertThat(sourceMapper.selectCount(null)).isZero();
+    }
+
+    @Test
+    void 模型调用失败时原样抛出分好类的错误() {
+        // LlmService 已经分好类（决策 032），由全局异常处理器返回 502 和提示，不再是 500
+        when(splitService.split(anyString())).thenThrow(new LlmException(ErrorCode.LLM_AUTH_FAILED));
+
+        assertThatThrownBy(() -> sourceService.importQuestions(USER_ID, request(CONTENT)))
+                .isInstanceOfSatisfying(LlmException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.LLM_AUTH_FAILED));
         verify(splitService, times(1)).split(anyString());
         assertThat(sourceMapper.selectCount(null)).isZero();
     }

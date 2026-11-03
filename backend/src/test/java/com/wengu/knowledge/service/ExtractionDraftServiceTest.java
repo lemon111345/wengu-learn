@@ -29,6 +29,7 @@ import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftMapper;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.llm.dto.LlmResult;
+import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmOutputParseException;
 import com.wengu.source.dto.ImportQuestionsRequest;
 import com.wengu.source.dto.SplitQuestion;
@@ -182,7 +183,7 @@ class ExtractionDraftServiceTest {
         DraftView view = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null));
 
         assertThat(view.status()).isEqualTo(DraftStatus.RUNNING);
-        assertThat(view.batches()).containsExactly(new BatchView(1, BatchStatus.PENDING, List.of(1, 2, 3)));
+        assertThat(view.batches()).containsExactly(new BatchView(1, BatchStatus.PENDING, List.of(1, 2, 3), null));
         assertThat(view.items()).isEmpty();
         verify(extractionService, never()).extract(any(), any());
 
@@ -198,7 +199,7 @@ class ExtractionDraftServiceTest {
         DraftView view = createAndRun(null);
 
         assertThat(view.status()).isEqualTo(DraftStatus.READY);
-        assertThat(view.batches()).containsExactly(new BatchView(1, BatchStatus.READY, List.of(1, 2, 3)));
+        assertThat(view.batches()).containsExactly(new BatchView(1, BatchStatus.READY, List.of(1, 2, 3), null));
         assertThat(view.items()).extracting(DraftItemView::order).containsExactly(1, 2, 3, 4);
         assertThat(view.items().get(0).title()).isEqualTo("HashMap 的 put 流程是怎样的？");
         assertThat(view.items().get(2).sourceQuestionIds()).containsExactly(2);
@@ -269,6 +270,9 @@ class ExtractionDraftServiceTest {
         assertThat(batch.getError()).contains("没有来源题号");
         assertThat(batch.getPromptTokens()).isEqualTo(2000);
         assertThat(itemMapper.selectCount(null)).isZero();
+        // 给用户看的原因：输出不合格（决策 032）；原始的 error 不返回前端
+        assertThat(batch.getErrorCode()).isEqualTo("LLM_INVALID_OUTPUT");
+        assertThat(view.batches().getFirst().failureReason()).isEqualTo(ErrorCode.LLM_INVALID_OUTPUT.getMessage());
     }
 
     @Test
@@ -283,6 +287,8 @@ class ExtractionDraftServiceTest {
         assertThat(batch.getError()).isEqualTo("IllegalStateException: 连接超时");
         assertThat(batch.getRawOutput()).isNull();
         assertThat(batch.getModel()).isNull();
+        // 不是分好类的 LlmException：原因按“调用失败”笼统地说
+        assertThat(batch.getErrorCode()).isEqualTo("LLM_FAILED");
         verify(extractionService, times(1)).extract(anyList(), any());
     }
 
@@ -366,7 +372,7 @@ class ExtractionDraftServiceTest {
 
         DraftView retrying = draftService.retry(USER_ID, failed.id());
         assertThat(retrying.status()).isEqualTo(DraftStatus.RUNNING);
-        assertThat(retrying.batches()).containsExactly(new BatchView(1, BatchStatus.PENDING, List.of(1, 2, 3)));
+        assertThat(retrying.batches()).containsExactly(new BatchView(1, BatchStatus.PENDING, List.of(1, 2, 3), null));
 
         extractionExecutor.runAll();
         DraftView view = draftService.get(USER_ID, failed.id());
@@ -421,8 +427,8 @@ class ExtractionDraftServiceTest {
 
         DraftView created = draftService.create(USER_ID, new CreateDraftRequest(bigSource, null));
         assertThat(created.batches()).containsExactly(
-                new BatchView(1, BatchStatus.PENDING, IntStream.rangeClosed(1, 16).boxed().toList()),
-                new BatchView(2, BatchStatus.PENDING, IntStream.rangeClosed(17, 31).boxed().toList()));
+                new BatchView(1, BatchStatus.PENDING, IntStream.rangeClosed(1, 16).boxed().toList(), null),
+                new BatchView(2, BatchStatus.PENDING, IntStream.rangeClosed(17, 31).boxed().toList(), null));
 
         extractionExecutor.runAll();
         DraftView view = draftService.get(USER_ID, created.id());
@@ -460,14 +466,19 @@ class ExtractionDraftServiceTest {
     @Test
     void 某批调用模型出错时后面的批次不再执行() {
         long bigSource = importSource(31);
-        when(extractionService.extract(anyList(), any())).thenThrow(new IllegalStateException("Key 不对"));
+        when(extractionService.extract(anyList(), any())).thenThrow(new LlmException(ErrorCode.LLM_AUTH_FAILED));
 
         DraftView view = createAndRunFrom(bigSource);
 
         assertThat(view.status()).isEqualTo(DraftStatus.FAILED);
         List<ExtractionBatch> batches = batches(view);
         assertThat(batches).extracting(ExtractionBatch::getError)
-                .containsExactly("IllegalStateException: Key 不对", ExtractionWorker.SKIPPED);
+                .containsExactly("LlmException: " + ErrorCode.LLM_AUTH_FAILED.getMessage(), ExtractionWorker.SKIPPED);
+        // 没执行的那一批，原因和出错的那一批一样（决策 032）
+        assertThat(batches).extracting(ExtractionBatch::getErrorCode)
+                .containsExactly("LLM_AUTH_FAILED", "LLM_AUTH_FAILED");
+        assertThat(view.batches()).extracting(BatchView::failureReason)
+                .containsOnly(ErrorCode.LLM_AUTH_FAILED.getMessage());
         assertThat(batches.get(1).getAttempts()).isZero();
         verify(extractionService, times(1)).extract(anyList(), any());
 

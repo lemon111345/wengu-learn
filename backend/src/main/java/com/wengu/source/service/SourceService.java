@@ -144,7 +144,8 @@ public class SourceService {
 
     /**
      * 调用模型切分，返回去重后的题目。只有输出解析失败或校验不通过时才重试；
-     * 模型调用本身抛出的异常（网络错误、Key 不对）重试也没用，直接抛出。
+     * 模型调用本身抛出的异常（网络错误、Key 不对）重试也没用，直接抛出：它是分好类的 LlmException，
+     * 由全局异常处理器返回对应的状态码和提示（决策 032）。
      */
     private List<SplitQuestion> splitWithRetry(String content) {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {

@@ -15,6 +15,7 @@ import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.knowledge.service.KnowledgePointService;
 import com.wengu.llm.dto.ChatTurn;
+import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,7 +47,10 @@ public class ChatService {
 
     static final int MAX_CONTENT_LENGTH = 5000;
 
-    /** 出错时给用户看的提示；具体原因只写日志（ui.md 第 7 节，友好提示由 #27 细化） */
+    /**
+     * 原因不明时给用户看的提示（ui.md 第 7 节）。模型调用出错时改用分好类的提示，
+     * 如“AI 模型太久没有回应，可以重试”（决策 032）
+     */
     static final String ERROR_MESSAGE = "老师暂时没有回应，可以点重试";
 
     private final StudySessionService sessions;
@@ -238,7 +242,7 @@ public class ChatService {
 
         return visible.map(ChatEvents::delta)
                 .concatWith(saved.map(s -> ChatEvents.done(s.messageId(), s.marker(), s.ended())))
-                .onErrorResume(e -> Flux.just(ChatEvents.error(ERROR_MESSAGE)));
+                .onErrorResume(e -> Flux.just(ChatEvents.error(e instanceof LlmException ? e.getMessage() : ERROR_MESSAGE)));
     }
 
     private record Saved(long messageId, Marker marker, boolean ended) {
@@ -247,13 +251,13 @@ public class ChatService {
     /**
      * 存下老师的回复，记一次活动；学习对话输出了【学习结束】、或者学生已回答到上限时结束会话。
      *
-     * @throws IllegalStateException 模型返回了空回复（这时不存，学生可以重试）
+     * @throws LlmException 去掉标记后没有正文（这时不存，学生可以重试）。完全没有输出的，LlmService 已经报过空正文
      */
     private Saved saveReply(StudySession session, MarkerFilter filter, Rules rules, int answers) {
         String content = filter.content();
         Marker marker = filter.marker();
         if (content.isEmpty()) {
-            throw new IllegalStateException("模型返回了空回复");
+            throw new LlmException(ErrorCode.LLM_EMPTY_RESPONSE);
         }
         Instant now = Instant.now(clock);
         boolean ended = (rules.endOnMarker() && marker == Marker.END) || answers >= rules.maxAnswers();

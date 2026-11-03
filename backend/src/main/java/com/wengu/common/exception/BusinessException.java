@@ -19,6 +19,12 @@ public class BusinessException extends RuntimeException {
         this.errorCode = errorCode;
     }
 
+    /** 带上原始异常，排查时能看到真正的原因（如大模型调用失败，决策 032） */
+    public BusinessException(ErrorCode errorCode, String message, Throwable cause) {
+        super(message, cause);
+        this.errorCode = errorCode;
+    }
+
     public ErrorCode getErrorCode() {
         return errorCode;
     }

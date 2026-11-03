@@ -1,7 +1,10 @@
 package com.wengu.llm.service;
 
+import com.wengu.common.result.ErrorCode;
 import com.wengu.llm.dto.ChatTurn;
 import com.wengu.llm.dto.LlmResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -14,9 +17,12 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /**
  * 大模型调用入口。其他模块（knowledge、chat）只通过本类调用大模型，不直接使用 Spring AI，
@@ -26,27 +32,44 @@ import java.util.List;
  * <p>
  * 每次请求都显式带上超时（见 {@link #options}）。SDK 的自动重试在 application.yml 中关掉了，
  * 要不要重试由调用方决定（决策 005 修订）。
+ * <p>
+ * 调用失败时一律抛出 {@link LlmException}（按 Key 不对、超时、空正文等分类，决策 032），
+ * 每次调用的结果记到 {@link LlmStatusTracker}。
  */
 @Service
 public class LlmService {
 
+    private static final Logger log = LoggerFactory.getLogger(LlmService.class);
+
     private final ChatClient chatClient;
     private final Duration timeout;
+    private final LlmStatusTracker status;
 
     /** ChatClient.Builder 由 Spring AI 根据 spring.ai.openai.* 配置自动创建。 */
-    public LlmService(ChatClient.Builder chatClientBuilder, @Value("${spring.ai.openai.timeout}") Duration timeout) {
+    public LlmService(ChatClient.Builder chatClientBuilder, @Value("${spring.ai.openai.timeout}") Duration timeout,
+                      LlmStatusTracker status) {
         this.chatClient = chatClientBuilder.build();
         this.timeout = timeout;
+        this.status = status;
     }
 
-    /** 普通调用：等模型生成完毕后一次性返回完整回复。 */
+    /**
+     * 普通调用：等模型生成完毕后一次性返回完整回复。
+     *
+     * @throws LlmException 调用失败，或者没有返回正文
+     */
     public String call(String prompt) {
-        return chatClient.prompt().user(prompt).options(options(null)).call().content();
+        String content = guard(() -> chatClient.prompt().user(prompt).options(options(null)).call().content());
+        if (content == null || content.isBlank()) {
+            throw fail(new LlmException(ErrorCode.LLM_EMPTY_RESPONSE));
+        }
+        status.success();
+        return content;
     }
 
-    /** 流式调用：模型每生成一段就推送一段，供 SSE 逐字输出。 */
+    /** 流式调用：模型每生成一段就推送一段，供 SSE 逐字输出。出错时以 {@link LlmException} 结束 */
     public Flux<String> stream(String prompt) {
-        return chatClient.prompt().user(prompt).options(options(null)).stream().content();
+        return tracked(chatClient.prompt().user(prompt).options(options(null)).stream().content());
     }
 
     /**
@@ -58,12 +81,51 @@ public class LlmService {
      */
     public Flux<String> stream(String system, List<ChatTurn> history, Double temperature) {
         List<Message> messages = history.stream().map(LlmService::toMessage).toList();
-        return chatClient.prompt()
+        return tracked(chatClient.prompt()
                 .system(system)
                 .messages(messages)
                 .options(options(temperature))
                 .stream()
-                .content();
+                .content());
+    }
+
+    /**
+     * 给流式调用加上错误分类和状态记录。
+     * <p>
+     * 流正常结束、但一个字都没有时，SDK 不报错（实测），这里以 {@link ErrorCode#LLM_EMPTY_RESPONSE} 结束。
+     * 每次订阅单独计数：defer 让每个订阅者有自己的 received。
+     */
+    private Flux<String> tracked(Flux<String> source) {
+        return Flux.defer(() -> {
+            AtomicBoolean received = new AtomicBoolean();
+            return source
+                    .doOnNext(text -> {
+                        if (text != null && !text.isEmpty()) {
+                            received.set(true);
+                        }
+                    })
+                    .concatWith(Mono.defer(() -> received.get() ? Mono.<String>empty()
+                            : Mono.error(new LlmException(ErrorCode.LLM_EMPTY_RESPONSE))))
+                    .doOnComplete(status::success)
+                    .onErrorMap(e -> fail(LlmException.from(e)));
+        });
+    }
+
+    /** 同步调用：SDK 的异常转成 LlmException 并记下 */
+    private <T> T guard(Supplier<T> call) {
+        try {
+            return call.get();
+        } catch (RuntimeException e) {
+            throw fail(LlmException.from(e));
+        }
+    }
+
+    /** 记下失败，返回原异常，供调用处直接 throw */
+    private LlmException fail(LlmException e) {
+        status.failure(e.getErrorCode());
+        // 只记返回码和原始异常的类名、信息：服务商的错误信息里没有 Key，但请求体（用户的对话）不进日志
+        log.warn("大模型调用失败: {}, cause={}", e.getErrorCode(), e.getCause() == null ? "-" : e.getCause().toString());
+        return e;
     }
 
     /**
@@ -96,6 +158,7 @@ public class LlmService {
      * 文本按原样发送，不做模板渲染，其中的花括号不需要转义。
      *
      * @throws LlmOutputParseException 返回内容无法解析时抛出，携带原始返回
+     * @throws LlmException            调用失败，或者没有返回正文
      */
     public <T> LlmResult<T> call(String system, String user, Class<T> type) {
         return call(system, user, type, null);
@@ -108,14 +171,14 @@ public class LlmService {
      */
     public <T> LlmResult<T> call(String system, String user, Class<T> type, Double temperature) {
         BeanOutputConverter<T> converter = new BeanOutputConverter<>(type);
-        ChatResponse response = chatClient.prompt()
+        ChatResponse response = guard(() -> chatClient.prompt()
                 .system(system)
                 .user(user + "\n\n" + converter.getFormat())
                 .options(options(temperature))
                 .call()
-                .chatResponse();
+                .chatResponse());
         if (response == null || response.getResult() == null) {
-            throw new IllegalStateException("模型没有返回结果");
+            throw fail(new LlmException(ErrorCode.LLM_EMPTY_RESPONSE));
         }
 
         Generation generation = response.getResult();
@@ -126,6 +189,12 @@ public class LlmService {
                 generation.getMetadata().getFinishReason(),
                 usage == null ? null : usage.getPromptTokens(),
                 usage == null ? null : usage.getCompletionTokens());
+        // 正常结束却没有正文：不当作“输出不合格”，否则调用方会重试，而这多半每次都一样（决策 032）。
+        // 被截断（length）的空输出仍然算输出问题，交给下面的解析
+        if ((raw.rawText() == null || raw.rawText().isBlank()) && !raw.truncated()) {
+            throw fail(new LlmException(ErrorCode.LLM_EMPTY_RESPONSE));
+        }
+        status.success();
 
         try {
             T content = converter.convert(raw.rawText() == null ? "" : raw.rawText());
