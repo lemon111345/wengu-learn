@@ -28,6 +28,8 @@ export interface BatchView {
   status: BatchStatus
   /** 这一批的题号 */
   questionIds: number[]
+  /** 失败时给用户看的原因，如“AI 模型拒绝了请求……”；原因不明时为 null（决策 032） */
+  failureReason: string | null
 }
 
 export interface DraftItemView {

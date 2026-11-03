@@ -76,6 +76,8 @@ function statusText(batch: BatchView) {
           <span class="batch-status">{{ statusText(batch) }}</span>
         </div>
         <span class="bar" aria-hidden="true"><span class="fill" /></span>
+        <!-- 失败原因（ui.md 第 7 节、决策 032），如 Key 不对、超时；原因不明时不显示 -->
+        <p v-if="batch.status === 'FAILED' && batch.failureReason" class="reason">{{ batch.failureReason }}</p>
       </li>
     </ol>
     <div class="actions">
@@ -153,6 +155,12 @@ h2 {
 .batch-status {
   color: var(--wg-text-muted);
   font-size: 14px;
+}
+
+.reason {
+  color: var(--wg-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .failed .batch-status {
