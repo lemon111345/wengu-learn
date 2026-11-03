@@ -2,6 +2,7 @@ package com.wengu.knowledge.controller;
 
 import com.wengu.common.context.CurrentUser;
 import com.wengu.common.result.Result;
+import com.wengu.knowledge.dto.KnowledgePointDetail;
 import com.wengu.knowledge.dto.KnowledgePointIdsRequest;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.LibrarySort;
@@ -50,6 +51,12 @@ public class KnowledgePointController {
                                     @RequestParam(defaultValue = "ORDER") LibrarySort sort,
                                     @RequestParam(defaultValue = "ASC") SortDirection direction) {
         return Result.ok(libraryService.list(currentUser.id(), mastery, type, sort, direction));
+    }
+
+    /** 知识点详情：掌握程度、下次复习、要点和 AI 原文、学习记录、来源。不存在或已删除时 404。 */
+    @GetMapping("/{id}")
+    public Result<KnowledgePointDetail> detail(@PathVariable long id) {
+        return Result.ok(libraryService.detail(currentUser.id(), id));
     }
 
     /** 编辑标题、类型、要点，只改传了的字段；有改动时留一条修改前的快照。 */

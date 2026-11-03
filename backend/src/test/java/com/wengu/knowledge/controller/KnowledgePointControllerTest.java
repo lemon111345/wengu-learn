@@ -83,6 +83,23 @@ class KnowledgePointControllerTest {
     }
 
     @Test
+    void 知识点详情() throws Exception {
+        mockMvc.perform(get("/api/knowledge-points/" + kpId).session(login))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(kpId))
+                .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.mastery").value("NEW"))
+                .andExpect(jsonPath("$.data.summary").value("要点"))
+                .andExpect(jsonPath("$.data.summaryEdited").value(false))
+                .andExpect(jsonPath("$.data.reviews").isArray())
+                .andExpect(jsonPath("$.data.sources").isArray());
+
+        mockMvc.perform(get("/api/knowledge-points/" + Long.MAX_VALUE).session(login))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
     void 列表参数不合法时返回400() throws Exception {
         for (String[] param : List.of(new String[]{"mastery", "GOOD"}, new String[]{"type", "QUIZ"},
                 new String[]{"sort", "TITLE"}, new String[]{"direction", "UP"})) {

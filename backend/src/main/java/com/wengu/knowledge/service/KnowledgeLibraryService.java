@@ -1,7 +1,10 @@
 package com.wengu.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.wengu.common.exception.BusinessException;
+import com.wengu.common.result.ErrorCode;
 import com.wengu.common.time.StudyDay;
+import com.wengu.knowledge.dto.KnowledgePointDetail;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.LibraryItem;
 import com.wengu.knowledge.dto.LibrarySort;
@@ -9,10 +12,19 @@ import com.wengu.knowledge.dto.LibraryView;
 import com.wengu.knowledge.dto.Mastery;
 import com.wengu.knowledge.dto.NextReview;
 import com.wengu.knowledge.dto.SortDirection;
+import com.wengu.knowledge.dto.SourceRef;
+import com.wengu.knowledge.dto.StudyRecord;
+import com.wengu.knowledge.entity.ExtractionDraft;
+import com.wengu.knowledge.entity.ExtractionDraftItem;
 import com.wengu.knowledge.entity.KnowledgePoint;
+import com.wengu.knowledge.entity.KpSource;
+import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
+import com.wengu.knowledge.mapper.ExtractionDraftMapper;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.knowledge.mapper.KpSourceMapper;
 import com.wengu.review.dto.CardProgress;
 import com.wengu.review.service.ReviewService;
+import com.wengu.source.service.SourceService;
 import com.wengu.user.dto.SettingsView;
 import com.wengu.user.service.UserSettingsService;
 import org.springframework.stereotype.Service;
@@ -22,10 +34,18 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 知识库页面的查询：列表和详情（#50，决策 030）。只读，修改在 {@link KnowledgePointService}。
@@ -37,14 +57,24 @@ import java.util.Map;
 public class KnowledgeLibraryService {
 
     private final KnowledgePointMapper knowledgePointMapper;
+    private final KpSourceMapper kpSourceMapper;
+    private final ExtractionDraftItemMapper draftItemMapper;
+    private final ExtractionDraftMapper draftMapper;
     private final ReviewService reviewService;
+    private final SourceService sourceService;
     private final UserSettingsService settingsService;
     private final Clock clock;
 
-    public KnowledgeLibraryService(KnowledgePointMapper knowledgePointMapper, ReviewService reviewService,
+    public KnowledgeLibraryService(KnowledgePointMapper knowledgePointMapper, KpSourceMapper kpSourceMapper,
+                                   ExtractionDraftItemMapper draftItemMapper, ExtractionDraftMapper draftMapper,
+                                   ReviewService reviewService, SourceService sourceService,
                                    UserSettingsService settingsService, Clock clock) {
         this.knowledgePointMapper = knowledgePointMapper;
+        this.kpSourceMapper = kpSourceMapper;
+        this.draftItemMapper = draftItemMapper;
+        this.draftMapper = draftMapper;
         this.reviewService = reviewService;
+        this.sourceService = sourceService;
         this.settingsService = settingsService;
         this.clock = clock;
     }
@@ -100,6 +130,104 @@ public class KnowledgeLibraryService {
                         row.mastery(), nextReview(row.mastery(), row.card(), today, settings)))
                 .toList();
         return new LibraryView(kps.size(), counts, items);
+    }
+
+    /**
+     * 知识点详情。
+     * <ul>
+     *   <li>要点是否改过：和确认时关联的草稿条目（AI 原文）对比，不另存（决策 029）</li>
+     *   <li>学习记录：合并时留在被合并的知识点上（决策 029），这里按 merged_into 一起取出；
+     *       merged_into 始终指向还在的知识点，只查一层</li>
+     *   <li>来源：kp_source 关联的材料（合并时已经并过来了），题号来自自己和并进来的知识点的草稿条目</li>
+     * </ul>
+     *
+     * @throws BusinessException 知识点不存在、不属于这个用户或已删除时为 NOT_FOUND
+     */
+    public KnowledgePointDetail detail(long userId, long kpId) {
+        KnowledgePoint kp = knowledgePointMapper.selectById(kpId);
+        if (kp == null || kp.getUserId() != userId || kp.getDeletedAt() != null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "知识点不存在");
+        }
+        List<KnowledgePoint> merged = knowledgePointMapper.selectList(new LambdaQueryWrapper<KnowledgePoint>()
+                .select(KnowledgePoint::getId, KnowledgePoint::getTitle, KnowledgePoint::getDraftItemId)
+                .eq(KnowledgePoint::getUserId, userId)
+                .eq(KnowledgePoint::getMergedInto, kpId));
+
+        CardProgress card = reviewService.progressOf(userId, List.of(kpId)).get(kpId);
+        Mastery mastery = Mastery.of(kp.getType(), kp.getStatus(), card);
+        SettingsView settings = settingsService.get(userId);
+        LocalDate today = studyDate(Instant.now(clock), settings);
+
+        Map<Long, ExtractionDraftItem> draftItems = draftItems(userId, Stream.concat(Stream.of(kp), merged.stream())
+                .map(KnowledgePoint::getDraftItemId).filter(Objects::nonNull).toList());
+        ExtractionDraftItem own = kp.getDraftItemId() == null ? null : draftItems.get(kp.getDraftItemId());
+        String aiSummary = own == null ? null : own.getSummary();
+        boolean edited = aiSummary != null && !aiSummary.strip().equals(kp.getSummary().strip());
+
+        return new KnowledgePointDetail(kp.getId(), kp.getTitle(), kp.getType(), kp.getStatus(), mastery,
+                nextReview(mastery, card, today, settings), kp.getSummary(), aiSummary, edited,
+                studyRecords(userId, kpId, merged, settings), sources(userId, kpId, draftItems.values()));
+    }
+
+    /** 学习记录，最近的在前；并进来的知识点的记录带上它的标题 */
+    private List<StudyRecord> studyRecords(long userId, long kpId, List<KnowledgePoint> merged, SettingsView settings) {
+        Map<Long, String> mergedTitles = merged.stream()
+                .collect(Collectors.toMap(KnowledgePoint::getId, KnowledgePoint::getTitle));
+        List<Long> ids = new ArrayList<>(mergedTitles.keySet());
+        ids.add(kpId);
+        return reviewService.reviewsOf(userId, ids).stream()
+                .map(r -> new StudyRecord(studyDate(r.reviewedAt(), settings), r.firstReview(), r.rating(),
+                        r.ratingAi(), mergedTitles.get(r.kpId())))
+                .toList();
+    }
+
+    private Map<Long, ExtractionDraftItem> draftItems(long userId, List<Long> ids) {
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        return draftItemMapper.selectList(new LambdaQueryWrapper<ExtractionDraftItem>()
+                        .eq(ExtractionDraftItem::getUserId, userId)
+                        .in(ExtractionDraftItem::getId, ids))
+                .stream()
+                .collect(Collectors.toMap(ExtractionDraftItem::getId, item -> item));
+    }
+
+    /**
+     * 来源材料和题号。材料来自 kp_source；题号按“草稿条目 → 草稿的材料”找到，只认 kp_source 中有的材料。
+     * 材料被删掉了（名称查不到）的不显示。
+     */
+    private List<SourceRef> sources(long userId, long kpId, Collection<ExtractionDraftItem> items) {
+        List<Long> sourceIds = kpSourceMapper.selectList(new LambdaQueryWrapper<KpSource>()
+                        .eq(KpSource::getKpId, kpId)
+                        .orderByAsc(KpSource::getSourceId))
+                .stream().map(KpSource::getSourceId).toList();
+        if (sourceIds.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, String> names = sourceService.getNames(userId, sourceIds);
+
+        Map<Long, Long> draftSources = items.isEmpty() ? Map.of()
+                : draftMapper.selectList(new LambdaQueryWrapper<ExtractionDraft>()
+                        .select(ExtractionDraft::getId, ExtractionDraft::getSourceId)
+                        .in(ExtractionDraft::getId, items.stream().map(ExtractionDraftItem::getDraftId).toList()))
+                .stream()
+                .filter(draft -> draft.getSourceId() != null)
+                .collect(Collectors.toMap(ExtractionDraft::getId, ExtractionDraft::getSourceId));
+        Map<Long, Set<Integer>> questions = new HashMap<>();
+        for (ExtractionDraftItem item : items) {
+            Long sourceId = draftSources.get(item.getDraftId());
+            if (sourceId != null) {
+                Arrays.stream(item.getSourceQuestionIds().split(","))
+                        .map(String::strip)
+                        .map(Integer::valueOf)
+                        .forEach(id -> questions.computeIfAbsent(sourceId, k -> new TreeSet<>()).add(id));
+            }
+        }
+
+        return sourceIds.stream()
+                .filter(names::containsKey)
+                .map(id -> new SourceRef(id, names.get(id), List.copyOf(questions.getOrDefault(id, Set.of()))))
+                .toList();
     }
 
     /**

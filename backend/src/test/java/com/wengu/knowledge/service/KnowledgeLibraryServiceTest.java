@@ -2,6 +2,9 @@ package com.wengu.knowledge.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.wengu.TestcontainersConfiguration;
+import com.wengu.common.exception.BusinessException;
+import com.wengu.common.result.ErrorCode;
+import com.wengu.knowledge.dto.KnowledgePointDetail;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.LibraryItem;
 import com.wengu.knowledge.dto.LibrarySort;
@@ -9,13 +12,26 @@ import com.wengu.knowledge.dto.LibraryView;
 import com.wengu.knowledge.dto.Mastery;
 import com.wengu.knowledge.dto.NextReview;
 import com.wengu.knowledge.dto.SortDirection;
+import com.wengu.knowledge.dto.SourceRef;
+import com.wengu.knowledge.dto.StudyRecord;
 import com.wengu.knowledge.dto.UpdateKnowledgePointRequest;
+import com.wengu.knowledge.entity.ExtractionDraft;
+import com.wengu.knowledge.entity.ExtractionDraftItem;
+import com.wengu.knowledge.entity.ItemDecision;
+import com.wengu.knowledge.entity.KnowledgePointStatus;
+import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
+import com.wengu.knowledge.mapper.ExtractionDraftMapper;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.knowledge.mapper.KpSourceMapper;
 import com.wengu.review.entity.CardState;
+import com.wengu.review.entity.ReviewLog;
+import com.wengu.review.fsrs.Rating;
 import com.wengu.review.fsrs.State;
 import com.wengu.review.mapper.CardStateMapper;
 import com.wengu.review.mapper.ReviewLogMapper;
+import com.wengu.source.entity.Source;
+import com.wengu.source.entity.SourceType;
+import com.wengu.source.mapper.SourceMapper;
 import com.wengu.user.dto.UpdateSettingsRequest;
 import com.wengu.user.service.UserSettingsService;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,10 +52,11 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.entry;
 
 /**
- * 知识库列表（#50，决策 030）。真实 MySQL。
+ * 知识库列表和详情（#50，决策 030）。真实 MySQL。
  * 设置为 Asia/Shanghai、4 点分界；现在是北京时间 10 月 29 日 10:00，学习日是 10 月 29 日。
  */
 @SpringBootTest
@@ -79,6 +96,15 @@ class KnowledgeLibraryServiceTest {
     private ReviewLogMapper reviewLogMapper;
 
     @Autowired
+    private ExtractionDraftMapper draftMapper;
+
+    @Autowired
+    private ExtractionDraftItemMapper draftItemMapper;
+
+    @Autowired
+    private SourceMapper sourceMapper;
+
+    @Autowired
     private JdbcTemplate jdbc;
 
     /*
@@ -106,6 +132,9 @@ class KnowledgeLibraryServiceTest {
         cardStateMapper.delete(null);
         kpSourceMapper.delete(null);
         knowledgePointMapper.delete(null);
+        draftItemMapper.delete(null);
+        draftMapper.delete(null);
+        sourceMapper.delete(null);
 
         List<Long> ids = knowledgePointService.create(USER_ID, null, List.of(
                 point(KnowledgePointType.SYSTEM_DESIGN, "如何设计秒杀？"),
@@ -259,6 +288,163 @@ class KnowledgeLibraryServiceTest {
         LibraryItem item = list(null, null).items().stream().filter(i -> i.id() == solid).findFirst().orElseThrow();
         assertThat(item.mastery()).isEqualTo(Mastery.RECORD_ONLY);
         assertThat(item.nextReview()).isNull();
+    }
+
+    // ---------- 详情 ----------
+
+    private long source(String name) {
+        Source source = new Source();
+        source.setUserId(USER_ID);
+        source.setType(SourceType.QUESTION);
+        source.setName(name);
+        source.setContent("原文");
+        source.setCreatedAt(NOW);
+        sourceMapper.insert(source);
+        return source.getId();
+    }
+
+    /** 从这份材料抽取的一个草稿条目，返回条目 id */
+    private long draftItem(long sourceId, String summary, String questionIds) {
+        ExtractionDraft draft = new ExtractionDraft();
+        draft.setUserId(USER_ID);
+        draft.setSourceId(sourceId);
+        draft.setCreatedAt(NOW);
+        draft.setConfirmedAt(NOW);
+        draftMapper.insert(draft);
+        ExtractionDraftItem item = new ExtractionDraftItem();
+        item.setUserId(USER_ID);
+        item.setDraftId(draft.getId());
+        item.setBatchId(0L);
+        item.setItemOrder(1);
+        item.setTitle("AI 写的标题");
+        item.setSummary(summary);
+        item.setType(KnowledgePointType.CONCEPT);
+        item.setSourceQuestionIds(questionIds);
+        item.setDecision(ItemDecision.ACCEPTED);
+        draftItemMapper.insert(item);
+        return item.getId();
+    }
+
+    /** 像确认草稿那样建一个知识点：关联材料和草稿条目 */
+    private long fromDraft(long sourceId, String title, String summary, String questionIds) {
+        long itemId = draftItem(sourceId, summary, questionIds);
+        return knowledgePointService.create(USER_ID, sourceId, List.of(new KnowledgePointService.NewKnowledgePoint(
+                KnowledgePointType.CONCEPT, title, summary.strip(), itemId))).getFirst();
+    }
+
+    private void log(long kpId, boolean firstReview, Rating rating, Rating ratingAi, Instant reviewedAt) {
+        ReviewLog log = new ReviewLog();
+        log.setUserId(USER_ID);
+        log.setKpId(kpId);
+        log.setRatingUser(rating);
+        log.setRatingAi(ratingAi);
+        log.setStateBefore(State.LEARNING);
+        log.setFirstReview(firstReview);
+        log.setReviewedAt(reviewedAt);
+        reviewLogMapper.insert(log);
+    }
+
+    private static void assertNotFound(Runnable call) {
+        assertThatThrownBy(call::run).isInstanceOfSatisfying(BusinessException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+    }
+
+    @Test
+    void 详情中的掌握程度和下次复习与列表一致() {
+        KnowledgePointDetail detail = libraryService.detail(USER_ID, fair);
+
+        assertThat(detail.title()).isEqualTo("HashMap 是怎么扩容的？");
+        assertThat(detail.type()).isEqualTo(KnowledgePointType.MECHANISM);
+        assertThat(detail.status()).isEqualTo(KnowledgePointStatus.ACTIVE);
+        assertThat(detail.mastery()).isEqualTo(Mastery.FAIR);
+        assertThat(detail.nextReview()).isEqualTo(new NextReview(LocalDate.of(2026, 10, 30), 1));
+        // 不是从草稿来的：没有 AI 原文，也就谈不上改过
+        assertThat(detail.summary()).isEqualTo("要点");
+        assertThat(detail.aiSummary()).isNull();
+        assertThat(detail.summaryEdited()).isFalse();
+        assertThat(detail.reviews()).isEmpty();
+        assertThat(detail.sources()).isEmpty();
+
+        KnowledgePointDetail paused = libraryService.detail(USER_ID, suspended);
+        assertThat(paused.status()).isEqualTo(KnowledgePointStatus.SUSPENDED);
+        assertThat(paused.mastery()).isEqualTo(Mastery.SUSPENDED);
+        assertThat(paused.nextReview()).isNull();
+    }
+
+    @Test
+    void 要点和AI原文对比_恢复后不算改过() {
+        long sourceId = source("Java 面试题");
+        long kpId = fromDraft(sourceId, "什么是 JMM？", "AI 写的要点\n", "1");
+
+        KnowledgePointDetail original = libraryService.detail(USER_ID, kpId);
+        assertThat(original.aiSummary()).isEqualTo("AI 写的要点\n");
+        // 首尾空白不算改动：保存时会去掉
+        assertThat(original.summaryEdited()).isFalse();
+
+        knowledgePointService.update(USER_ID, kpId, new UpdateKnowledgePointRequest(null, null, "我改过的要点"));
+        KnowledgePointDetail edited = libraryService.detail(USER_ID, kpId);
+        assertThat(edited.summary()).isEqualTo("我改过的要点");
+        assertThat(edited.aiSummary()).isEqualTo("AI 写的要点\n");
+        assertThat(edited.summaryEdited()).isTrue();
+
+        // 恢复 AI 版本：前端把原文填回去，走普通的编辑
+        knowledgePointService.update(USER_ID, kpId, new UpdateKnowledgePointRequest(null, null, edited.aiSummary()));
+        assertThat(libraryService.detail(USER_ID, kpId).summaryEdited()).isFalse();
+    }
+
+    @Test
+    void 来源带上题号_去重时补关联的材料只有名称() {
+        long first = source("Java 面试题");
+        long second = source("并发专题");
+        long kpId = fromDraft(first, "什么是 JMM？", "要点", "5,1,3");
+        knowledgePointService.linkToSource(USER_ID, second, List.of(kpId));
+
+        assertThat(libraryService.detail(USER_ID, kpId).sources()).containsExactly(
+                new SourceRef(first, "Java 面试题", List.of(1, 3, 5)),
+                new SourceRef(second, "并发专题", List.of()));
+    }
+
+    @Test
+    void 合并后学习记录和来源一起显示_最近的在前() {
+        long first = source("Java 面试题");
+        long second = source("并发专题");
+        long primary = fromDraft(first, "volatile 保证了什么？", "要点", "1");
+        long merged = fromDraft(second, "volatile 有什么用？", "要点", "2,4");
+        long earlier = fromDraft(second, "volatile 的可见性是什么？", "要点", "6");
+        // 北京时间 10 月 29 日 03:30，还没到 4 点，算 10 月 28 日
+        log(primary, true, Rating.GOOD, Rating.GOOD, Instant.parse("2026-10-28T19:30:00Z"));
+        log(merged, true, Rating.HARD, null, Instant.parse("2026-10-20T02:00:00Z"));
+        log(merged, false, Rating.EASY, Rating.GOOD, Instant.parse("2026-10-25T02:00:00Z"));
+        log(earlier, true, Rating.AGAIN, Rating.HARD, Instant.parse("2026-10-10T02:00:00Z"));
+        // 先把 earlier 并进 merged，再把 merged 并进 primary：earlier 也改指向 primary
+        knowledgePointService.merge(USER_ID, merged, List.of(earlier));
+        knowledgePointService.merge(USER_ID, primary, List.of(merged));
+
+        KnowledgePointDetail detail = libraryService.detail(USER_ID, primary);
+
+        assertThat(detail.reviews()).containsExactly(
+                new StudyRecord(LocalDate.of(2026, 10, 28), true, Rating.GOOD, Rating.GOOD, null),
+                new StudyRecord(LocalDate.of(2026, 10, 25), false, Rating.EASY, Rating.GOOD, "volatile 有什么用？"),
+                new StudyRecord(LocalDate.of(2026, 10, 20), true, Rating.HARD, null, "volatile 有什么用？"),
+                new StudyRecord(LocalDate.of(2026, 10, 10), true, Rating.AGAIN, Rating.HARD, "volatile 的可见性是什么？"));
+        assertThat(detail.sources()).containsExactly(
+                new SourceRef(first, "Java 面试题", List.of(1)),
+                new SourceRef(second, "并发专题", List.of(2, 4, 6)));
+        // 主知识点的复习进度不变：它自己的卡
+        assertThat(detail.mastery()).isEqualTo(Mastery.NEW);
+    }
+
+    @Test
+    void 删除的_被合并的_别人的_不存在的都是404() {
+        long merged = knowledgePointService.create(USER_ID, null, List.of(point(KnowledgePointType.CONCEPT, "被合并的")))
+                .getFirst();
+        knowledgePointService.merge(USER_ID, solid, List.of(merged));
+        knowledgePointService.delete(USER_ID, List.of(familiar));
+
+        assertNotFound(() -> libraryService.detail(USER_ID, familiar));
+        assertNotFound(() -> libraryService.detail(USER_ID, merged));
+        assertNotFound(() -> libraryService.detail(OTHER_USER_ID, solid));
+        assertNotFound(() -> libraryService.detail(USER_ID, Long.MAX_VALUE));
     }
 
     @Test
