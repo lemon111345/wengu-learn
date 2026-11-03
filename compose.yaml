@@ -1,18 +1,63 @@
-# 本地开发用的 MySQL：docker compose up -d
-# 账号密码只用于本机开发，与 application.yml 中的默认值一致。#24 会在这里加入后端、前端和 Nginx
+# 温故（#24，决策 036）
+#
+# 部署：复制 .env.example 为 .env 并填好 API Key，然后 docker compose up -d --build，打开 http://localhost:8000
+# 本地开发：只启动数据库 docker compose up -d mysql，后端和前端用开发服务器（见 README）
+#
+# 配置都在同目录的 .env 中：compose 用它替换下面的 ${...}，后端容器也读取它（env_file）。
+# .env 中没写的变量不传给后端，由 application.yml 中的默认值生效，默认值只在那一处维护。
 services:
   mysql:
     image: mysql:8.4
     environment:
       MYSQL_DATABASE: wengu
       MYSQL_USER: wengu
-      MYSQL_PASSWORD: wengu
-      MYSQL_ROOT_PASSWORD: wengu-root
+      MYSQL_PASSWORD: ${WENGU_DB_PASSWORD:-wengu}
+      MYSQL_ROOT_PASSWORD: ${WENGU_DB_ROOT_PASSWORD:-wengu-root}
     ports:
-      # 宿主机用 3307，避免和本机已安装的 MySQL（3306）冲突
-      - "3307:3306"
+      # 只绑定本机：开发时后端从宿主机连 3307；部署时外网连不进来。用 3307 避免和本机已装的 MySQL（3306）冲突
+      - "127.0.0.1:${WENGU_DB_PORT:-3307}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # 连接同一个 compose 中的 MySQL；这两项不从 .env 读，以这里为准
+      WENGU_DB_URL: jdbc:mysql://mysql:3306/wengu?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+      WENGU_DB_USERNAME: wengu
+      WENGU_DB_PASSWORD: ${WENGU_DB_PASSWORD:-wengu}
+    extra_hosts:
+      # 连宿主机上的 Ollama 时用 http://host.docker.internal:11434/v1；Docker Desktop 自带这个名字，Linux 靠这一行
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/health > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    ports:
+      - "${WENGU_PORT:-8000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   mysql-data:

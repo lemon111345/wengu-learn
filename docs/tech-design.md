@@ -37,7 +37,7 @@ Redis 在接口入口处做限流；调用大模型和 FSRS 调度都在 Service
 | 调度算法 | FSRS-6，从 py-fsrs 6.3.2 移植为 Java | 用 Python 版输出做单元测试校验，见 [决策 003](./decisions/003-FSRS移植.md) |
 | 文档解析 | Apache PDFBox、Apache POI | PDF 与 DOCX 文字提取 |
 | 前端 | Vue 3 + TypeScript + Vite + Element Plus | 上手平缓；TS 是前端主流，静态类型对 Java 背景更友好，也让 AI 写的代码更好读、错误在编译时暴露 |
-| 部署 | Docker Compose + Nginx | 一条命令启动 |
+| 部署 | Docker Compose + Nginx | 一条命令启动：mysql、backend、web（Nginx 提供前端并转发 /api）三个容器，多阶段构建，配置写在 `.env`；见 [决策 036](./decisions/036-Docker部署.md) |
 
 ## 包结构与分层约定
 
