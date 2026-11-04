@@ -27,6 +27,5 @@ data-private/
 node_modules/
 dist/
 
-# ===== Claude Code 本地说明（个人文件，不提交）=====
-CLAUDE.md
+# ===== Claude Code 个人偏好（不提交；项目规则在 CLAUDE.md）=====
 CLAUDE.local.md
