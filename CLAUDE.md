@@ -2,9 +2,9 @@
 
 把“AI 追问式学习”和“间隔重复编排”结合的开源学习平台。用户导入面试题、源码和文档，系统每天安排少量新知识和到期复习，通过 AI 对话学懂，再由 FSRS 算法安排下次复习。
 
-完整背景见：
-- 需求：@docs/prd.md
-- 技术方案：@docs/tech-design.md
+完整背景见下面两份文档（不会自动加载，需要时再读）：
+- 需求：[docs/prd.md](docs/prd.md)
+- 技术方案：[docs/tech-design.md](docs/tech-design.md)
 
 ## 技术栈
 
