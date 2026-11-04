@@ -6,6 +6,8 @@ import com.wengu.common.result.ErrorCode;
 import com.wengu.llm.dto.LlmResult;
 import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmOutputParseException;
+import com.wengu.source.dto.GenerateResult;
+import com.wengu.source.dto.GeneratedQuestion;
 import com.wengu.source.dto.ImportQuestionsRequest;
 import com.wengu.source.dto.ImportedSource;
 import com.wengu.source.dto.SourceQuestion;
@@ -231,6 +233,68 @@ class SourceServiceTest {
                     .isInstanceOfSatisfying(BusinessException.class,
                             e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND));
         }
+    }
+
+    @MockitoBean
+    private QuestionGenerateService generateService;
+
+    private static final String NOTE = """
+            # 线程池笔记
+
+            ## 核心参数
+
+            corePoolSize 是核心线程数……
+
+            ## 拒绝策略
+
+            AbortPolicy 直接抛异常……
+            """;
+
+    private static LlmResult<GenerateResult> generated(GeneratedQuestion... questions) {
+        return new LlmResult<>(new GenerateResult(List.of(questions)), "{...}", "test-model", "stop", 100, 50);
+    }
+
+    @Test
+    void 讲解资料根据内容整理题目_保存为文档类型且不调用识别() {
+        when(generateService.generate(anyString())).thenReturn(generated(
+                new GeneratedQuestion("核心参数", "线程池有哪些核心参数？", List.of("无界队列有什么问题？")),
+                new GeneratedQuestion("拒绝策略", "四种拒绝策略怎么选？", List.of())));
+
+        ImportedSource imported = sourceService.importQuestions(USER_ID,
+                new ImportQuestionsRequest("线程池笔记", NOTE, SourceType.DOCUMENT));
+
+        assertThat(imported.type()).isEqualTo(SourceType.DOCUMENT);
+        assertThat(imported.questions()).containsExactly(
+                new SourceQuestion(1, "线程池有哪些核心参数？", List.of("无界队列有什么问题？")),
+                new SourceQuestion(2, "四种拒绝策略怎么选？", List.of()));
+        Source saved = sourceMapper.selectById(imported.id());
+        assertThat(saved.getType()).isEqualTo(SourceType.DOCUMENT);
+        assertThat(saved.getContent()).isEqualTo(NOTE.strip());
+        verify(splitService, never()).split(anyString());
+    }
+
+    @Test
+    void 整理的题目出处不在资料中时重试_两次都不行时报错且不保存() {
+        when(generateService.generate(anyString()))
+                .thenReturn(generated(new GeneratedQuestion("线程池监控", "怎么监控线程池？", List.of())))
+                .thenThrow(parseException());
+
+        assertThatThrownBy(() -> sourceService.importQuestions(USER_ID,
+                new ImportQuestionsRequest("线程池笔记", NOTE, SourceType.DOCUMENT)))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.QUESTION_GENERATE_FAILED));
+        verify(generateService, times(2)).generate(anyString());
+        assertThat(sourceMapper.selectCount(null)).isZero();
+    }
+
+    @Test
+    void 不传类型时按题目清单识别() {
+        when(splitService.split(anyString())).thenReturn(result(q("什么是 MVCC？")));
+
+        ImportedSource imported = sourceService.importQuestions(USER_ID, request(CONTENT));
+
+        assertThat(imported.type()).isEqualTo(SourceType.QUESTION);
+        verify(generateService, never()).generate(anyString());
     }
 
     private static LlmOutputParseException parseException() {

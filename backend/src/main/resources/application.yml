@@ -10,6 +10,12 @@ spring:
     placeholders:
       # V1 插入默认用户时用的时区。V1 已经执行过的库不再用到它；空库仍然从 V1 开始执行，所以要保留
       default_timezone: ${wengu.default-timezone}
+  servlet:
+    multipart:
+      # 上传资料的大小上限（#26），和 DocumentTextExtractor.MAX_FILE_SIZE、Nginx 的 client_max_body_size 一致；
+      # 超过时由全局异常处理器返回“文件不能超过 10 MB”
+      max-file-size: 10MB
+      max-request-size: 11MB
   mvc:
     async:
       # 流式回复（SSE）是异步请求，默认超时跟随 Tomcat，约 30 秒，老师的一条长回复会被中途切断。
