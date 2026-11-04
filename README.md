@@ -168,6 +168,12 @@ cd backend
 .\mvnw.cmd test "-Dtest=ChatLiveTest" "-Dllm.live=true"
 ```
 
+## 参与开发
+
+项目规则（模块依赖边界、时间一律存 UTC、用户数据表带 `user_id`、接口与后端约定、当前阶段不做的功能等）写在 [CLAUDE.md](CLAUDE.md)。Claude Code 会自动读取它；不用 Claude Code 的话，也请按其中的规则开发。
+
+个人的工作偏好可以写进仓库根目录的 `CLAUDE.local.md`，它和 CLAUDE.md 一起加载，已被 `.gitignore` 忽略。
+
 ## 许可
 
 [GNU AGPL-3.0](LICENSE)。可以自由使用、修改和自部署；如果修改后通过网络对外提供服务，需要按同样的许可公开修改后的完整源码。
