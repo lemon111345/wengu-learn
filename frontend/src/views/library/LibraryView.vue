@@ -100,6 +100,22 @@ function onToggle(id: number, on: boolean) {
   checked.value = next
 }
 
+/**
+ * 表头全选（#78）：只作用于当前显示的行（筛选和搜索之后），在别的筛选下勾选的不动，
+ * 和“切换筛选后勾选保留”一致。全选是加进去，取消是只移出当前显示的这些
+ */
+function onToggleAll(on: boolean) {
+  const next = new Map(checked.value)
+  for (const item of visibleItems.value) {
+    if (on) {
+      next.set(item.id, item.title)
+    } else {
+      next.delete(item.id)
+    }
+  }
+  checked.value = next
+}
+
 function uncheck(ids: number[]) {
   const next = new Map(checked.value)
   ids.forEach((id) => next.delete(id))
@@ -309,6 +325,7 @@ onMounted(async () => {
         :direction="direction"
         @select="select"
         @toggle="onToggle"
+        @toggle-all="onToggleAll"
         @sort="onSort"
       />
       <section v-else class="panel empty">
