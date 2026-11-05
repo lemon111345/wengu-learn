@@ -2,6 +2,8 @@
 // 知识点列表（ui.md 5.9）：复选框、标题、类型、掌握、下次复习。
 // 点表头排序：“知识点”回到学习顺序；“掌握”“下次复习”第一次升序，再点反向。排序由后端完成（决策 030）。
 // 点标题在右侧打开详情，当前行用 --wg-surface 底色
+// 表头复选框只看当前显示的行（筛选和搜索之后）：全选中、部分选中（半选）、都没选中（#78）
+import { computed } from 'vue'
 import type { LibraryItem, LibrarySort, SortDirection } from '@/api/knowledgePoints'
 import { masteryLabels, typeLabels } from '@/utils/labels'
 import MasteryDot from './MasteryDot.vue'
@@ -18,8 +20,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [id: number]
   toggle: [id: number, checked: boolean]
+  /** 勾选或取消当前显示的全部行 */
+  toggleAll: [checked: boolean]
   sort: [sort: LibrarySort]
 }>()
+
+const checkedCount = computed(() => props.items.filter((i) => props.checked.has(i.id)).length)
+const allChecked = computed(() => props.items.length > 0 && checkedCount.value === props.items.length)
+const someChecked = computed(() => checkedCount.value > 0 && !allChecked.value)
 
 const columns: { sort: LibrarySort; label: string }[] = [
   { sort: 'MASTERY', label: '掌握' },
@@ -47,7 +55,15 @@ function ariaSort(sort: LibrarySort) {
       </colgroup>
       <thead>
         <tr>
-          <th scope="col"><span class="visually-hidden">选择</span></th>
+          <th scope="col" class="check">
+            <!-- 没全选中时点它全选；全选中时点它全部取消 -->
+            <el-checkbox
+              :model-value="allChecked"
+              :indeterminate="someChecked"
+              aria-label="全选当前列表"
+              @change="emit('toggleAll', !allChecked)"
+            />
+          </th>
           <th scope="col" :aria-sort="ariaSort('ORDER')">
             <button type="button" class="head" :class="{ on: sort === 'ORDER' }" @click="emit('sort', 'ORDER')">
               知识点（按学习顺序）
@@ -168,7 +184,8 @@ tr.current td {
   background: var(--wg-surface);
 }
 
-.check {
+th.check,
+td.check {
   padding: 0;
   text-align: center;
 }
@@ -214,13 +231,5 @@ tr.current .title {
 
 .warn {
   color: var(--wg-warn);
-}
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
 }
 </style>
