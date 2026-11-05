@@ -10,6 +10,7 @@ import {
   fetchLibrary,
   mergeKnowledgePoints,
   restoreKnowledgePoints,
+  resumeKnowledgePoints,
   suspendKnowledgePoints,
   type LibrarySort,
   type LibraryView,
@@ -129,24 +130,31 @@ function reloadPanelIf(ids: number[]) {
   }
 }
 
-async function suspendChecked() {
+/**
+ * 批量暂停、批量恢复共用：对勾选的知识点调用接口，成功后取消勾选并重新取列表。
+ * 两个按钮一直显示（#78）：恢复本来没暂停的、暂停已经暂停的，后端都直接成功，所以勾选里混着两种也没关系
+ */
+async function setStatusChecked(action: (ids: number[]) => Promise<unknown>, done: string, failed: string) {
   const ids = [...checked.value.keys()]
   if (busy.value || ids.length === 0) {
     return
   }
   busy.value = true
   try {
-    await suspendKnowledgePoints(ids)
-    ElMessage.success(`已暂停 ${ids.length} 个知识点`)
+    await action(ids)
+    ElMessage.success(`${done} ${ids.length} 个知识点`)
     uncheck(ids)
     reloadPanelIf(ids)
     await load()
   } catch (e) {
-    ElMessage.error(e instanceof ApiError ? e.message : '没有暂停成功，请重试')
+    ElMessage.error(e instanceof ApiError ? e.message : failed)
   } finally {
     busy.value = false
   }
 }
+
+const suspendChecked = () => setStatusChecked(suspendKnowledgePoints, '已暂停', '没有暂停成功，请重试')
+const resumeChecked = () => setStatusChecked(resumeKnowledgePoints, '已恢复', '没有恢复成功，请重试')
 
 async function merge(primaryId: number) {
   const ids = [...checked.value.keys()]
@@ -310,6 +318,7 @@ onMounted(async () => {
             合并
           </button>
           <button type="button" class="batch-btn" :disabled="busy" @click="suspendChecked">暂停复习</button>
+          <button type="button" class="batch-btn" :disabled="busy" @click="resumeChecked">恢复复习</button>
           <button type="button" class="batch-btn danger" :disabled="busy" @click="remove([...checked.keys()])">
             删除
           </button>
