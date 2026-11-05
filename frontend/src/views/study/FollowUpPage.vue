@@ -77,7 +77,7 @@ useAutoScroll(() => [messages.value.length, streamingText.value])
     <section class="intro">
       <h1>接着问</h1>
       <p>
-        想问什么都可以，问到弄懂为止，不影响评分。老师只回答，不出题。返回后，聊到的新知识会整理出来，在评分页确认要不要加入复习。
+        想问什么都可以，问到弄懂为止，不影响评分。老师只回答，不出题。
       </p>
     </section>
 
