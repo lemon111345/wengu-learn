@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// “每天新学”的加减按钮。改了之后点“保存”才生效，“取消”恢复原值：
+// “每天学几个”（含复习）的加减按钮。改了之后点“保存”才生效，“取消”恢复原值：
 // 这个数一改，今天的新知识列表就跟着变，自动保存会让列表随着点击来回跳
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
@@ -41,7 +41,7 @@ async function save() {
 
 <template>
   <div class="stepper" :class="`align-${align}`">
-    <NumberStepper v-model="draft" :min="DAILY_NEW_MIN" :max="DAILY_NEW_MAX" label="每天新学" />
+    <NumberStepper v-model="draft" :min="DAILY_NEW_MIN" :max="DAILY_NEW_MAX" label="每天学几个" />
     <div v-if="draft !== value" class="confirm">
       <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       <el-button text :disabled="saving" @click="draft = value">取消</el-button>

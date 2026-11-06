@@ -7,7 +7,7 @@ import java.time.ZoneId;
  *
  * @param timezone      IANA 时区，如 Asia/Shanghai
  * @param dayStartHour  一天从几点开始算，0～23
- * @param dailyNewLimit 每天新学几个知识点
+ * @param dailyNewLimit 每天学几个知识点，含复习（决策 016 的修订）
  */
 public record SettingsView(String timezone, int dayStartHour, int dailyNewLimit) {
 

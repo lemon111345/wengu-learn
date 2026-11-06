@@ -25,11 +25,12 @@ export interface UpcomingDay {
 export interface TodayPlan {
   /** 学习日，如 2026-11-02。页面上的日期一律用它，不用浏览器的当前日期 */
   date: string
+  /** 每天学几个，含复习 */
   dailyNewLimit: number
   newLearnedToday: number
-  /** 到期复习，按学习顺序，不含今天已完成的 */
+  /** 到期复习，按学习顺序，不含今天已完成的；全部列出，可能超过每天学几个 */
   reviews: PlanItem[]
-  /** 新知识，按学习顺序 */
+  /** 新知识，按学习顺序，只补足每天学几个剩下的名额 */
   newItems: PlanItem[]
   /** 今天已完成的，按完成时间排列 */
   completed: CompletedItem[]
@@ -39,7 +40,7 @@ export interface TodayPlan {
   knowledgePointCount: number
   /** 今天的有效学习时长（分钟） */
   studiedMinutesToday: number
-  /** 按现在的每天新学数还要几天学完（含今天）；每天新学为 0 或没有待学时为 null */
+  /** 界面不再使用（#85），接口约定不删除字段，所以保留 */
   daysToFinish: number | null
 }
 

@@ -45,7 +45,7 @@ import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * 每日计划（决策 016）。真实 MySQL，时钟可以手动拨动。
- * 默认设置：Asia/Shanghai、4 点分界、每天新学 3 个。默认时刻为北京时间 10 月 29 日 10:00，
+ * 默认设置：Asia/Shanghai、4 点分界、每天学 3 个（含复习）。默认时刻为北京时间 10 月 29 日 10:00，
  * 这个学习日是 [10-28T20:00Z, 10-29T20:00Z)。
  */
 @SpringBootTest
@@ -170,6 +170,7 @@ class PlanServiceTest {
 
     @Test
     void 先复习后新学且各自按学习顺序排列() {
+        settingsService.update(1, new UpdateSettingsRequest(null, null, 5));
         reviewedKp("昨天到期", 3, NOW.minus(Duration.ofDays(1)));
         reviewedKp("今天晚些时候到期", 1, DAY_END.minusMillis(1));
         reviewedKp("明天才到期", 2, DAY_END);
@@ -183,7 +184,7 @@ class PlanServiceTest {
         assertThat(plan.date()).isEqualTo(LocalDate.of(2026, 10, 29));
         assertThat(titles(plan.reviews())).containsExactly("今天晚些时候到期", "昨天到期");
         assertThat(titles(plan.newItems())).containsExactly("新知识 1", "新知识 2", "新知识 3");
-        assertThat(plan.dailyNewLimit()).isEqualTo(3);
+        assertThat(plan.dailyNewLimit()).isEqualTo(5);
         assertThat(plan.newLearnedToday()).isZero();
     }
 
@@ -249,15 +250,16 @@ class PlanServiceTest {
     }
 
     @Test
-    void 修改每天新学数后立即生效() {
+    void 修改每天学几个后立即生效() {
         for (int i = 1; i <= 6; i++) {
             newKp("新知识 " + i, i);
         }
         reviewedKp("到期复习", 0, NOW);
-        assertThat(planService.today(1).newItems()).hasSize(3);
+        // 总量 3，复习占 1 个
+        assertThat(planService.today(1).newItems()).hasSize(2);
 
         settingsService.update(1, new UpdateSettingsRequest(null, null, 5));
-        assertThat(planService.today(1).newItems()).hasSize(5);
+        assertThat(planService.today(1).newItems()).hasSize(4);
 
         // 0：只复习不学新的
         settingsService.update(1, new UpdateSettingsRequest(null, null, 0));
@@ -279,6 +281,120 @@ class PlanServiceTest {
 
         assertThat(plan.newLearnedToday()).isEqualTo(2);
         assertThat(plan.newItems()).isEmpty();
+    }
+
+    @Test
+    void 到期复习全部列出不截断_超过总量时新学为零() {
+        for (int i = 1; i <= 5; i++) {
+            reviewedKp("复习 " + i, i, NOW.minus(Duration.ofDays(i)));
+        }
+        newKp("新知识", 10);
+        reviewedKp("明天到期", 11, DAY_END);
+
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.reviews()).hasSize(5);
+        assertThat(plan.newItems()).isEmpty();
+        // 接下来 7 天的预测只看复习，不受总量影响
+        assertThat(counts(plan)).containsExactly(1, 0, 0, 0, 0, 0, 0);
+    }
+
+    @Test
+    void 新学只补足总量减去复习后的名额() {
+        settingsService.update(1, new UpdateSettingsRequest(null, null, 5));
+        reviewedKp("复习 1", 1, NOW);
+        reviewedKp("复习 2", 2, NOW);
+        for (int i = 1; i <= 5; i++) {
+            newKp("新知识 " + i, 10 + i);
+        }
+
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 1", "新知识 2", "新知识 3");
+    }
+
+    @Test
+    void 完成复习后新学名额不变() {
+        settingsService.update(1, new UpdateSettingsRequest(null, null, 5));
+        KnowledgePoint review = reviewedKp("复习 1", 1, NOW);
+        reviewedKp("复习 2", 2, NOW);
+        for (int i = 1; i <= 5; i++) {
+            newKp("新知识 " + i, 10 + i);
+        }
+        assertThat(planService.today(1).newItems()).hasSize(3);
+
+        finishReview(review);
+        TodayPlan plan = planService.today(1);
+
+        assertThat(titles(plan.reviews())).containsExactly("复习 2");
+        assertThat(plan.newItems()).hasSize(3);
+    }
+
+    @Test
+    void 今天的复习和已学的新知识一起占名额() {
+        settingsService.update(1, new UpdateSettingsRequest(null, null, 5));
+        KnowledgePoint done = reviewedKp("完成的复习", 1, NOW);
+        reviewedKp("没完成的复习", 2, NOW);
+        KnowledgePoint learned = newKp("学过的新知识", 3);
+        for (int i = 1; i <= 5; i++) {
+            newKp("新知识 " + i, 10 + i);
+        }
+        finishReview(done);
+        firstReview(learned, NOW);
+
+        // 总量 5：完成的复习 1、没完成的复习 1、已学的新知识 1，还剩 2 个
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 1", "新知识 2");
+    }
+
+    @Test
+    void 同一个知识点今天评了两次只占一个名额() {
+        KnowledgePoint review = reviewedKp("评了两次的", 1, NOW.plus(Duration.ofDays(3)));
+        log(review, NOW.minus(Duration.ofHours(2)), Rating.AGAIN, false);
+        log(review, NOW.minus(Duration.ofHours(1)), Rating.GOOD, false);
+        for (int i = 1; i <= 3; i++) {
+            newKp("新知识 " + i, 10 + i);
+        }
+
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 1", "新知识 2");
+    }
+
+    @Test
+    void 暂停的到期复习不占名额() {
+        reviewedKp(1, "暂停的复习", 1, NOW, KnowledgePointStatus.SUSPENDED);
+        for (int i = 1; i <= 3; i++) {
+            newKp("新知识 " + i, 10 + i);
+        }
+
+        assertThat(planService.today(1).newItems()).hasSize(3);
+    }
+
+    @Test
+    void 昨天完成的复习不占今天的名额() {
+        KnowledgePoint review = reviewedKp("昨天复习的", 1, NOW.plus(Duration.ofDays(3)));
+        log(review, DAY_START.minusMillis(1), Rating.GOOD, false);
+        for (int i = 1; i <= 3; i++) {
+            newKp("新知识 " + i, 10 + i);
+        }
+
+        assertThat(planService.today(1).newItems()).hasSize(3);
+    }
+
+    @Test
+    void 名额被复习占满时_学完复习也算当天完成() {
+        KnowledgePoint review = reviewedKp("复习", 1, NOW);
+        settingsService.update(1, new UpdateSettingsRequest(null, null, 1));
+        newKp("新知识", 2);
+        assertThat(planService.today(1).newItems()).isEmpty();
+
+        finishReview(review);
+        planService.today(1);
+
+        assertThat(completionMapper.selectCount(null)).isEqualTo(1);
+    }
+
+    /** 模拟 #20 的评分：完成一次复习，写流水并把到期日推到以后。 */
+    private void finishReview(KnowledgePoint kp) {
+        log(kp, NOW, Rating.GOOD, false);
+        cardStateMapper.updateById(CardState.of(kp.getId(), kp.getUserId(),
+                new Card(State.REVIEW, null, 8.0, 5.0, NOW.plus(Duration.ofDays(8)), NOW)));
     }
 
     @Test

@@ -97,7 +97,7 @@ class AuthControllerTest {
         mockMvc.perform(get("/api/settings").session(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.timezone").value("America/New_York"))
-                .andExpect(jsonPath("$.data.dailyNewLimit").value(3))
+                .andExpect(jsonPath("$.data.dailyNewLimit").value(5))
                 .andExpect(jsonPath("$.data.dayStartHour").value(4));
     }
 
@@ -300,7 +300,7 @@ class AuthControllerTest {
         mockMvc.perform(get("/api/plan/today").session(bobSession))
                 .andExpect(jsonPath("$.data.newItems").isEmpty());
         mockMvc.perform(get("/api/settings").session(bobSession))
-                .andExpect(jsonPath("$.data.dailyNewLimit").value(3));
+                .andExpect(jsonPath("$.data.dailyNewLimit").value(5));
     }
 
     @Test

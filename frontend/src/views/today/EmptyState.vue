@@ -46,9 +46,9 @@ const steps = [
   </main>
   <aside class="side">
     <section class="panel">
-      <h2>每天新学几个</h2>
+      <h2>每天学几个</h2>
       <DailyNewStepper :value="dailyNewLimit" align="start" @saved="emit('saved', $event)" />
-      <p>一个知识点大约要聊 10～20 分钟。每天有 1 小时的话，3 个比较合适。之后随时可以改。</p>
+      <p>包括新学和复习，复习优先。一个知识点大约要聊 10～30 分钟，按你每天有多少时间来定。之后随时可以改。</p>
     </section>
     <section class="panel">
       <h2>温故怎么安排复习</h2>

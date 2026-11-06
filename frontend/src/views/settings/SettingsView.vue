@@ -6,7 +6,6 @@ import { ElMessage } from 'element-plus'
 import PageHeader from '@/components/PageHeader.vue'
 import { ApiError } from '@/api/http'
 import { fetchLlmStatus, type LlmStatus } from '@/api/llm'
-import { fetchTodayPlan } from '@/api/plan'
 import { fetchSettings, updateSettings, type Settings } from '@/api/settings'
 import AccountCard from './AccountCard.vue'
 import ModelCard from './ModelCard.vue'
@@ -14,7 +13,6 @@ import ScheduleCard from './ScheduleCard.vue'
 import ShortcutsCard from './ShortcutsCard.vue'
 
 const settings = ref<Settings | null>(null)
-const daysToFinish = ref<number | null>(null)
 /** 取不到时为 null，卡片显示“暂时取不到” */
 const llmStatus = ref<LlmStatus | null>(null)
 const loadError = ref<string | null>(null)
@@ -31,20 +29,9 @@ async function load() {
     .then((s) => (llmStatus.value = s))
     .catch(() => (llmStatus.value = null))
   try {
-    const [s, plan] = await Promise.all([fetchSettings(), fetchTodayPlan()])
-    settings.value = s
-    daysToFinish.value = plan.daysToFinish
+    settings.value = await fetchSettings()
   } catch (e) {
     loadError.value = e instanceof ApiError ? e.message : '设置没有加载出来，请重试'
-  }
-}
-
-/** “还要 X 天学完”由后端按新的设置重新算（决策 034：计划的规则在后端） */
-async function refreshDaysToFinish() {
-  try {
-    daysToFinish.value = (await fetchTodayPlan()).daysToFinish
-  } catch {
-    // 取不到时保留原来的说法，下次进入页面再取
   }
 }
 
@@ -60,7 +47,6 @@ async function save(changes: Partial<Settings>) {
     if (seq === saveSeq) {
       settings.value = saved
       saveState.value = 'saved'
-      await refreshDaysToFinish()
     }
   } catch (e) {
     ElMessage.error(e instanceof ApiError ? e.message : '保存失败，请重试')
@@ -109,7 +95,7 @@ onMounted(load)
 
   <div v-else class="wg-page-body columns">
     <div class="column">
-      <ScheduleCard v-if="settings" :settings="settings" :days-to-finish="daysToFinish" @change="save" />
+      <ScheduleCard v-if="settings" :settings="settings" @change="save" />
       <el-skeleton v-else class="skeleton" :rows="5" animated />
       <!-- “老师”卡片在 #53 完成后加在这里 -->
     </div>

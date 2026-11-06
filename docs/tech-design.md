@@ -136,7 +136,7 @@ frontend/src
 | 表 | 作用 | 关键字段 |
 | --- | --- | --- |
 | user | 用户 | id、username（唯一，按数据库排序规则比较，不区分大小写）、password_hash（bcrypt，带 `{bcrypt}` 前缀，见决策 022） |
-| user_settings | 用户设置 | user_id、daily_new_limit（每天新学数量，默认 3）、timezone（注册时取浏览器时区，读不到或不合法时用环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点） |
+| user_settings | 用户设置 | user_id、daily_new_limit（每天学几个，含复习，默认 5；列名沿用，见决策 016 的修订）、timezone（注册时取浏览器时区，读不到或不合法时用环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点） |
 | source | 导入的学习材料 | id、user_id、type（QUESTION 题目清单 / DOCUMENT 讲解资料，#26；源码、截图以后添加）、name、content（用户粘贴的原文，包括答案；上传的文件存提取出的文字）、questions（识别或整理出的题目 JSON，V2 添加，见决策 011、037） |
 | knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（ACTIVE / SUSPENDED）、sort_order（新知识按 sort_order、id 派发；确认草稿时接在已有知识点之后）、draft_item_id（来自哪个草稿条目，V6 添加，见决策 015）、deleted_at（软删除，为空表示没删）、merged_into（被合并时指向主知识点，同时写 deleted_at）（V11 添加，见决策 029） |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id、user_id |
@@ -175,12 +175,12 @@ frontend/src
 1. 根据用户时区和 day_start_hour，算出“今天”的起止时间（换算成 UTC）。
 2. 到期复习：review 查 card_state 中 user_id 匹配、**last_review 不为空**、且 due 早于今天结束时间的 kp_id。必须排除 last_review 为空的新卡片，否则新知识会被误当成到期复习。
 3. 今天已学的新知识数：review 查 review_log 中今天范围内、**is_first_review 为真**的记录条数。不能用 state_before 判断：新卡片的 state 也是“学习中”。
-4. 剩余新知识名额 = daily_new_limit − 第 3 步的数量，小于 0 时取 0。
+4. 剩余新知识名额 = max(0, daily_new_limit − 今天占名额的知识点数)。daily_new_limit 是每天学习总量（含复习）；今天占名额的 = 第 2 步还没完成的到期复习 ∪ 今天范围内 review_log 的知识点，按知识点去重。已完成的复习也要算，否则每完成一个复习，新学名额就会多出一个。到期复习全部列出，不截断，超过总量时新知识为 0（决策 016 的修订）。
 5. 新知识候选：review 查 card_state 中 last_review 为空的 kp_id。
 6. 过滤与排序：plan 把第 2、5 步的 kp_id 交给 knowledge，排除暂停的、删除的和只收录类型的知识点，按排序字段排序；新知识取前“剩余名额”个。
 7. 返回：到期复习列表 + 新知识列表，先复习后新学。另附今天已完成的条目（今天范围内的 review_log，同一知识点取最后一次，暂停的也显示）和接下来 7 个学习日每天到期的复习数（从明天起，不算暂停的），见 [决策 024](./decisions/024-今天页的补充数据.md)。
 
-第 3 步是防止重复派发的关键：如果不扣除今天已学的新知识，用户下午再打开页面时会被重新分配一批新知识，每日上限就失效了。
+第 4 步把今天已学的也算进去，是防止重复派发的关键：否则用户下午再打开页面时会被重新分配一批新知识，每日上限就失效了。
 
 计算连续学习天数要用的“当天完成”记录（[决策 020](./decisions/020-连续学习的口径.md)）是已经发生的事实，不是计划的快照，计划仍然实时计算。
 
@@ -341,7 +341,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `POST /api/knowledge-points/delete` | 删除（#25） | `{ids}` | — | 软删除，只写 deleted_at，状态、card_state、学习记录、来源都不动。批量规则同上 |
 | `POST /api/knowledge-points/restore` | 撤销删除（#25） | `{ids}` | — | 清空 deleted_at，删除前的状态和进度原样回来；后端不限时间。有一个没删除或是被合并的整批 404 |
 | `POST /api/knowledge-points/merge` | 合并（#25） | `{primaryId, mergedIds}` | — | 主知识点的标题、要点、复习进度不变；被合并的来源并到主知识点，然后软删除、merged_into 指向主知识点，之前并进它们的也改指向主知识点；学习记录不搬；不能撤销。没有选择或 mergedIds 包含主知识点 400；有一个不存在、不属于当前用户或已删除 404。见决策 029 |
-| `GET /api/plan/today` | 今天的计划（#18、#48、#49、#19、#52） | — | `{date, dailyNewLimit, newLearnedToday, reviews: [{kpId, title, type}], newItems: [...], completed: [{kpId, title, type, rating, firstReview}], upcomingReviews: [{date, count}], knowledgePointCount, studiedMinutesToday, daysToFinish}` | 实时计算：先复习后新学，各自按学习顺序；新知识最多“每天新学数 − 今天已学数”个；date 是学习日（按时区和 day_start_hour）。completed 是今天已完成的，按完成时间排列，同一知识点取最后一次评分，暂停的也在内；upcomingReviews 是从明天起 7 个学习日每天到期的复习数，今天和已过期的在 reviews 中，不算暂停的。knowledgePointCount 是知识点总数（暂停的、不参与调度的也算），为 0 时今天页显示空状态：只看上面几个列表会把“都在很多天后到期”“只有只收录的”误判为空。studiedMinutesToday 是今天学习日内开始的会话的有效时长之和（分钟，不足一分钟舍去）。daysToFinish 是按现在的每天新学数，还要几个学习日学完全部待学的新知识（不含暂停的）：今天剩下的名额先用掉、算一天，其余每天学“每天新学数”个；今天的名额已用完时从明天算起；每天新学为 0 或没有待学时为 null（设置页“还要 X 天学完”）。见决策 016、024、025 |
+| `GET /api/plan/today` | 今天的计划（#18、#48、#49、#19、#52） | — | `{date, dailyNewLimit, newLearnedToday, reviews: [{kpId, title, type}], newItems: [...], completed: [{kpId, title, type, rating, firstReview}], upcomingReviews: [{date, count}], knowledgePointCount, studiedMinutesToday, daysToFinish}` | 实时计算：先复习后新学，各自按学习顺序；到期复习全部列出，新知识只补足 dailyNewLimit（每天学几个，含复习）剩下的名额；date 是学习日（按时区和 day_start_hour）。completed 是今天已完成的，按完成时间排列，同一知识点取最后一次评分，暂停的也在内；upcomingReviews 是从明天起 7 个学习日每天到期的复习数，今天和已过期的在 reviews 中，不算暂停的。knowledgePointCount 是知识点总数（暂停的、不参与调度的也算），为 0 时今天页显示空状态：只看上面几个列表会把“都在很多天后到期”“只有只收录的”误判为空。studiedMinutesToday 是今天学习日内开始的会话的有效时长之和（分钟，不足一分钟舍去）。daysToFinish 是假设之后的名额都用来新学，至少还要几个学习日学完全部待学的新知识（不含暂停的）；每天学几个为 0 或没有待学时为 null。#85 起界面不再使用，接口约定不删除字段，所以保留。见决策 016、024、025 |
 | `POST /api/sessions` | 开始学习一个知识点（#19、#23） | `{kpId}` | `{id, type, kpId, parentSessionId, kpTitle, ended, skippedExplanation, generating, activeSeconds, rating, messages: [{id, role, content, marker, createdAt}]}` | 只创建会话，不调用模型，老师的第一句由 reply 生成；这个知识点最近的会话还没走完时返回那个会话：没结束的接着学，学完但还没评分的回去评分。知识点不存在 404，只收录的类型 400。见决策 025、027 |
 | `GET /api/sessions/{id}` | 会话和全部消息，刷新后恢复（#19、#23） | — | 同上 | messages 不含发给模型的知识点信息和附加提示；generating 为 true 表示上一条回复还在后台生成；activeSeconds 是有效时长；rating 是已评的分 `{rating, date, days}`，没评分或接着问时为 null。不存在或不属于当前用户 404 |
 | `POST /api/sessions/{id}/reply` | 生成老师的下一条回复：刚开始时的第一句，或出错后重试（#19） | — | `text/event-stream`：`delta {text}`、`done {messageId, marker, ended}`、`error {message}` | 已经轮到学生回答、会话已结束、正在生成时 409（统一格式的 JSON，不开始推送）。浏览器断开后回复照样生成完、存库。见决策 025 |

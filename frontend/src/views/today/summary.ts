@@ -48,5 +48,5 @@ export function overviewDescription(plan: TodayPlan): string {
     doneNew > 0 ? `新学 ${doneNew} 个已完成` : '',
     minutes,
   ].filter((s) => s !== '')
-  return done.length > 0 ? done.join('，') : `今天共 ${remaining} 个，先复习后学新的`
+  return done.length > 0 ? done.join('，') : `今天 ${remaining} 个：复习 ${plan.reviews.length}、新学 ${plan.newItems.length}`
 }
