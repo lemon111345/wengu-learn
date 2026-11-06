@@ -84,7 +84,7 @@ flowchart TB
 
 所有模块都可以依赖 common，图中省略。
 
-**规划中的模块（未实现）：**技能体系（[决策 033](./decisions/033-技能体系.md)）会新增 `skill`（图谱、技能、知识点模板，只依赖 common）和 `progress`（暂名，技能亮度的计算，依赖 knowledge、review、skill），knowledge 新增依赖 skill。实现时再修订决策 002 和上图。
+**规划中的模块（M3，未实现）：**技能体系（[决策 033](./decisions/033-技能体系.md)）会新增 `skill`（图谱、技能、知识点模板，只依赖 common）和 `progress`（暂名，技能亮度的计算，依赖 knowledge、review、skill），knowledge 新增依赖 skill。实现时再修订决策 002 和上图。
 
 ## 接口与后端约定
 
@@ -150,7 +150,7 @@ frontend/src
 | extraction_draft | 一次抽取，用户确认后才生成知识点（V3 添加，V4 精简） | id、user_id、source_id（会话来源由 #31 添加，见决策 008）、created_at、confirmed_at（V6 添加）；状态不存库：确认后为 CONFIRMED，之前由批次推算（RUNNING / READY / FAILED），见决策 012、013、015 |
 | extraction_batch | 草稿中的一批，每批调用一次抽取（V4 添加） | id、user_id、draft_id、batch_no（重试时新增一行、批号不变，旧行保留）、status（PENDING / RUNNING / READY / FAILED）、questions（发给模型的题目）、context（这一批用的去重上下文，V5 添加）、covered（被已有内容覆盖的题，换回了知识点 id 或条目 id，带标题快照，V5 添加，见决策 014）、raw_output、error（原始信息，不返回前端）、error_code（失败原因的返回码，V12 添加，见决策 032）、attempts、prompt_version、model、prompt_tokens、completion_tokens（多次调用累加）、created_at、started_at、finished_at，见决策 013 |
 | extraction_draft_item | 草稿中的一个知识点（V3 添加） | id、user_id、draft_id、batch_id（V4 添加）、item_order（批内顺序）、title、summary、type、source_question_ids（如 "1,3,5"，对应 source 中的题号）、decision（确认时的处理：ACCEPTED / REJECTED，V6 添加，见决策 015） |
-| model_config | 模型配置（M3；M1 用环境变量，见决策 007） | user_id、base_url、model、api_key_encrypted |
+| model_config | 模型配置（M4；M1 用环境变量，见决策 007） | user_id、base_url、model、api_key_encrypted |
 
 关键索引：
 
@@ -247,7 +247,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 原理机制 | MECHANISM | 流程或原理，常带追问链 | 深度对话，按顺序学习 |
 | 列举 | ENUMERATION | “有哪些” | 偏记忆，快问快答 |
 | 排查实战 | TROUBLESHOOTING | “线上出了问题怎么办” | 情景模拟，考察步骤和工具 |
-| 系统设计 | SYSTEM_DESIGN | “设计一个 XX 系统” | 综合多个知识点；M1 只标记、不进入每日计划，以后做模拟面试 |
+| 系统设计 | SYSTEM_DESIGN | “设计一个 XX 系统” | 综合多个知识点；M1 只标记、不进入每日计划，学法在 M3 定，以后做模拟面试 |
 | 个人经历 | EXPERIENCE | “你项目里怎么做的” | 必须结合用户源码追问；M1 只标记、不进入每日计划，M2 有源码导入后启用 |
 
 加 type 字段的理由：不同类型的复习方式差别很大，用类型选择不同的对话 prompt，成本几乎为零，却直接决定学习体验。
@@ -292,7 +292,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 阶段 | 内容 |
 | --- | --- |
 | 现在（M1） | 只有固定流程；模型由环境变量配置，整个部署共用一套 |
-| M3 | 用户自带 Key 与加密存储，前端提供国内模型的预设和自定义接口；“测试连接”检测工具调用 |
+| M4 | 用户自带 Key 与加密存储，前端提供国内模型的预设和自定义接口；“测试连接”检测工具调用 |
 | 以后（时机未定） | Agent：只做满足“用户直接问自己的 AI 做不到一样好”的事，遵守上面的安全原则 |
 
 ## 掌握程度
