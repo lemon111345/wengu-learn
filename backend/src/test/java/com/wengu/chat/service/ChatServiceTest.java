@@ -396,6 +396,33 @@ class ChatServiceTest {
     }
 
     @Test
+    void 准备生成时抛出Error也会清除正在生成的标记() {
+        when(llmService.stream(anyString(), anyList(), any())).thenThrow(new NoClassDefFoundError("模拟类加载失败"));
+
+        assertThatThrownBy(() -> chatService.reply(USER_ID, sessionId)).isInstanceOf(NoClassDefFoundError.class);
+
+        assertThat(sessionService.get(USER_ID, sessionId).generating()).isFalse();
+    }
+
+    @Test
+    void 上一条回复丢了时不能发新消息但可以重试() {
+        modelReplies("开场");
+        collect(chatService.reply(USER_ID, sessionId));
+        when(llmService.stream(anyString(), anyList(), any())).thenThrow(new NoClassDefFoundError("模拟类加载失败"));
+        assertThatThrownBy(() -> chatService.send(USER_ID, sessionId, new SendMessageRequest("我的回答")))
+                .isInstanceOf(NoClassDefFoundError.class);
+        // 学生的话已经存下，老师没有回复
+        assertThat(sessionService.get(USER_ID, sessionId).messages().getLast().content()).isEqualTo("我的回答");
+
+        assertError(() -> chatService.send(USER_ID, sessionId, new SendMessageRequest("再发一条")), ErrorCode.CONFLICT);
+
+        org.mockito.Mockito.reset(llmService);
+        modelReplies("重试后的回复");
+        collect(chatService.reply(USER_ID, sessionId));
+        assertThat(sessionService.get(USER_ID, sessionId).messages().getLast().content()).isEqualTo("重试后的回复");
+    }
+
+    @Test
     void 不合法的回答和其他用户的会话() {
         modelReplies("开场");
         collect(chatService.reply(USER_ID, sessionId));

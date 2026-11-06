@@ -24,7 +24,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -45,8 +45,14 @@ public class StudySessionService {
     private final UserSettingsService settingsService;
     private final Clock clock;
 
-    // 正在生成回复的会话。只有一个后端实例，放在内存中即可；重启后清空，没存下的回复由用户重试
-    private final Set<Long> generating = ConcurrentHashMap.newKeySet();
+    /**
+     * “正在生成”超过这么久，就当作已经失败，可以重试。和异步请求的上限（spring.mvc.async.request-timeout）一致。
+     * 标记本来由 finishReply 清除，但 Reactor 遇到 LinkageError 这类致命错误时会直接抛出，doFinally 不一定执行（#95）
+     */
+    static final Duration REPLY_TIMEOUT = Duration.ofMinutes(10);
+
+    // 正在生成回复的会话和开始的时刻。只有一个后端实例，放在内存中即可；重启后清空，没存下的回复由用户重试
+    private final Map<Long, Instant> generating = new ConcurrentHashMap<>();
 
     public StudySessionService(StudySessionMapper sessionMapper, MessageMapper messageMapper,
                                KnowledgePointService knowledgePointService, ReviewService reviewService,
@@ -189,9 +195,20 @@ public class StudySessionService {
                 .orderByAsc(Message::getId));
     }
 
-    /** 标记这个会话开始生成回复；已经在生成时返回 false。 */
+    /** 标记这个会话开始生成回复；已经在生成时返回 false。超过 {@link #REPLY_TIMEOUT} 的标记不算。 */
     boolean tryStartReply(long sessionId) {
-        return generating.add(sessionId);
+        Instant now = Instant.now(clock);
+        Instant started = generating.putIfAbsent(sessionId, now);
+        return started == null || (isExpired(started, now) && generating.replace(sessionId, started, now));
+    }
+
+    private boolean isGenerating(long sessionId) {
+        Instant started = generating.get(sessionId);
+        return started != null && !isExpired(started, Instant.now(clock));
+    }
+
+    private static boolean isExpired(Instant started, Instant now) {
+        return !now.isBefore(started.plus(REPLY_TIMEOUT));
     }
 
     void finishReply(long sessionId) {
@@ -225,7 +242,7 @@ public class StudySessionService {
                 .toList();
         return new SessionView(session.getId(), session.getType(), session.getKpId(), session.getParentSessionId(), kpTitle,
                 session.getEndedAt() != null, Boolean.TRUE.equals(session.getSkippedExplanation()),
-                generating.contains(session.getId()), session.getActiveSeconds(), rating(session), messages);
+                isGenerating(session.getId()), session.getActiveSeconds(), rating(session), messages);
     }
 
     /** 学习会话已经评过分时，评分和下次复习的学习日；其他情况为 null */

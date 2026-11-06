@@ -195,4 +195,28 @@ class StudySessionServiceTest {
         assertThat(saved.getActiveSeconds()).isEqualTo(180 + 600);
         assertThat(saved.getLastActiveAt()).isEqualTo(NOW.plus(Duration.ofMinutes(33)));
     }
+
+    @Test
+    void 正在生成的标记超过上限后失效_可以重新开始() {
+        long kpId = kp(USER_ID, "什么是 MVCC？", KnowledgePointType.CONCEPT);
+        long sessionId = sessionService.start(USER_ID, new StartSessionRequest(kpId)).id();
+        try {
+            assertThat(sessionService.tryStartReply(sessionId)).isTrue();
+            assertThat(sessionService.get(USER_ID, sessionId).generating()).isTrue();
+
+            // 还没到上限：后到的请求被拒绝
+            ((MutableClock) clock).set(NOW.plus(StudySessionService.REPLY_TIMEOUT).minusSeconds(1));
+            assertThat(sessionService.get(USER_ID, sessionId).generating()).isTrue();
+            assertThat(sessionService.tryStartReply(sessionId)).isFalse();
+
+            // 到了上限：当作已经失败，页面不再等，也可以重新开始
+            ((MutableClock) clock).set(NOW.plus(StudySessionService.REPLY_TIMEOUT));
+            assertThat(sessionService.get(USER_ID, sessionId).generating()).isFalse();
+            assertThat(sessionService.tryStartReply(sessionId)).isTrue();
+            assertThat(sessionService.get(USER_ID, sessionId).generating()).isTrue();
+        } finally {
+            sessionService.finishReply(sessionId);
+            ((MutableClock) clock).set(NOW);
+        }
+    }
 }

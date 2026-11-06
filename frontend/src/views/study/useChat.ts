@@ -51,6 +51,17 @@ export function useChat(sessionId: () => number) {
     return [...saved, { id: -1, role: 'USER', content: pendingUser.value, marker: null, createdAt: '' }]
   })
 
+  /**
+   * 最后一条是学生的话，又没有在生成：这条回复丢了（后端重启、生成中途失败），只能重试。
+   * 后端这时不接受新消息，所以要给出重试按钮，否则对话就卡死了（#95）
+   */
+  function showRetryIfReplyLost() {
+    const s = session.value
+    if (s && !s.ended && !s.generating && s.messages.at(-1)?.role === 'USER' && !error.value?.retryable) {
+      error.value = { message: '老师这条回复没有生成出来，可以点重试', retryable: true }
+    }
+  }
+
   async function refresh() {
     try {
       session.value = await fetchSession(sessionId())
@@ -65,6 +76,8 @@ export function useChat(sessionId: () => number) {
     stopPolling()
     if (session.value.generating) {
       pollTimer = setTimeout(refresh, POLL_INTERVAL)
+    } else {
+      showRetryIfReplyLost()
     }
   }
 

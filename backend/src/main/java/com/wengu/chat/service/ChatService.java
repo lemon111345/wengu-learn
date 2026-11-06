@@ -100,7 +100,7 @@ public class ChatService {
         begin(sessionId);
         try {
             return stream(session, messages);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
             sessions.finishReply(sessionId);
             throw e;
         }
@@ -198,7 +198,7 @@ public class ChatService {
             List<Message> history = new ArrayList<>(messages);
             history.add(message);
             return stream(session, history);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
             sessions.finishReply(session.getId());
             throw e;
         }
