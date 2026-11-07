@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 右侧栏“接下来 7 天要复习的”（ui.md 5.2）：7 根柱子，最多的一天用主色；下面是“每天新学”
+// 右侧栏“接下来 7 天要复习的”（ui.md 5.2）：7 根柱子，最多的一天用主色；下面是“每天学几个”
 import { computed } from 'vue'
 import type { UpcomingDay } from '@/api/plan'
 import { weekdayLabel } from '@/utils/date'
@@ -32,7 +32,7 @@ const bars = computed(() =>
       </li>
     </ol>
     <div class="daily-new">
-      <span>每天新学</span>
+      <span>每天学几个</span>
       <DailyNewStepper :value="dailyNewLimit" @saved="emit('saved', $event)" />
     </div>
   </section>

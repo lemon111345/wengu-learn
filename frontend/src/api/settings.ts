@@ -5,11 +5,11 @@ export interface Settings {
   timezone: string
   /** 新的一天从几点开始，0～23 */
   dayStartHour: number
-  /** 每天新学几个，0～50 */
+  /** 每天学几个，含复习，0～50。字段名没有改（决策 016 的修订） */
   dailyNewLimit: number
 }
 
-/** 每天新学的范围，和后端 UpdateSettingsRequest 的校验一致 */
+/** 每天学几个的范围，和后端 UpdateSettingsRequest 的校验一致 */
 export const DAILY_NEW_MIN = 0
 export const DAILY_NEW_MAX = 50
 

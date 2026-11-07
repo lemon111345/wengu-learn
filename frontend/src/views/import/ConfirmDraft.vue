@@ -1,13 +1,12 @@
 <script setup lang="ts">
 // 确认知识点（ui.md 5.8）：按学习顺序列出，只能取消勾选、不能修改（草稿保持模型的原始输出）；
-// 右侧栏是将加入的数量、按类型的数量、大约几天学完、确认加入；有题没拆出知识点时可以单独再抽。
+// 右侧栏是将加入的数量、按类型的数量、确认加入；有题没拆出知识点时可以单独再抽。
 // 草稿已经确认过时，显示加入了哪些
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { confirmDraft, createDraft, type DraftItemView, type DraftView } from '@/api/drafts'
 import { ApiError } from '@/api/http'
-import { fetchSettings } from '@/api/settings'
 import type { KnowledgePointType } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
 import { modKeyLabel, useShortcut } from '@/shortcuts/useShortcut'
@@ -16,41 +15,21 @@ import { typeLabels } from '@/utils/labels'
 const props = defineProps<{ draft: DraftView }>()
 const router = useRouter()
 
-/** 只收录、暂时不能学的类型（决策 007），不算进“几天学完” */
+/** 只收录、暂时不能学的类型（决策 007） */
 const UNSCHEDULED: KnowledgePointType[] = ['SYSTEM_DESIGN', 'EXPERIENCE']
 
 const confirmed = computed(() => props.draft.status === 'CONFIRMED')
 const rejected = ref<Set<number>>(new Set())
 const busy = ref(false)
-const dailyNewLimit = ref<number | null>(null)
-
-onMounted(async () => {
-  try {
-    dailyNewLimit.value = (await fetchSettings()).dailyNewLimit
-  } catch {
-    // 取不到时不显示“几天学完”
-  }
-})
 
 const questionCount = computed(() => props.draft.batches.reduce((n, b) => n + b.questionIds.length, 0))
 const accepted = computed(() =>
   props.draft.items.filter((i) => (confirmed.value ? i.decision === 'ACCEPTED' : !rejected.value.has(i.id))),
 )
-const scheduledCount = computed(() => accepted.value.filter((i) => !UNSCHEDULED.includes(i.type)).length)
 const typeCounts = computed(() => {
   const counts = new Map<KnowledgePointType, number>()
   accepted.value.forEach((i) => counts.set(i.type, (counts.get(i.type) ?? 0) + 1))
   return [...counts].sort((a, b) => b[1] - a[1])
-})
-const daysText = computed(() => {
-  const limit = dailyNewLimit.value
-  if (limit === null || scheduledCount.value === 0) {
-    return ''
-  }
-  if (limit === 0) {
-    return '每天新学设为 0，这一批暂时不会安排'
-  }
-  return `按每天新学 ${limit} 个，大约 ${Math.ceil(scheduledCount.value / limit)} 天学完这一批`
 })
 
 function isOn(item: DraftItemView) {
@@ -165,7 +144,6 @@ useShortcut('Mod+Enter', () => void confirm())
           </li>
         </ul>
         <template v-if="!confirmed">
-          <p v-if="daysText" class="days">{{ daysText }}</p>
           <el-button type="primary" class="confirm" :loading="busy" @click="confirm">
             确认加入<kbd>{{ modKeyLabel }} Enter</kbd>
           </el-button>
@@ -339,10 +317,6 @@ h1 {
   display: flex;
   justify-content: space-between;
   color: var(--wg-text-muted);
-}
-
-.days {
-  font-size: 14px;
 }
 
 .confirm {

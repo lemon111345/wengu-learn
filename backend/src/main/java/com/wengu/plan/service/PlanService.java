@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,20 +62,22 @@ public class PlanService {
         SettingsView settings = settingsService.get(userId);
         StudyDay day = StudyDay.of(Instant.now(clock), settings.zoneId(), settings.dayStartHour());
 
-        // 2. 到期复习：今天结束前到期的，包括今天晚些时候才到期的
+        // 2. 到期复习：今天结束前到期的，包括今天晚些时候才到期的。全部列出，不受每天学习总量限制
         List<PlanItem> reviews = items(knowledgePointService.activeInOrder(userId,
                 reviewService.dueKpIds(userId, day.end())));
 
-        // 3、4. 扣除今天已学的新知识，否则下午再打开时会再派一批，每天的上限就失效了
+        // 3、4. 新学只补足总量剩下的名额。今天已经评过分的也要扣：不扣新学的，下午再打开时会再派一批；
+        // 不扣复习的，每完成一个复习，名额就会多出一个
         int learned = reviewService.countFirstReviews(userId, day.start(), day.end());
-        int remaining = Math.max(0, settings.dailyNewLimit() - learned);
+        List<ReviewRecord> todayRecords = reviewService.reviewsBetween(userId, day.start(), day.end());
+        int remaining = Math.max(0, settings.dailyNewLimit() - usedToday(reviews, todayRecords));
 
         // 5、6. 新知识：去掉暂停的，按学习顺序取前 remaining 个。全部待学的总数还要用来算“还要几天学完”
         List<KnowledgePointSummary> allNew = knowledgePointService.activeInOrder(userId, reviewService.newKpIds(userId));
         List<PlanItem> newItems = items(allNew).stream().limit(remaining).toList();
 
         // 7. 先复习，后新学；另附今天已完成的，供页面显示对勾、评分和进度
-        List<CompletedItem> completed = completed(userId, day);
+        List<CompletedItem> completed = completed(userId, todayRecords);
         if (reviews.isEmpty() && newItems.isEmpty() && !completed.isEmpty()) {
             recordCompletion(userId, day.date());
         }
@@ -85,8 +88,19 @@ public class PlanService {
     }
 
     /**
+     * 今天占名额的知识点数：还没完成的到期复习，加上今天评过分的（新学和复习都算）。
+     * 取并集，同一个知识点今天评了多次也只占一个名额。流水不按知识点状态过滤：学完后删除或暂停的，仍然占名额。
+     */
+    private static int usedToday(List<PlanItem> reviews, List<ReviewRecord> todayRecords) {
+        Set<Long> used = new HashSet<>();
+        reviews.forEach(item -> used.add(item.kpId()));
+        todayRecords.forEach(record -> used.add(record.kpId()));
+        return used.size();
+    }
+
+    /**
      * 还要几个学习日学完全部待学的新知识：今天剩下的名额先用掉（算一天），其余每天学 dailyNewLimit 个。
-     * 今天的名额已经用完时从明天算起。
+     * 今天的名额已经用完时从明天算起。没有算以后的复习，所以是下限（{@link TodayPlan#daysToFinish()}）。
      *
      * @param newCount       待学的新知识总数（不含暂停的），包括今天计划里还没学的
      * @param remainingToday 今天还剩的新学名额
@@ -148,9 +162,9 @@ public class PlanService {
     }
 
     /** 今天已完成的：来自今天学习日内的评分流水，同一个知识点评了多次时取最后一次，按完成时间排列。 */
-    private List<CompletedItem> completed(long userId, StudyDay day) {
+    private List<CompletedItem> completed(long userId, List<ReviewRecord> todayRecords) {
         Map<Long, ReviewRecord> latest = new LinkedHashMap<>();
-        for (ReviewRecord r : reviewService.reviewsBetween(userId, day.start(), day.end())) {
+        for (ReviewRecord r : todayRecords) {
             // 先删再放：再次评分的知识点移到最后，顺序跟着最后一次评分走
             latest.remove(r.kpId());
             latest.put(r.kpId(), r);

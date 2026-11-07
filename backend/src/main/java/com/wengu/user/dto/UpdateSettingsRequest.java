@@ -5,7 +5,7 @@ package com.wengu.user.dto;
  *
  * @param timezone      IANA 时区
  * @param dayStartHour  0～23
- * @param dailyNewLimit 0～50；0 表示只复习不学新的
+ * @param dailyNewLimit 每天学几个，含复习；0～50；0 表示只复习不学新的
  */
 public record UpdateSettingsRequest(String timezone, Integer dayStartHour, Integer dailyNewLimit) {
 }

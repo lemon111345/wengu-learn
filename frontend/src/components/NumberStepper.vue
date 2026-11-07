@@ -4,7 +4,7 @@
 const props = defineProps<{
   min: number
   max: number
-  /** 读屏软件读的名称，如“每天新学” */
+  /** 读屏软件读的名称，如“每天学几个” */
   label: string
 }>()
 

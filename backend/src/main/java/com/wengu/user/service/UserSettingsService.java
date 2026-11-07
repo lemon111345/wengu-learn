@@ -18,11 +18,11 @@ import java.time.ZoneId;
 @Service
 public class UserSettingsService {
 
-    /** 每天新学数量的上限，防止误填一个很大的数。 */
+    /** 每天学几个（含复习）的上限，防止误填一个很大的数。 */
     public static final int MAX_DAILY_NEW_LIMIT = 50;
 
     /** 新用户的默认值（决策 009 第 5 条）。 */
-    static final int DEFAULT_DAILY_NEW_LIMIT = 3;
+    static final int DEFAULT_DAILY_NEW_LIMIT = 5;
     static final int DEFAULT_DAY_START_HOUR = 4;
 
     private final UserSettingsMapper settingsMapper;
