@@ -36,7 +36,9 @@ const direction = ref<SortDirection>('ASC')
 
 const library = ref<LibraryView | null>(null)
 const loadError = ref<string | null>(null)
-const selectedId = ref<number | null>(null)
+/** 选中的知识点写进地址（?kp=）：从回顾页返回时还停在刚才那一条 */
+const selectedId = ref<number | null>(Number(route.query.kp) || null)
+watch(selectedId, (id) => void router.replace({ query: id === null ? {} : { kp: id } }))
 /**
  * 勾选的知识点：id → 标题，按勾选顺序。切换筛选后勾选保留，
  * 勾选的可能不在当前列表中，合并弹窗要显示它们的标题，所以记下来

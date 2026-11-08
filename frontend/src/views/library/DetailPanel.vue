@@ -208,7 +208,10 @@ function toggleSuspend() {
           <li v-for="(record, i) in detail.reviews" :key="i">
             <span class="muted">{{ formatMonthDay(record.date) }}</span>
             <span class="record-text">
-              {{ studyRecordText(record) }}
+              <RouterLink v-if="record.sessionId !== null" :to="`/history/${record.sessionId}`">
+                {{ studyRecordText(record) }}
+              </RouterLink>
+              <template v-else>{{ studyRecordText(record) }}</template>
               <span v-if="record.mergedFrom" class="merged">合并自：{{ record.mergedFrom }}</span>
             </span>
           </li>
