@@ -59,13 +59,28 @@ const preview = ref<RatingOption[]>([])
 const chosen = ref<RatingOption | null>(props.session.rating)
 /** 后台保存中：先显示预览中的日期（乐观更新），保存成功后换成后端返回的 */
 const saving = ref(false)
-/** 这次是刚点的，播放日期浮上来的动效；刷新后看到的不播放 */
+/** 第一次评分时播放日期浮上来的动效；刷新后看到的、改分时都不播放 */
 const justChosen = ref(false)
 const rated = computed(() => chosen.value !== null && !saving.value)
+/** 已经评过分、又不能再改（之后又复习过，或者是早期的记录）：能不能改由后端判断（决策 039） */
+const locked = props.session.rating !== null && !props.session.ratingEditable
+/** 后端已经保存的评分，保存失败时退回到这里 */
+let saved = props.session.rating
+/** 用户最后点的一档 */
+let latest: Rating | null = saved?.rating ?? null
+
+/** 大字的日期。隔几天后改成低的一档时，到期时间可能已经过去，这时写“今天”，不写过去的日期 */
+const seeYou = computed(() => {
+  const option = chosen.value
+  if (!option) {
+    return ''
+  }
+  return !locked && option.days <= 0 ? '今天再见' : `${formatMonthDay(option.date)}再见`
+})
 
 onMounted(async () => {
   void loadSuggestion()
-  if (!chosen.value) {
+  if (!locked) {
     try {
       preview.value = await fetchRatingPreview(props.session.id)
     } catch {
@@ -78,22 +93,46 @@ function optionOf(rating: Rating) {
   return preview.value.find((o) => o.rating === rating)
 }
 
-async function choose(rating: Rating) {
-  if (chosen.value || saving.value) {
+/** 选一档或改成另一档：立刻显示，后台保存（乐观更新） */
+function choose(rating: Rating) {
+  if (locked || rating === latest) {
     return
   }
-  const previewed = optionOf(rating)
-  chosen.value = previewed ?? null
+  latest = rating
+  chosen.value = optionOf(rating) ?? null
+  if (saved === null) {
+    justChosen.value = true
+  }
+  // 已经有请求在路上时不再发，由正在跑的 save 接着处理
+  if (!saving.value) {
+    void save()
+  }
+}
+
+/**
+ * 同一时间只发一个请求，保证后端按顺序收到。连续快速改分时，中间点过的不发，
+ * 等前一个返回后只发最后一次的选择；以最后一次为准。
+ */
+async function save() {
   saving.value = true
-  justChosen.value = true
   try {
-    chosen.value = await rate(props.session.id, rating)
-    // 评过分，当天进度变了
-    refreshStudyProgress()
+    while (latest !== null && latest !== saved?.rating) {
+      const sending: Rating = latest
+      saved = await rate(props.session.id, sending)
+      // 等待期间又改了的话，这个结果已经过时，不显示
+      if (latest === sending) {
+        chosen.value = saved
+      }
+      // 评过分或改了分，当天进度可能变了
+      refreshStudyProgress()
+    }
   } catch (e) {
-    // 保存失败：撤回显示，提示重试（决策 021）
-    chosen.value = null
-    justChosen.value = false
+    // 保存失败：退回上一次保存成功的评分，提示重试（决策 021）
+    latest = saved?.rating ?? null
+    chosen.value = saved
+    if (saved === null) {
+      justChosen.value = false
+    }
     ElMessage.error(e instanceof ApiError ? e.message : '评分没有保存，请重试')
   } finally {
     saving.value = false
@@ -157,7 +196,7 @@ useShortcut('Enter', () => void next())
           type="button"
           class="rating"
           :class="{ picked: chosen?.rating === rating }"
-          :disabled="chosen !== null && chosen.rating !== rating"
+          :disabled="locked && chosen?.rating !== rating"
           :aria-pressed="chosen?.rating === rating"
           @click="choose(rating)"
         >
@@ -170,10 +209,11 @@ useShortcut('Enter', () => void next())
         </button>
       </div>
       <p v-if="!chosen" class="hint">按 1～4 选择，评分后会算出下次复习的日期</p>
+      <p v-else-if="locked" class="hint">这次评分不能再改了：之后又复习过，或者是早期的记录</p>
     </section>
 
     <div v-if="chosen" class="see-you" :class="{ animate: justChosen }">
-      <span class="date">{{ formatMonthDay(chosen.date) }}再见</span>
+      <span class="date">{{ seeYou }}</span>
       <p>到时会换个角度问，重点问这次没掌握的地方。</p>
     </div>
 

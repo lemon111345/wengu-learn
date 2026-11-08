@@ -39,7 +39,10 @@ export function timeAgo(instant: string, now = Date.now()): string {
   return hours < 24 ? `${hours} 小时前` : `${Math.floor(hours / 24)} 天前`
 }
 
-/** 距今天几个学习日的说法：1 天是“明天”，其他是“3 天后” */
+/** 距今天几个学习日的说法：1 天是“明天”，其他是“3 天后”；今天或已经过去（隔几天后改分时）都是“今天” */
 export function daysLater(days: number): string {
+  if (days <= 0) {
+    return '今天'
+  }
   return days === 1 ? '明天' : `${days} 天后`
 }

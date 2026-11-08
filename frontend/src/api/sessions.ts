@@ -42,6 +42,8 @@ export interface SessionView {
   activeSeconds: number
   /** 已经评过分时的评分和下次复习日期 */
   rating: RatingOption | null
+  /** 已经评过分时，这次评分还能不能修改（决策 039） */
+  ratingEditable: boolean
   messages: MessageView[]
 }
 
