@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.List;
@@ -84,11 +85,23 @@ public class ReviewService {
      * @throws BusinessException 这个知识点没有调度状态（不存在、不属于该用户、或者是只收录的类型）时为 NOT_FOUND
      */
     public Map<Rating, Instant> preview(long userId, long kpId) {
-        Card card = card(userId, kpId).toCard();
-        Instant now = Instant.now(clock);
+        return dues(kpId, card(userId, kpId).toCard(), Instant.now(clock));
+    }
+
+    /**
+     * 已评分会话的预览：按评分前的快照和原来的评分时间，算出四种评分各自的下次复习时间，不保存（决策 039）。
+     *
+     * @throws BusinessException 这个会话没有评分时为 NOT_FOUND；不能修改时为 CONFLICT，见 {@link #changeableLog}
+     */
+    public Map<Rating, Instant> previewChange(long userId, long sessionId) {
+        ReviewLog log = changeableLog(userId, sessionId);
+        return dues(log.getKpId(), log.cardBefore(), log.getReviewedAt());
+    }
+
+    private static Map<Rating, Instant> dues(long kpId, Card card, Instant at) {
         Map<Rating, Instant> dues = new EnumMap<>(Rating.class);
         for (Rating rating : Rating.values()) {
-            dues.put(rating, schedulerFor(kpId, card).review(card, rating, now).due());
+            dues.put(rating, schedulerFor(kpId, card).review(card, rating, at).due());
         }
         return dues;
     }
@@ -107,26 +120,19 @@ public class ReviewService {
             throw new BusinessException(ErrorCode.CONFLICT, "这次学习已经评过分了");
         }
         Card before = card(userId, kpId).toCard();
-        Instant now = Instant.now(clock);
+        // 数据库只存到毫秒。截断后再计算，改分时读回的评分时间才和这里用的完全相同（决策 039）
+        Instant now = Instant.now(clock).truncatedTo(ChronoUnit.MILLIS);
         Card after = schedulerFor(kpId, before).review(before, ratingUser, now);
         boolean firstReview = before.lastReview() == null;
 
-        // 不用 updateById：它默认跳过值为 null 的字段，而进入 REVIEW 后 step 要变成 null
-        cardStateMapper.update(new LambdaUpdateWrapper<CardState>()
-                .eq(CardState::getKpId, kpId)
-                .set(CardState::getState, after.state())
-                .set(CardState::getStep, after.step())
-                .set(CardState::getStability, after.stability())
-                .set(CardState::getDifficulty, after.difficulty())
-                .set(CardState::getDue, after.due())
-                .set(CardState::getLastReview, after.lastReview()));
+        saveCard(kpId, after);
         ReviewLog log = new ReviewLog();
         log.setUserId(userId);
         log.setKpId(kpId);
         log.setSessionId(sessionId);
         log.setRatingUser(ratingUser);
         log.setRatingAi(ratingAi);
-        log.setStateBefore(before.state());
+        log.snapshotBefore(before);
         log.setFirstReview(firstReview);
         log.setDueAfter(after.due());
         log.setReviewedAt(now);
@@ -140,13 +146,86 @@ public class ReviewService {
     }
 
     /**
+     * 修改评分（决策 039）：恢复评分前的快照，用原来的评分时间按新评分重算，结果和第一次就选这一档相同。
+     * 不能在已经按旧评分算过的状态上再算：FSRS 是非线性的，难度还会被截在 1～10，算不回去。
+     * <p>
+     * 只改 card_state 和这条流水的 rating_user、due_after；评分时间、是否第一次、AI 建议都不变。
+     *
+     * @throws BusinessException 这个会话没有评分时为 NOT_FOUND；不能修改时为 CONFLICT，见 {@link #changeableLog}
+     */
+    @Transactional
+    public ReviewResult changeRating(long userId, long sessionId, Rating ratingUser) {
+        ReviewLog log = changeableLog(userId, sessionId);
+        Card before = log.cardBefore();
+        Card after = schedulerFor(log.getKpId(), before).review(before, ratingUser, log.getReviewedAt());
+
+        saveCard(log.getKpId(), after);
+        reviewLogMapper.update(new LambdaUpdateWrapper<ReviewLog>()
+                .eq(ReviewLog::getId, log.getId())
+                .set(ReviewLog::getRatingUser, ratingUser)
+                .set(ReviewLog::getDueAfter, after.due()));
+        return new ReviewResult(ratingUser, after.due(), log.getFirstReview());
+    }
+
+    /** 这个会话的评分现在还能不能改；没有评分时为 false。 */
+    public boolean isRatingChangeable(long sessionId) {
+        ReviewLog log = logOf(sessionId);
+        return log != null && log.hasSnapshot() && isLatest(log);
+    }
+
+    /**
+     * 能修改的评分流水：属于该用户、有快照、是这个知识点最近一次评分。
+     *
+     * @throws BusinessException 没有评分或不属于该用户时为 NOT_FOUND；旧记录、之后又复习过时为 CONFLICT
+     */
+    private ReviewLog changeableLog(long userId, long sessionId) {
+        ReviewLog log = logOf(sessionId);
+        if (log == null || log.getUserId() != userId) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "这次学习还没有评分");
+        }
+        if (!log.hasSnapshot()) {
+            throw new BusinessException(ErrorCode.CONFLICT, "这是早期的评分记录，不能修改");
+        }
+        if (!isLatest(log)) {
+            throw new BusinessException(ErrorCode.CONFLICT, "这次评分之后又复习过，不能修改");
+        }
+        return log;
+    }
+
+    private ReviewLog logOf(long sessionId) {
+        return reviewLogMapper.selectOne(new LambdaQueryWrapper<ReviewLog>()
+                .eq(ReviewLog::getSessionId, sessionId));
+    }
+
+    /** 这条流水是不是这个知识点最近一次评分。之后的评分是在这次的结果上算的，改了这次，后面的就对不上了 */
+    private boolean isLatest(ReviewLog log) {
+        ReviewLog latest = reviewLogMapper.selectOne(new LambdaQueryWrapper<ReviewLog>()
+                .select(ReviewLog::getId)
+                .eq(ReviewLog::getKpId, log.getKpId())
+                .orderByDesc(ReviewLog::getReviewedAt)
+                .orderByDesc(ReviewLog::getId)
+                .last("LIMIT 1"));
+        return latest.getId().equals(log.getId());
+    }
+
+    private void saveCard(long kpId, Card card) {
+        // 不用 updateById：它默认跳过值为 null 的字段，而进入 REVIEW 后 step 要变成 null，恢复新卡时 last_review 也可能为空
+        cardStateMapper.update(new LambdaUpdateWrapper<CardState>()
+                .eq(CardState::getKpId, kpId)
+                .set(CardState::getState, card.state())
+                .set(CardState::getStep, card.step())
+                .set(CardState::getStability, card.stability())
+                .set(CardState::getDifficulty, card.difficulty())
+                .set(CardState::getDue, card.due())
+                .set(CardState::getLastReview, card.lastReview()));
+    }
+
+    /**
      * 这个会话的评分结果，没评过分时为空（#23 学习页刷新后显示已评的分）。
      * V10 之前的流水没有 due_after，这里不会遇到：那时还没有学习会话的评分。
      */
     public Optional<ReviewResult> reviewOf(long sessionId) {
-        ReviewLog log = reviewLogMapper.selectOne(new LambdaQueryWrapper<ReviewLog>()
-                .eq(ReviewLog::getSessionId, sessionId));
-        return Optional.ofNullable(log)
+        return Optional.ofNullable(logOf(sessionId))
                 .map(l -> new ReviewResult(l.getRatingUser(), l.getDueAfter(), l.getFirstReview()));
     }
 

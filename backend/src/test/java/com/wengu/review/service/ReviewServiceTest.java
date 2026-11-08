@@ -265,6 +265,131 @@ class ReviewServiceTest {
         assertThat(reviewLogMapper.selectCount(null)).isEqualTo(1);
     }
 
+    /** 四档两两组合：先评 first 再改成 second，和直接评 second 的结果完全相同（决策 039）。 */
+    private void assertChangeSameAsDirect(Card before) {
+        long kpId = 1000L;
+        for (Rating first : Rating.values()) {
+            for (Rating second : Rating.values()) {
+                kpId++;
+                // fuzz 的随机数和 kpId 有关，两条路径要用同一个 kpId：先直接评，记下结果后清掉，再走“评 + 改”
+                cardStateMapper.insert(CardState.of(kpId, 1, before));
+                ReviewResult direct = reviewService.rate(1, kpId, kpId, second, null);
+                Card directCard = cardStateMapper.selectById(kpId).toCard();
+                cardStateMapper.deleteById(kpId);
+                reviewLogMapper.delete(null);
+
+                cardStateMapper.insert(CardState.of(kpId, 1, before));
+                reviewService.rate(1, kpId, kpId, first, Rating.HARD);
+                Instant previewed = reviewService.previewChange(1, kpId).get(second);
+                ReviewResult changed = reviewService.changeRating(1, kpId, second);
+
+                assertThat(cardStateMapper.selectById(kpId).toCard()).as("%s -> %s", first, second).isEqualTo(directCard);
+                assertThat(changed).isEqualTo(direct);
+                assertThat(previewed).isEqualTo(direct.due());
+                ReviewLog log = reviewLogMapper.selectOne(null);
+                assertThat(log.getRatingUser()).isEqualTo(second);
+                assertThat(log.getDueAfter()).isEqualTo(direct.due());
+                // 其他字段保持第一次评分时的值
+                assertThat(log.getRatingAi()).isEqualTo(Rating.HARD);
+                assertThat(log.getReviewedAt()).isEqualTo(NOW);
+                assertThat(log.cardBefore()).isEqualTo(before);
+                reviewLogMapper.delete(null);
+            }
+        }
+    }
+
+    @Test
+    void 新卡改分和第一次就选这一档完全相同() {
+        assertChangeSameAsDirect(Card.newCard(NOW.minus(Duration.ofDays(1))));
+    }
+
+    @Test
+    void 复习中的卡改分和第一次就选这一档完全相同() {
+        assertChangeSameAsDirect(new Card(State.REVIEW, null, 5.0, 5.0, NOW, NOW.minus(Duration.ofDays(5))));
+    }
+
+    @Test
+    void 重学中的卡改分和第一次就选这一档完全相同() {
+        assertChangeSameAsDirect(new Card(State.RELEARNING, 0, 2.0, 7.0, NOW, NOW.minus(Duration.ofHours(1))));
+    }
+
+    @Test
+    void 改了又改回去等于没改() {
+        reviewService.initCards(1, List.of(801L));
+        reviewService.rate(1, 801L, 9801L, Rating.GOOD, null);
+        Card original = cardStateMapper.selectById(801L).toCard();
+
+        reviewService.changeRating(1, 9801L, Rating.AGAIN);
+        reviewService.changeRating(1, 9801L, Rating.EASY);
+        reviewService.changeRating(1, 9801L, Rating.GOOD);
+
+        assertThat(cardStateMapper.selectById(801L).toCard()).isEqualTo(original);
+        assertThat(reviewLogMapper.selectCount(null)).isEqualTo(1);
+    }
+
+    @Test
+    void 改分后仍然算第一次学习() {
+        reviewService.initCards(1, List.of(802L));
+        reviewService.rate(1, 802L, 9802L, Rating.GOOD, null);
+
+        assertThat(reviewService.changeRating(1, 9802L, Rating.EASY).firstReview()).isTrue();
+        assertThat(reviewService.countFirstReviews(1, NOW, NOW.plusMillis(1))).isEqualTo(1);
+    }
+
+    @Test
+    void 之后又复习过的评分不能再改最新的可以改() {
+        reviewService.initCards(1, List.of(803L));
+        reviewService.rate(1, 803L, 9803L, Rating.GOOD, null);
+        reviewService.rate(1, 803L, 9804L, Rating.GOOD, null);
+        Card afterLatest = cardStateMapper.selectById(803L).toCard();
+
+        assertThat(reviewService.isRatingChangeable(9803L)).isFalse();
+        assertThat(reviewService.isRatingChangeable(9804L)).isTrue();
+        assertThatThrownBy(() -> reviewService.changeRating(1, 9803L, Rating.EASY))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.CONFLICT));
+        assertThatThrownBy(() -> reviewService.previewChange(1, 9803L)).isInstanceOf(BusinessException.class);
+        assertThat(cardStateMapper.selectById(803L).toCard()).isEqualTo(afterLatest);
+
+        reviewService.changeRating(1, 9804L, Rating.EASY);
+        assertThat(cardStateMapper.selectById(803L).toCard()).isNotEqualTo(afterLatest);
+    }
+
+    @Test
+    void 没有快照的旧记录不能改() {
+        reviewService.initCards(1, List.of(804L));
+        ReviewLog old = new ReviewLog();
+        old.setUserId(1L);
+        old.setKpId(804L);
+        old.setSessionId(9805L);
+        old.setRatingUser(Rating.GOOD);
+        old.setStateBefore(State.LEARNING);
+        old.setFirstReview(true);
+        old.setReviewedAt(NOW);
+        reviewLogMapper.insert(old);
+
+        assertThat(reviewService.isRatingChangeable(9805L)).isFalse();
+        assertThatThrownBy(() -> reviewService.changeRating(1, 9805L, Rating.EASY))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    @Test
+    void 没有评分和其他用户的会话不能改() {
+        reviewService.initCards(2, List.of(805L));
+        reviewService.rate(2, 805L, 9806L, Rating.GOOD, null);
+        Card before = cardStateMapper.selectById(805L).toCard();
+
+        assertThat(reviewService.isRatingChangeable(9999L)).isFalse();
+        assertThatThrownBy(() -> reviewService.changeRating(1, 9806L, Rating.EASY))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+        assertThatThrownBy(() -> reviewService.changeRating(1, 9999L, Rating.EASY))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+        assertThat(cardStateMapper.selectById(805L).toCard()).isEqualTo(before);
+    }
+
     @Test
     void 其他用户的知识点不能评分也不能预览() {
         reviewService.initCards(2, List.of(701L));
