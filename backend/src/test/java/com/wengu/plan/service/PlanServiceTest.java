@@ -206,6 +206,39 @@ class PlanServiceTest {
     }
 
     @Test
+    void 自己挑一个列表外的新知识_算今天学的且列表末尾少一个() {
+        newKp("新知识 1", 1);
+        newKp("新知识 2", 2);
+        newKp("新知识 3", 3);
+        KnowledgePoint picked = newKp("知识库里挑的", 4);
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 1", "新知识 2", "新知识 3");
+
+        firstReview(picked, NOW.minus(Duration.ofHours(1)));
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.newLearnedToday()).isEqualTo(1);
+        assertThat(titles(plan.newItems())).containsExactly("新知识 1", "新知识 2");
+        assertThat(plan.completed()).extracting(CompletedItem::title).containsExactly("知识库里挑的");
+    }
+
+    @Test
+    void 名额用完后自己挑的仍然算今天学的_不再派新知识() {
+        firstReview(newKp("新知识 1", 1), NOW.minus(Duration.ofHours(4)));
+        firstReview(newKp("新知识 2", 2), NOW.minus(Duration.ofHours(3)));
+        firstReview(newKp("新知识 3", 3), NOW.minus(Duration.ofHours(2)));
+        KnowledgePoint picked = newKp("知识库里挑的", 4);
+        newKp("新知识 5", 5);
+        assertThat(planService.today(1).newItems()).isEmpty();
+
+        firstReview(picked, NOW.minus(Duration.ofHours(1)));
+        TodayPlan plan = planService.today(1);
+
+        assertThat(plan.newLearnedToday()).isEqualTo(4);
+        assertThat(plan.newItems()).isEmpty();
+        assertThat(plan.completed()).hasSize(4);
+    }
+
+    @Test
     void 跨过分界时刻后名额恢复() {
         KnowledgePoint first = newKp("新知识 1", 1);
         newKp("新知识 2", 2);

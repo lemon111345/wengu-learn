@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 新学或复习列表（ui.md 5.2）：今天已完成的在前，显示对勾、灰色标题和评分；后面是还没学的
+// 新学或复习列表（ui.md 5.2）：今天已完成的在前，显示对勾、灰色标题和评分；后面是还没学的，点一行就学这一个
 import type { CompletedItem, PlanItem } from '@/api/plan'
 import { ratingColors, ratingLabels, typeLabels } from '@/utils/labels'
 
@@ -45,9 +45,12 @@ defineProps<{
           {{ ratingLabels[item.rating] }}
         </span>
       </li>
-      <li v-for="item in pending" :key="item.kpId" class="row">
-        <span class="title" :class="{ next: item.kpId === nextKpId }">{{ item.title }}</span>
-        <span class="tag">{{ typeLabels[item.type] }}</span>
+      <li v-for="item in pending" :key="item.kpId">
+        <!-- 用链接而不是点击事件：Tab 和 Enter 直接可用；焦点在链接上时，页面的 Enter 快捷键不生效，进的是这一行 -->
+        <RouterLink class="row pick" :to="`/study/${item.kpId}`">
+          <span class="title" :class="{ next: item.kpId === nextKpId }">{{ item.title }}</span>
+          <span class="tag">{{ typeLabels[item.type] }}</span>
+        </RouterLink>
       </li>
     </ul>
     <p v-else class="empty">{{ emptyText }}</p>
@@ -87,6 +90,14 @@ ul {
   gap: 6px 14px;
   padding: 12px 0;
   border-bottom: 1px solid var(--wg-border);
+}
+
+.pick {
+  color: var(--wg-text);
+}
+
+.pick:hover {
+  color: var(--wg-primary-hover);
 }
 
 .title {
