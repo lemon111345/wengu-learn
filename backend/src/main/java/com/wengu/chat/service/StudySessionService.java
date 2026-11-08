@@ -242,7 +242,8 @@ public class StudySessionService {
                 .toList();
         return new SessionView(session.getId(), session.getType(), session.getKpId(), session.getParentSessionId(), kpTitle,
                 session.getEndedAt() != null, Boolean.TRUE.equals(session.getSkippedExplanation()),
-                isGenerating(session.getId()), session.getActiveSeconds(), rating(session), messages);
+                isGenerating(session.getId()), session.getActiveSeconds(), rating(session),
+                reviewService.isRatingChangeable(session.getId()), messages);
     }
 
     /** 学习会话已经评过分时，评分和下次复习的学习日；其他情况为 null */

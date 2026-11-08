@@ -201,10 +201,48 @@ class RatingServiceTest {
         assertThat(log.getRatingUser()).isEqualTo(Rating.GOOD);
         assertThat(log.getRatingAi()).isEqualTo(Rating.HARD);
         assertThat(log.getFirstReview()).isTrue();
-        // 评过分以后不能再评，也不再预览
-        assertError(() -> ratingService.rate(USER_ID, sessionId, new RateRequest(Rating.EASY)), ErrorCode.CONFLICT);
-        assertError(() -> ratingService.preview(USER_ID, sessionId), ErrorCode.CONFLICT);
+    }
+
+    @Test
+    void 评过分后再次提交就是修改且和预览一致() {
+        long sessionId = session(SessionType.STUDY, true);
+        suggestion(sessionId, Rating.HARD);
+        ratingService.rate(USER_ID, sessionId, new RateRequest(Rating.GOOD));
+        RatingOption previewed = ratingService.preview(USER_ID, sessionId).get(3);
+
+        RatingOption changed = ratingService.rate(USER_ID, sessionId, new RateRequest(Rating.EASY));
+
+        assertThat(changed).isEqualTo(previewed);
+        assertThat(changed.rating()).isEqualTo(Rating.EASY);
         assertThat(reviewLogMapper.selectCount(null)).isEqualTo(1);
+        ReviewLog log = reviewLogMapper.selectOne(null);
+        assertThat(log.getRatingUser()).isEqualTo(Rating.EASY);
+        assertThat(log.getRatingAi()).isEqualTo(Rating.HARD);
+    }
+
+    @Test
+    void 隔了几天改成忘了时距今天是负数() {
+        long sessionId = session(SessionType.STUDY, true);
+        ratingService.rate(USER_ID, sessionId, new RateRequest(Rating.EASY));
+
+        ((MutableClock) clock).set(NOW.plus(Duration.ofDays(3)));
+        RatingOption changed = ratingService.rate(USER_ID, sessionId, new RateRequest(Rating.AGAIN));
+
+        // 按原来的评分时间计算：“忘了”至少隔一天（决策 003），是 11 月 3 日；今天已经是 11 月 5 日，前端显示“今天”
+        assertThat(changed.date()).isEqualTo(LocalDate.of(2026, 11, 3));
+        assertThat(changed.days()).isEqualTo(-2);
+        assertThat(reviewLogMapper.selectOne(null).getReviewedAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    void 之后又复习过的会话不能预览也不能修改() {
+        long first = session(SessionType.STUDY, true);
+        ratingService.rate(USER_ID, first, new RateRequest(Rating.GOOD));
+        long second = session(SessionType.STUDY, true);
+        ratingService.rate(USER_ID, second, new RateRequest(Rating.GOOD));
+
+        assertError(() -> ratingService.preview(USER_ID, first), ErrorCode.CONFLICT);
+        assertError(() -> ratingService.rate(USER_ID, first, new RateRequest(Rating.EASY)), ErrorCode.CONFLICT);
     }
 
     @Test

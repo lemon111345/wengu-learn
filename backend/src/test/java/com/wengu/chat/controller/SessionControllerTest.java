@@ -153,6 +153,19 @@ class SessionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.rating").value("GOOD"))
                 .andExpect(jsonPath("$.data.days").isNumber());
+
+        // 评过分后可以修改（决策 039）：会话上标明能改，预览照常，再次提交就是修改
+        mockMvc.perform(get("/api/sessions/" + sessionId).session(login))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rating.rating").value("GOOD"))
+                .andExpect(jsonPath("$.data.ratingEditable").value(true));
+        mockMvc.perform(get("/api/sessions/" + sessionId + "/rating-preview").session(login))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(4));
+        mockMvc.perform(post("/api/sessions/" + sessionId + "/rating").session(login).with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"rating\":\"EASY\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rating").value("EASY"));
     }
 
     @Test
