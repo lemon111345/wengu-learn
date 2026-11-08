@@ -4,6 +4,7 @@
 // 编辑先改在本地副本上，“保存修改”时一起提交。“恢复 AI 版本”只把原文填回编辑框，保存后才生效（决策 029）。
 // 删除由页面处理：批量删除也要撤销，两处共用一个撤销提示
 import { computed, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ApiError } from '@/api/http'
 import {
@@ -25,6 +26,7 @@ const emit = defineEmits<{
   changed: []
   delete: [id: number]
 }>()
+const router = useRouter()
 
 const detail = ref<KnowledgePointDetail | null>(null)
 const loadError = ref<string | null>(null)
@@ -155,6 +157,8 @@ function toggleSuspend() {
       <div class="state">
         <MasteryDot :mastery="detail.mastery" />{{ masteryLabels[detail.mastery] }}
         <span class="next">{{ nextLabel }}</span>
+        <!-- 只有待学的能开始学（#81）。有没保存的修改时，页面离开前的确认弹窗同样会问 -->
+        <el-button v-if="detail.mastery === 'NEW'" @click="router.push(`/study/${detail!.id}`)">开始学</el-button>
       </div>
 
       <div class="field">
