@@ -12,6 +12,8 @@ import java.time.Instant;
  * @param ratingAi    AI 建议的评分；建议还没生成时为空
  * @param firstReview 是否为第一次学习（新学），否则是复习
  * @param reviewedAt  评分时间
+ * @param sessionId   这次学习的会话，回顾时打开它（#82）；没有时为 null
  */
-public record ReviewRecord(long kpId, Rating rating, Rating ratingAi, boolean firstReview, Instant reviewedAt) {
+public record ReviewRecord(long kpId, Rating rating, Rating ratingAi, boolean firstReview, Instant reviewedAt,
+                           Long sessionId) {
 }

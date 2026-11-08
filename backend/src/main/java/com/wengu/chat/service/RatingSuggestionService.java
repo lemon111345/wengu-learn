@@ -107,6 +107,17 @@ public class RatingSuggestionService {
         return view(suggestion);
     }
 
+    /**
+     * 已经生成的评分建议，没有时为 null。只读，不调用模型：回顾当时的学习用（#82）。
+     *
+     * @throws BusinessException 会话不存在或不属于该用户时为 NOT_FOUND
+     */
+    public RatingSuggestionView saved(long userId, long sessionId) {
+        sessions.find(userId, sessionId);
+        RatingSuggestion saved = suggestionMapper.selectById(sessionId);
+        return saved == null ? null : view(saved);
+    }
+
     /** 这次学习的评分建议中“没掌握的”，还没有生成建议时为空。复习时针对它们提问（#21） */
     List<String> weakPoints(long sessionId) {
         RatingSuggestion saved = suggestionMapper.selectById(sessionId);

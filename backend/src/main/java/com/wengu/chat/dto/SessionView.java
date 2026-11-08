@@ -14,10 +14,11 @@ import java.util.List;
  * @param generating         老师是否正在回复；刷新时为 true 说明上一条回复还在后台生成，稍后再取
  * @param activeSeconds      有效时长（秒），学习页顶栏的“本次 X 分钟”
  * @param rating             学习会话已经评过分时，评分和下次复习的学习日；没评分、接着问时为 null
- * @param ratingEditable     已经评过分时，这次评分还能不能修改；没评分、接着问时为 false（决策 039）
+ * @param ratingEditable     已经评过分时，这次评分还能不能修改；没评分、接着问、知识点已合并或删除时为 false（决策 039）
+ * @param followUpSessionId  学习会话的接着问会话，回顾时用；没有接着问时为 null（#82）
  * @param messages           按时间排列
  */
 public record SessionView(long id, SessionType type, Long kpId, Long parentSessionId, String kpTitle, boolean ended,
                           boolean skippedExplanation, boolean generating, int activeSeconds, RatingOption rating,
-                          boolean ratingEditable, List<MessageView> messages) {
+                          boolean ratingEditable, Long followUpSessionId, List<MessageView> messages) {
 }

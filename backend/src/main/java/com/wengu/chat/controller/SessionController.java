@@ -68,6 +68,12 @@ public class SessionController {
         return Result.ok(ratingSuggestionService.suggest(currentUser.id(), id));
     }
 
+    /** 已经生成的 AI 评分建议，没有时 data 为 null。只读，不调用模型，回顾时用（#82）。 */
+    @GetMapping("/{id}/rating-suggestion")
+    public Result<RatingSuggestionView> savedRatingSuggestion(@PathVariable long id) {
+        return Result.ok(ratingSuggestionService.saved(currentUser.id(), id));
+    }
+
     /** 评分预览：四种评分分别对应的下次复习日期（学习日和距今天几天），不保存。 */
     @GetMapping("/{id}/rating-preview")
     public Result<List<RatingOption>> ratingPreview(@PathVariable long id) {

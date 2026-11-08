@@ -158,7 +158,12 @@ class SessionControllerTest {
         mockMvc.perform(get("/api/sessions/" + sessionId).session(login))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.rating.rating").value("GOOD"))
-                .andExpect(jsonPath("$.data.ratingEditable").value(true));
+                .andExpect(jsonPath("$.data.ratingEditable").value(true))
+                .andExpect(jsonPath("$.data.followUpSessionId").isNumber());
+        // 回顾时只读 AI 建议：这里没有生成过，data 为空，也不调用模型（#82）
+        mockMvc.perform(get("/api/sessions/" + sessionId + "/rating-suggestion").session(login))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").doesNotExist());
         mockMvc.perform(get("/api/sessions/" + sessionId + "/rating-preview").session(login))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.length()").value(4));

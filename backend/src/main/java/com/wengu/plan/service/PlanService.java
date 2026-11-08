@@ -174,7 +174,7 @@ public class PlanService {
                 .filter(r -> kps.containsKey(r.kpId()))
                 .map(r -> {
                     KnowledgePointSummary kp = kps.get(r.kpId());
-                    return new CompletedItem(kp.id(), kp.title(), kp.type(), r.rating(), r.firstReview());
+                    return new CompletedItem(kp.id(), kp.title(), kp.type(), r.rating(), r.firstReview(), r.sessionId());
                 })
                 .toList();
     }

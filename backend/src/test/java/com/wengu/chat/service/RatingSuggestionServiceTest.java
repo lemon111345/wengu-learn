@@ -127,6 +127,23 @@ class RatingSuggestionServiceTest {
     }
 
     @Test
+    void 只读查询返回存好的建议_没有时为空且不调用模型() {
+        long sessionId = session(SessionType.STUDY, true);
+
+        assertThat(suggestionService.saved(USER_ID, sessionId)).isNull();
+        verify(llmService, times(0)).call(anyString(), anyString(), eq(RatingSuggestionResult.class), any());
+        assertThat(suggestionMapper.selectCount(null)).isZero();
+
+        modelReturns(new RatingSuggestionResult("依据", List.of(), Rating.GOOD, List.of("漏了重排序")));
+        suggestionService.suggest(USER_ID, sessionId);
+
+        assertThat(suggestionService.saved(USER_ID, sessionId).rating()).isEqualTo(Rating.GOOD);
+        assertThat(suggestionService.saved(USER_ID, sessionId).weakPoints()).containsExactly("漏了重排序");
+        verify(llmService, times(1)).call(anyString(), anyString(), eq(RatingSuggestionResult.class), any());
+        assertThatThrownBy(() -> suggestionService.saved(2, sessionId)).isInstanceOf(BusinessException.class);
+    }
+
+    @Test
     void 模型调用失败时提示中带上原因() {
         long sessionId = session(SessionType.STUDY, true);
         when(llmService.call(anyString(), anyString(), eq(RatingSuggestionResult.class), any()))

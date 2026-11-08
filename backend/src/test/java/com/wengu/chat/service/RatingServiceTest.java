@@ -4,6 +4,7 @@ import com.wengu.MutableClock;
 import com.wengu.TestcontainersConfiguration;
 import com.wengu.chat.dto.RateRequest;
 import com.wengu.chat.dto.RatingOption;
+import com.wengu.chat.dto.SessionView;
 import com.wengu.chat.entity.RatingSuggestion;
 import com.wengu.chat.entity.SessionType;
 import com.wengu.chat.entity.StudySession;
@@ -68,6 +69,9 @@ class RatingServiceTest {
 
     @Autowired
     private ReviewService reviewService;
+
+    @Autowired
+    private StudySessionService sessionService;
 
     @Autowired
     private UserSettingsService settingsService;
@@ -243,6 +247,20 @@ class RatingServiceTest {
 
         assertError(() -> ratingService.preview(USER_ID, first), ErrorCode.CONFLICT);
         assertError(() -> ratingService.rate(USER_ID, first, new RateRequest(Rating.EASY)), ErrorCode.CONFLICT);
+    }
+
+    @Test
+    void 知识点被合并后还能取到标题但不能改分() {
+        long sessionId = session(SessionType.STUDY, true);
+        ratingService.rate(USER_ID, sessionId, new RateRequest(Rating.GOOD));
+        assertThat(sessionService.get(USER_ID, sessionId).ratingEditable()).isTrue();
+
+        jdbc.update("UPDATE knowledge_point SET deleted_at = NOW(3) WHERE id = ?", kpId);
+
+        SessionView view = sessionService.get(USER_ID, sessionId);
+        assertThat(view.kpTitle()).isEqualTo("什么是 volatile？");
+        assertThat(view.ratingEditable()).isFalse();
+        assertThat(view.rating().rating()).isEqualTo(Rating.GOOD);
     }
 
     @Test

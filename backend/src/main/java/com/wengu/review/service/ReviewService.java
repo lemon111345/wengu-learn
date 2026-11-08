@@ -336,13 +336,13 @@ public class ReviewService {
     private static LambdaQueryWrapper<ReviewLog> recordQuery(long userId) {
         return new LambdaQueryWrapper<ReviewLog>()
                 .select(ReviewLog::getKpId, ReviewLog::getRatingUser, ReviewLog::getRatingAi,
-                        ReviewLog::getFirstReview, ReviewLog::getReviewedAt)
+                        ReviewLog::getFirstReview, ReviewLog::getReviewedAt, ReviewLog::getSessionId)
                 .eq(ReviewLog::getUserId, userId);
     }
 
     private static ReviewRecord toRecord(ReviewLog log) {
         return new ReviewRecord(log.getKpId(), log.getRatingUser(), log.getRatingAi(), log.getFirstReview(),
-                log.getReviewedAt());
+                log.getReviewedAt(), log.getSessionId());
     }
 
     /**
