@@ -145,7 +145,7 @@ class FollowUpTest {
 
         ArgumentCaptor<String> system = ArgumentCaptor.forClass(String.class);
         verify(llmService, atLeastOnce()).stream(system.capture(), anyList(), any());
-        assertThat(system.getValue()).startsWith(FollowUpPrompt.system()).contains("学生称呼你为“小明”");
+        assertThat(system.getValue()).startsWith(FollowUpPrompt.system()).contains("你在这段对话中的称呼是“小明”");
     }
 
     private static void assertError(Runnable call, ErrorCode code) {

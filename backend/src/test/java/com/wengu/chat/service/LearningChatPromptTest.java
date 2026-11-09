@@ -37,7 +37,7 @@ class LearningChatPromptTest {
     void 换了称呼时在system_prompt末尾说明() {
         assertThat(LearningChatPrompt.withTeacherName("原来的提示", "小明"))
                 .startsWith("原来的提示\n\n")
-                .contains("学生称呼你为“小明”，需要自称时用这个称呼");
+                .contains("你在这段对话中的称呼是“小明”，这是你的称呼，不是学生的名字");
     }
 
     @Test

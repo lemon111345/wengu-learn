@@ -61,7 +61,9 @@ final class LearningChatPrompt {
         if (UserSettingsService.DEFAULT_TEACHER_NAME.equals(teacherName)) {
             return system;
         }
-        return system + "\n\n学生称呼你为“" + teacherName + "”，需要自称时用这个称呼，讲解方式和规则都不变。\n";
+        // 要写明“不是学生的名字”：只说“学生称呼你为 X”时，模型实测会用 X 称呼学生（决策 042）
+        return system + "\n\n你在这段对话中的称呼是“" + teacherName + "”，这是你的称呼，不是学生的名字。"
+                + "需要自称时用它，不要用它称呼学生；讲解方式和规则都不变。\n";
     }
 
     /** 读取 classpath 下的 prompt 文件，接着问的 prompt 也用它。 */

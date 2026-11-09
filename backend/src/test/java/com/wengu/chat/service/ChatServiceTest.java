@@ -171,7 +171,7 @@ class ChatServiceTest {
         modelReplies("你知道负载因子吗？");
         collect(chatService.reply(USER_ID, sessionId));
 
-        assertThat(lastSystemPrompt()).startsWith(LearningChatPrompt.system()).contains("学生称呼你为“小明”");
+        assertThat(lastSystemPrompt()).startsWith(LearningChatPrompt.system()).contains("你在这段对话中的称呼是“小明”");
         assertThat(sessionService.get(USER_ID, sessionId).teacherName()).isEqualTo("小明");
     }
 
