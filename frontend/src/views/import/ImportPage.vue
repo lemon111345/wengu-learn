@@ -16,13 +16,17 @@ import {
 } from '@/api/sources'
 import PageHeader from '@/components/PageHeader.vue'
 import { modKeyLabel, useShortcut } from '@/shortcuts/useShortcut'
+import ImageUploader from './ImageUploader.vue'
 import ImportSidebar from './ImportSidebar.vue'
 import ImportSteps from './ImportSteps.vue'
 
 const router = useRouter()
 
-/** 粘贴文本还是上传文件 */
-const mode = ref<'paste' | 'upload'>('paste')
+/** 粘贴文本、上传文件还是截图。截图识别完切回粘贴文本，用户核对后再识别题目（决策 044） */
+const mode = ref<'paste' | 'upload' | 'image'>('paste')
+const uploader = ref<InstanceType<typeof ImageUploader> | null>(null)
+/** 内容框里的文字刚从截图识别出来，提示用户核对 */
+const recognizedFromImages = ref(false)
 /** 资料类型（#26，决策 037）：题目清单从原文中识别题目，讲解资料根据内容整理题目 */
 const type = ref<SourceType>('QUESTION')
 const name = ref('')
@@ -51,6 +55,22 @@ function pickFile(event: Event) {
   }
   file.value = picked
   error.value = null
+}
+
+function selectMode(value: typeof mode.value) {
+  mode.value = value
+  error.value = null
+  recognizedFromImages.value = false
+}
+
+/** 截图识别好了：文字填进内容框（已有内容时追加在后面，可以分几批截图），用户核对后和粘贴的一样继续 */
+function onImagesRecognized(text: string) {
+  content.value = content.value.trim() === '' ? text : `${content.value.trimEnd()}\n\n${text}`
+  if (name.value.trim() === '') {
+    name.value = '截图导入'
+  }
+  selectMode('paste')
+  recognizedFromImages.value = true
 }
 
 function formatSize(bytes: number): string {
@@ -128,7 +148,7 @@ async function startExtraction() {
 // 第 1 步 Ctrl Enter 识别（焦点在输入框中也生效）；第 2 步 Enter 开始抽取
 useShortcut('Mod+Enter', () => {
   if (step.value === 1) {
-    void recognize()
+    void (mode.value === 'image' ? uploader.value?.submit() : recognize())
   }
 })
 useShortcut('Enter', () => {
@@ -148,14 +168,14 @@ useShortcut('Enter', () => {
       <section v-if="!source" class="panel">
         <div class="segmented" role="tablist" aria-label="导入方式">
           <button
-            v-for="m in [{ value: 'paste', label: '粘贴文本' }, { value: 'upload', label: '上传文件' }] as const"
+            v-for="m in [{ value: 'paste', label: '粘贴文本' }, { value: 'upload', label: '上传文件' }, { value: 'image', label: '截图' }] as const"
             :key="m.value"
             type="button"
             role="tab"
             class="segment"
             :class="{ active: mode === m.value }"
             :aria-selected="mode === m.value"
-            @click="(mode = m.value), (error = null)"
+            @click="selectMode(m.value)"
           >
             {{ m.label }}
           </button>
@@ -189,12 +209,13 @@ useShortcut('Enter', () => {
           <el-input
             id="source-name"
             v-model="name"
-            :placeholder="mode === 'upload' ? '不填时用文件名' : isDocument ? '如：线程池学习笔记' : '如：Java 后端面试题（第一批）'"
+            :placeholder="mode === 'upload' ? '不填时用文件名' : mode === 'image' ? '不填时写“截图导入”' : isDocument ? '如：线程池学习笔记' : '如：Java 后端面试题（第一批）'"
             maxlength="255"
           />
         </div>
         <div v-if="mode === 'paste'" class="field">
           <label for="source-content">内容</label>
+          <p v-if="recognizedFromImages" class="recognized">识别好了，核对一下，错的地方可以直接改</p>
           <el-input
             id="source-content"
             v-model="content"
@@ -204,6 +225,7 @@ useShortcut('Enter', () => {
             :placeholder="isDocument ? '把笔记或文章粘贴到这里' : '把面试题粘贴到这里'"
           />
         </div>
+        <ImageUploader v-else-if="mode === 'image'" ref="uploader" @recognized="onImagesRecognized" />
         <div v-else class="field">
           <span class="label">文件</span>
           <input ref="fileInput" type="file" class="file-input" :accept="UPLOAD_ACCEPT" @change="pickFile" />
@@ -215,15 +237,18 @@ useShortcut('Enter', () => {
           <el-button v-else class="pick" @click="fileInput?.click()">选择文件</el-button>
           <p class="hint">支持 PDF、Word（.docx）、Markdown 和 txt，最大 10 MB。扫描件（图片）的 PDF 暂不支持。</p>
         </div>
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <div class="row">
-          <el-button type="primary" class="primary" :loading="busy" @click="recognize">
-            {{ verb }}题目<kbd>{{ modKeyLabel }} Enter</kbd>
-          </el-button>
-          <span v-if="busy" class="hint">
-            {{ isDocument ? '正在根据内容整理题目，资料长时要一两分钟' : '正在识别题目，题目多时要一两分钟' }}
-          </span>
-        </div>
+        <!-- 截图有自己的主按钮：先识别文字，核对后才识别题目 -->
+        <template v-if="mode !== 'image'">
+          <p v-if="error" class="error" role="alert">{{ error }}</p>
+          <div class="row">
+            <el-button type="primary" class="primary" :loading="busy" @click="recognize">
+              {{ verb }}题目<kbd>{{ modKeyLabel }} Enter</kbd>
+            </el-button>
+            <span v-if="busy" class="hint">
+              {{ isDocument ? '正在根据内容整理题目，资料长时要一两分钟' : '正在识别题目，题目多时要一两分钟' }}
+            </span>
+          </div>
+        </template>
       </section>
 
       <!-- 第 2 步：确认题目 -->
@@ -396,6 +421,11 @@ label,
 
 .error {
   color: var(--wg-warn);
+  font-size: 14px;
+}
+
+.recognized {
+  color: var(--wg-success);
   font-size: 14px;
 }
 
