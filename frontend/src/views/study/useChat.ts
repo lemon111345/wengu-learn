@@ -58,7 +58,7 @@ export function useChat(sessionId: () => number) {
   function showRetryIfReplyLost() {
     const s = session.value
     if (s && !s.ended && !s.generating && s.messages.at(-1)?.role === 'USER' && !error.value?.retryable) {
-      error.value = { message: '老师这条回复没有生成出来，可以点重试', retryable: true }
+      error.value = { message: `${s.teacherName}这条回复没有生成出来，可以点重试`, retryable: true }
     }
   }
 
