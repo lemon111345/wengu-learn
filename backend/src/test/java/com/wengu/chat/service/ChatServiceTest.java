@@ -97,6 +97,9 @@ class ChatServiceTest {
     @BeforeEach
     void reset() {
         ((MutableClock) clock).set(NOW);
+        jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
+                + " VALUES (1, 3, 'Asia/Shanghai', 4)");
+        jdbc.update("UPDATE user_settings SET teacher_name = '老师' WHERE user_id = 1");
         messageMapper.delete(null);
         sessionMapper.delete(null);
         knowledgePointMapper.delete(null);
@@ -145,6 +148,31 @@ class ChatServiceTest {
     private static void assertError(Runnable call, ErrorCode code) {
         assertThatThrownBy(call::run).isInstanceOfSatisfying(BusinessException.class,
                 e -> assertThat(e.getErrorCode()).isEqualTo(code));
+    }
+
+    private String lastSystemPrompt() {
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, atLeastOnce()).stream(captor.capture(), anyList(), any());
+        return captor.getValue();
+    }
+
+    @Test
+    void 默认称呼时system_prompt和文件完全相同() {
+        modelReplies("你知道负载因子吗？");
+        collect(chatService.reply(USER_ID, sessionId));
+
+        assertThat(lastSystemPrompt()).isEqualTo(LearningChatPrompt.system());
+        assertThat(sessionService.get(USER_ID, sessionId).teacherName()).isEqualTo("老师");
+    }
+
+    @Test
+    void 换了称呼后模型和界面都用新称呼() {
+        jdbc.update("UPDATE user_settings SET teacher_name = '小明' WHERE user_id = 1");
+        modelReplies("你知道负载因子吗？");
+        collect(chatService.reply(USER_ID, sessionId));
+
+        assertThat(lastSystemPrompt()).startsWith(LearningChatPrompt.system()).contains("学生称呼你为“小明”");
+        assertThat(sessionService.get(USER_ID, sessionId).teacherName()).isEqualTo("小明");
     }
 
     @Test

@@ -243,7 +243,8 @@ public class StudySessionService {
         return new SessionView(session.getId(), session.getType(), session.getKpId(), session.getParentSessionId(), kpTitle,
                 session.getEndedAt() != null, Boolean.TRUE.equals(session.getSkippedExplanation()),
                 isGenerating(session.getId()), session.getActiveSeconds(), rating(session),
-                kpExists && reviewService.isRatingChangeable(session.getId()), followUpSessionId(session), messages);
+                kpExists && reviewService.isRatingChangeable(session.getId()), followUpSessionId(session), messages,
+                settingsService.get(session.getUserId()).teacherName());
     }
 
     private StudySession findFollowUp(long studySessionId) {

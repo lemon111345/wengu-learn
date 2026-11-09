@@ -26,6 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import reactor.core.publisher.Flux;
@@ -82,11 +83,17 @@ class FollowUpTest {
     @Autowired
     private KnowledgePointMapper knowledgePointMapper;
 
+    @Autowired
+    private JdbcTemplate jdbc;
+
     private long studyId;
 
     @BeforeEach
     void reset() {
         ((MutableClock) clock).set(NOW);
+        jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
+                + " VALUES (1, 3, 'Asia/Shanghai', 4)");
+        jdbc.update("UPDATE user_settings SET teacher_name = '老师' WHERE user_id = 1");
         messageMapper.delete(null);
         sessionMapper.delete(null);
         knowledgePointMapper.delete(null);
@@ -125,6 +132,20 @@ class FollowUpTest {
         ArgumentCaptor<List<ChatTurn>> captor = ArgumentCaptor.forClass(List.class);
         verify(llmService, atLeastOnce()).stream(anyString(), captor.capture(), any());
         return captor.getValue();
+    }
+
+    @Test
+    void 接着问也用新称呼() {
+        finishStudy();
+        jdbc.update("UPDATE user_settings SET teacher_name = '小明' WHERE user_id = 1");
+        long followUpId = sessionService.startFollowUp(USER_ID, studyId).id();
+        modelReplies("负载因子是 0.75。");
+
+        collect(chatService.send(USER_ID, followUpId, new SendMessageRequest("为什么是 0.75？")));
+
+        ArgumentCaptor<String> system = ArgumentCaptor.forClass(String.class);
+        verify(llmService, atLeastOnce()).stream(system.capture(), anyList(), any());
+        assertThat(system.getValue()).startsWith(FollowUpPrompt.system()).contains("学生称呼你为“小明”");
     }
 
     private static void assertError(Runnable call, ErrorCode code) {

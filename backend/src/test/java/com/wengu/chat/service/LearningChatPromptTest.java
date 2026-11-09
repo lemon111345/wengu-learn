@@ -29,6 +29,18 @@ class LearningChatPromptTest {
     }
 
     @Test
+    void 默认称呼时system_prompt一个字都不变() {
+        assertThat(LearningChatPrompt.withTeacherName("原来的提示", "老师")).isEqualTo("原来的提示");
+    }
+
+    @Test
+    void 换了称呼时在system_prompt末尾说明() {
+        assertThat(LearningChatPrompt.withTeacherName("原来的提示", "小明"))
+                .startsWith("原来的提示\n\n")
+                .contains("学生称呼你为“小明”，需要自称时用这个称呼");
+    }
+
+    @Test
     void 第一条消息是知识点信息() {
         assertThat(LearningChatPrompt.kickoff(MATERIAL)).isEqualTo("""
                 知识点标题：HashMap 的扩容机制是怎样的？

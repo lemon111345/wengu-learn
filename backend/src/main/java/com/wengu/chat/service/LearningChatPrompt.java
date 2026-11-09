@@ -5,6 +5,7 @@ import com.wengu.chat.entity.MessageRole;
 import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.llm.dto.ChatTurn;
 import com.wengu.review.fsrs.Rating;
+import com.wengu.user.service.UserSettingsService;
 import org.springframework.core.io.ClassPathResource;
 
 import java.io.IOException;
@@ -50,6 +51,17 @@ final class LearningChatPrompt {
 
     static String system() {
         return load(PROMPT_PATH);
+    }
+
+    /**
+     * 用户换了老师的称呼时，在 system prompt 末尾说明，接着问的 prompt 也用它（决策 042）。
+     * 默认称呼时原样返回，发给模型的内容一个字都不变，prompt 的实验结果仍然有效。
+     */
+    static String withTeacherName(String system, String teacherName) {
+        if (UserSettingsService.DEFAULT_TEACHER_NAME.equals(teacherName)) {
+            return system;
+        }
+        return system + "\n\n学生称呼你为“" + teacherName + "”，需要自称时用这个称呼，讲解方式和规则都不变。\n";
     }
 
     /** 读取 classpath 下的 prompt 文件，接着问的 prompt 也用它。 */
