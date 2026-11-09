@@ -6,6 +6,14 @@ spring:
     url: ${WENGU_DB_URL:jdbc:mysql://localhost:3307/wengu?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true}
     username: ${WENGU_DB_USERNAME:wengu}
     password: ${WENGU_DB_PASSWORD:wengu}
+  session:
+    # 必须显式配置：只配 server.servlet.session.timeout 对 Spring Session 不生效，Redis 中的 TTL 是默认的 30 分钟
+    timeout: ${server.servlet.session.timeout}
+  data:
+    redis:
+      # 登录状态存在这里（决策 040）。默认连接仓库根目录 compose.yaml 启动的 Redis
+      host: ${WENGU_REDIS_HOST:localhost}
+      port: ${WENGU_REDIS_PORT:6380}
   flyway:
     placeholders:
       # V1 插入默认用户时用的时区。V1 已经执行过的库不再用到它；空库仍然从 V1 开始执行，所以要保留
@@ -53,7 +61,7 @@ server:
   port: 8080
   servlet:
     session:
-      # 登录凭证是服务端 Session（决策 022）。默认 30 分钟不操作就失效，每天打开都要重新登录，改为 30 天
+      # 登录凭证是服务端 Session（决策 022、040）。默认 30 分钟不操作就失效，每天打开都要重新登录，改为 30 天
       timeout: 30d
       cookie:
         # 跨站的页面发起的 POST 不带这个 Cookie，和 CSRF 令牌一起防伪造请求
