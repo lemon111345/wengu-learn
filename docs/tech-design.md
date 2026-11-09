@@ -136,7 +136,7 @@ frontend/src
 | 表 | 作用 | 关键字段 |
 | --- | --- | --- |
 | user | 用户 | id、username（唯一，按数据库排序规则比较，不区分大小写）、password_hash（bcrypt，带 `{bcrypt}` 前缀，见决策 022） |
-| user_settings | 用户设置 | user_id、daily_new_limit（每天学几个，含复习，默认 5；列名沿用，见决策 016 的修订）、timezone（注册时取浏览器时区，读不到或不合法时用环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点） |
+| user_settings | 用户设置 | user_id、daily_new_limit（每天学几个，含复习，默认 5；列名沿用，见决策 016 的修订）、timezone（注册时取浏览器时区，读不到或不合法时用环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点）、teacher_name（老师的称呼，默认“老师”，V14，见决策 042） |
 | source | 导入的学习材料 | id、user_id、type（QUESTION 题目清单 / DOCUMENT 讲解资料，#26；源码、截图以后添加）、name、content（用户粘贴的原文，包括答案；上传的文件存提取出的文字）、questions（识别或整理出的题目 JSON，V2 添加，见决策 011、037） |
 | knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（ACTIVE / SUSPENDED）、sort_order（新知识按 sort_order、id 派发；确认草稿时接在已有知识点之后）、draft_item_id（来自哪个草稿条目，V6 添加，见决策 015）、deleted_at（软删除，为空表示没删）、merged_into（被合并时指向主知识点，同时写 deleted_at）（V11 添加，见决策 029） |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id、user_id |
@@ -344,8 +344,8 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `POST /api/knowledge-points/shuffle-pending` | 打乱待学的顺序（#77） | — | `{count}` | 待学的范围和知识库的“待学”一致（没学过、没暂停、没删除、参与调度）。按“来源资料 + 题号”分组（一个条目来自多道题时用最小的题号，找不到来源题的单独成组），只打乱组与组之间的顺序，组内先后不变；在这些知识点原来占用的 sort_order 之间重新分配，学过的不受影响。没有待学时 count 为 0。不能恢复 |
 | `POST /api/knowledge-points/merge` | 合并（#25） | `{primaryId, mergedIds}` | — | 主知识点的标题、要点、复习进度不变；被合并的来源并到主知识点，然后软删除、merged_into 指向主知识点，之前并进它们的也改指向主知识点；学习记录不搬；不能撤销。没有选择或 mergedIds 包含主知识点 400；有一个不存在、不属于当前用户或已删除 404。见决策 029 |
 | `GET /api/plan/today` | 今天的计划（#18、#48、#49、#19、#52） | — | `{date, dailyNewLimit, newLearnedToday, reviews: [{kpId, title, type}], newItems: [...], completed: [{kpId, title, type, rating, firstReview, sessionId}], upcomingReviews: [{date, count}], knowledgePointCount, studiedMinutesToday, daysToFinish, currentStreak, studiedMinutesThisWeek}` | 实时计算：先复习后新学，各自按学习顺序；到期复习全部列出，新知识只补足 dailyNewLimit（每天学几个，含复习）剩下的名额；date 是学习日（按时区和 day_start_hour）。completed 是今天已完成的，按完成时间排列，同一知识点取最后一次评分（sessionId 也是那一次的，回顾时用），暂停的也在内；upcomingReviews 是从明天起 7 个学习日每天到期的复习数，今天和已过期的在 reviews 中，不算暂停的。knowledgePointCount 是知识点总数（暂停的、不参与调度的也算），为 0 时今天页显示空状态：只看上面几个列表会把“都在很多天后到期”“只有只收录的”误判为空。studiedMinutesToday 是今天学习日内开始的会话的有效时长之和（分钟，不足一分钟舍去）。daysToFinish 是假设之后的名额都用来新学，至少还要几个学习日学完全部待学的新知识（不含暂停的）；每天学几个为 0 或没有待学时为 null。#85 起界面不再使用，接口约定不删除字段，所以保留。currentStreak 是连续学习天数，口径见决策 020；studiedMinutesThisWeek 是本周（从周一的学习日开始）开始的会话的有效时长之和，取整方式和 studiedMinutesToday 相同。见决策 016、024、025、041 |
-| `POST /api/sessions` | 开始学习一个知识点（#19、#23） | `{kpId}` | `{id, type, kpId, parentSessionId, kpTitle, ended, skippedExplanation, generating, activeSeconds, rating, ratingEditable, followUpSessionId, messages: [{id, role, content, marker, createdAt}]}` | 只创建会话，不调用模型，老师的第一句由 reply 生成；这个知识点最近的会话还没走完时返回那个会话：没结束的接着学，学完但还没评分的回去评分。知识点不存在 404，只收录的类型 400。见决策 025、027 |
-| `GET /api/sessions/{id}` | 会话和全部消息，刷新后恢复（#19、#23） | — | 同上 | messages 不含发给模型的知识点信息和附加提示；generating 为 true 表示上一条回复还在后台生成；activeSeconds 是有效时长；rating 是已评的分 `{rating, date, days}`，没评分或接着问时为 null；ratingEditable 是这次评分还能不能修改，没评分、接着问、知识点已合并或删除时为 false（决策 039）；followUpSessionId 是学习会话的接着问会话，只查不建，没有时为 null（#82）；知识点已合并或删除时 kpTitle 照常返回。不存在或不属于当前用户 404 |
+| `POST /api/sessions` | 开始学习一个知识点（#19、#23） | `{kpId}` | `{id, type, kpId, parentSessionId, kpTitle, ended, skippedExplanation, generating, activeSeconds, rating, ratingEditable, followUpSessionId, messages: [{id, role, content, marker, createdAt}], teacherName}` | 只创建会话，不调用模型，老师的第一句由 reply 生成；这个知识点最近的会话还没走完时返回那个会话：没结束的接着学，学完但还没评分的回去评分。知识点不存在 404，只收录的类型 400。见决策 025、027 |
+| `GET /api/sessions/{id}` | 会话和全部消息，刷新后恢复（#19、#23） | — | 同上 | messages 不含发给模型的知识点信息和附加提示；generating 为 true 表示上一条回复还在后台生成；activeSeconds 是有效时长；rating 是已评的分 `{rating, date, days}`，没评分或接着问时为 null；ratingEditable 是这次评分还能不能修改，没评分、接着问、知识点已合并或删除时为 false（决策 039）；followUpSessionId 是学习会话的接着问会话，只查不建，没有时为 null（#82）；知识点已合并或删除时 kpTitle 照常返回；teacherName 是用户现在设置的老师称呼（决策 042）。不存在或不属于当前用户 404 |
 | `POST /api/sessions/{id}/reply` | 生成老师的下一条回复：刚开始时的第一句，或出错后重试（#19） | — | `text/event-stream`：`delta {text}`、`done {messageId, marker, ended}`、`error {message}` | 已经轮到学生回答、会话已结束、正在生成时 409（统一格式的 JSON，不开始推送）。浏览器断开后回复照样生成完、存库。见决策 025 |
 | `POST /api/sessions/{id}/messages` | 学生回答，老师流式回复（#19） | `{content}` | 同上 | 内容为空或超过 5000 字 400；没轮到学生、会话已结束、正在生成时 409。第 7 次回答后要求完整作答，第 8 次后收尾，会话结束 |
 | `POST /api/sessions/{id}/skip-explanation` | “这个我会，直接完整作答”（#19） | — | 同上 | 对话中显示一条学生消息“这个我会，直接完整作答。”，会话记录 skippedExplanation；已经在完整作答时、接着问的会话 409 |
@@ -355,8 +355,8 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `GET /api/sessions/{id}/rating-preview` | 评分预览（#20） | — | `[{rating, date, days}]`，按 AGAIN、HARD、GOOD、EASY 排列 | date 是下次复习的学习日，days 是距今天几个学习日；不保存。已经评过分时按评分前的快照和原来的评分时间计算，days 可能为负。不是学习会话 400，还没学完或评分不能修改（ratingEditable 为 false）409。见决策 039 |
 | `POST /api/sessions/{id}/rating` | 确认或修改评分（#20、#84） | `{rating}` | `{rating, date, days}` | 没评过分时更新 card_state、写 review_log（AI 建议已生成时记下 rating_ai）；评过分时就是修改：恢复评分前的快照，用原来的评分时间按新评分重算，更新 card_state 和这条流水的 rating_user、due_after。日期和预览一致（fuzz 的随机数固定）。评分为空 400，不是学习会话 400，还没学完或评分不能修改 409。见决策 026、039 |
 | `GET /api/llm/status` | 模型状态（#27） | — | `{model, lastCall: {ok, code, message, at} \| null}` | 最近一次调用的结果，存在内存中，重启后为 null；所有用户共用一套模型配置，状态也是全局的。不返回服务地址和 Key，不为此真实调用模型。头像上的红点、设置页的 AI 模型卡片用它。见决策 032 |
-| `GET /api/settings` | 读取用户设置（#18） | — | `{timezone, dayStartHour, dailyNewLimit}` | |
-| `PATCH /api/settings` | 修改用户设置（#18） | 只传要改的字段，如 `{dailyNewLimit: 5}` | 同上 | timezone 为合法时区，dayStartHour 0～23，dailyNewLimit 0～50，否则 400；修改后立即生效。见决策 016 |
+| `GET /api/settings` | 读取用户设置（#18） | — | `{timezone, dayStartHour, dailyNewLimit, teacherName}` | |
+| `PATCH /api/settings` | 修改用户设置（#18） | 只传要改的字段，如 `{dailyNewLimit: 5}` | 同上 | timezone 为合法时区，dayStartHour 0～23，dailyNewLimit 0～50，teacherName 最多 10 个字、不含控制字符，否则 400；teacherName 为空白时恢复成“老师”；修改后立即生效。见决策 016、042 |
 | `GET /api/auth/registration` | 注册是否开放（#46），不需要登录 | — | `{open}` | 由 `WENGU_ALLOW_REGISTRATION` 控制，默认开放 |
 | `POST /api/auth/register` | 注册，并直接登录（#46），不需要登录 | `{username, password, timezone?}` | `{id, username}` | 用户名 2～32 个字符（中文、字母、数字、下划线、连字符），密码 8～64 个字符且不超过 72 字节，否则 400；用户名已被使用（不区分大小写）409 `USERNAME_TAKEN`；注册关闭 403 `REGISTRATION_CLOSED`。timezone 是浏览器时区，没有或不合法时用 `WENGU_TIMEZONE`；同时写入默认设置。见决策 017、022 |
 | `POST /api/auth/login` | 登录（#46），不需要登录 | `{username, password}` | `{id, username}` | 用户不存在和密码错误都返回 401 `LOGIN_FAILED`；登录后更换 Session id |
@@ -376,7 +376,6 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 
 | 表 | 需要的内容 | 来源 |
 | --- | --- | --- |
-| user_settings | 老师的称呼 | ui.md 5.10 |
 | extraction_draft / extraction_draft_item | 候选知识点的草稿：来源是学习会话；勾选与取消复用条目的 decision 字段（决策 015） | 决策 019 |
 
 **接口：**
