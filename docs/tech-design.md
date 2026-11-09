@@ -14,12 +14,12 @@ flowchart TB
         CTL[Controller · 接口与 SSE 推送] --> SVC[Service · 每日计划、FSRS、AI 对话]
         SVC --> MAP[Mapper · MyBatis-Plus]
     end
-    CTL --> RD[(Redis · 限流与额度计数)]
+    CTL --> RD[(Redis · 登录状态、限流与额度计数)]
     SVC --> LLM[大模型 · OpenAI 兼容接口或本地 Ollama]
     MAP --> DB[(MySQL · 事实数据)]
 ```
 
-Redis 在接口入口处做限流；调用大模型和 FSRS 调度都在 Service 层，AI 的回复由 Controller 通过 SSE 逐字推给浏览器。
+Redis 保存登录状态（决策 040），以后还要在接口入口处做限流；调用大模型和 FSRS 调度都在 Service 层，AI 的回复由 Controller 通过 SSE 逐字推给浏览器。
 
 ## 技术栈
 
@@ -31,13 +31,13 @@ Redis 在接口入口处做限流；调用大模型和 FSRS 调度都在 Service
 | 持久层 | MyBatis-Plus + MySQL 8.4，Flyway 管理表结构 | 熟悉；MVP 不需要向量检索；表结构随代码版本化，见 [决策 009](./decisions/009-数据库迁移与表结构约定.md) |
 | 测试数据库 | Testcontainers（MySQL 8.4） | 迁移脚本和时区处理要在真实的 MySQL 上测，H2 不可靠 |
 | 安全 | Spring Security | 始终启用，只有多用户模式，见 [决策 017](./decisions/017-只保留多用户模式.md)；凭证为服务端 Session，见 [决策 022](./decisions/022-登录凭证与认证.md) |
-| 缓存 / 计数 | Redis | 只用于 AI 接口限流、线上免费额度计数，不做过早缓存 |
+| 登录状态 / 计数 | Redis 7 + Spring Session | 现在保存登录状态，重启后端不用重新登录，见 [决策 040](./decisions/040-Session存进Redis.md)；以后用于 AI 接口限流、线上免费额度计数；不做过早缓存 |
 | 大模型接入 | Spring AI 2.0.1（OpenAI starter） | Spring 官方项目，用法与其他 starter 一致；兼容 OpenAI 格式与 Ollama，见 [决策 004](./decisions/004-大模型接入.md) |
 | 流式输出 | SSE | 单向推送，比 WebSocket 简单 |
 | 调度算法 | FSRS-6，从 py-fsrs 6.3.2 移植为 Java | 用 Python 版输出做单元测试校验，见 [决策 003](./decisions/003-FSRS移植.md) |
 | 文档解析 | Apache PDFBox 3.0.8、Apache POI 5.5.1 | PDF 与 DOCX 文字提取，见 [决策 037](./decisions/037-文档导入.md) |
 | 前端 | Vue 3 + TypeScript + Vite + Element Plus | 上手平缓；TS 是前端主流，静态类型对 Java 背景更友好，也让 AI 写的代码更好读、错误在编译时暴露 |
-| 部署 | Docker Compose + Nginx | 一条命令启动：mysql、backend、web（Nginx 提供前端并转发 /api）三个容器，多阶段构建，配置写在 `.env`；见 [决策 036](./decisions/036-Docker部署.md) |
+| 部署 | Docker Compose + Nginx | 一条命令启动：mysql、redis、backend、web（Nginx 提供前端并转发 /api）四个容器，多阶段构建，配置写在 `.env`；见 [决策 036](./decisions/036-Docker部署.md) |
 
 ## 包结构与分层约定
 
@@ -212,7 +212,7 @@ frontend/src
 | 今天页的补充数据放进每日计划接口：已完成的条目来自当天流水（暂停的也显示），接下来 7 天从明天起按学习日划分；草稿列表返回全部未确认的和最近 10 份已确认的 | 一次请求拿全今天页的数据，用同一个“现在”；今天到期和过期的已在复习列表里；旧的“等你确认”不会被挤出列表，见 [决策 024](./decisions/024-今天页的补充数据.md) | 另开接口；7 天包括今天；草稿列表只取最近 20 份 |
 | Flyway 管理表结构，字段随 issue 增量添加 | 空库启动即建好表，每次改动有记录；实现前不预先猜字段，见 [决策 009](./decisions/009-数据库迁移与表结构约定.md) | 手写 SQL 手动执行；V1 一次建好所有字段 |
 | “现在”从注入的 Clock 获取 | 测试中可以换成固定时间，覆盖“今天”的边界 | 直接调用 Instant.now() |
-| Redis 只用于限流和额度计数 | 这些场景需要高频读写计数器；每日计划无需缓存 | 缓存每日计划（过早优化） |
+| Redis 用于登录状态、限流和额度计数 | 登录状态要在重启后保留（决策 040）；限流和额度需要高频读写计数器；每日计划无需缓存 | 缓存每日计划（过早优化） |
 | 流式输出用 SSE | AI 回复是单向推送，SSE 实现简单 | WebSocket |
 | 抽取在后台执行：草稿下面挂批次，状态由批次推算；专用线程池显式提交；重启时未完成的批次标为失败，由用户重试 | 抽取要 1～3 分钟，不能挂着请求；分批不暴露给用户；重跑要花钱，不自动重跑，见 [决策 013](./decisions/013-异步抽取与分批.md) | 一批一份草稿；`@Async`；数据库轮询队列；重启后自动重跑 |
 | 题目切分交给模型：只输出题目原文，程序逐字核对，temperature 0；导入分两步，先预览再抽取 | 真实资料格式很乱（表格、带答案、网页复制），规则写不全；逐字核对能查出改写和编造，见 [决策 011](./decisions/011-题目切分交给模型.md) | 规则切分；切分合并进抽取 prompt |
