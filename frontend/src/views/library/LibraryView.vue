@@ -11,6 +11,7 @@ import {
   mergeKnowledgePoints,
   restoreKnowledgePoints,
   resumeKnowledgePoints,
+  shufflePendingKnowledgePoints,
   suspendKnowledgePoints,
   type LibrarySort,
   type LibraryView,
@@ -158,6 +159,37 @@ async function setStatusChecked(action: (ids: number[]) => Promise<unknown>, don
 const suspendChecked = () => setStatusChecked(suspendKnowledgePoints, '已暂停', '没有暂停成功，请重试')
 const resumeChecked = () => setStatusChecked(resumeKnowledgePoints, '已恢复', '没有恢复成功，请重试')
 
+// ---- 打乱待学顺序（#77） ----
+// 数量随类型筛选变化：筛选时只看得到一部分，而打乱的始终是全部待学的，所以按钮照常显示，弹窗不写数字
+const pendingCount = computed(() => library.value?.counts.NEW ?? 0)
+const canShuffle = computed(() => type.value !== null || pendingCount.value >= 2)
+
+async function shufflePending() {
+  if (busy.value) {
+    return
+  }
+  const target = type.value === null ? `${pendingCount.value} 个待学知识点` : '全部待学知识点'
+  try {
+    await ElMessageBox.confirm(
+      `把 ${target}的顺序打乱？同一道题拆出的知识点仍然在一起，学过的不受影响。今天还没学的新知识也会跟着换，打乱后不能恢复。`,
+      '打乱待学顺序',
+      { confirmButtonText: '打乱', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  busy.value = true
+  try {
+    const { count } = await shufflePendingKnowledgePoints()
+    ElMessage.success(`已打乱 ${count} 个待学知识点的顺序`)
+    await load()
+  } catch (e) {
+    ElMessage.error(e instanceof ApiError ? e.message : '没有打乱成功，请重试')
+  } finally {
+    busy.value = false
+  }
+}
+
 async function merge(primaryId: number) {
   const ids = [...checked.value.keys()]
   const mergedIds = ids.filter((id) => id !== primaryId)
@@ -286,6 +318,7 @@ onMounted(async () => {
         <span class="search-keys" aria-hidden="true"><kbd>{{ modKeyLabel }}</kbd><kbd>K</kbd></span>
       </template>
     </el-input>
+    <el-button v-if="canShuffle" :disabled="busy" @click="shufflePending">打乱待学顺序</el-button>
     <el-button type="primary" @click="router.push('/import')">导入资料</el-button>
   </PageHeader>
   <div v-if="loadError && !library" class="wg-page-body">

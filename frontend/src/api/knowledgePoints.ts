@@ -116,6 +116,11 @@ export function restoreKnowledgePoints(ids: number[]) {
   return post<void>('/api/knowledge-points/restore', { ids })
 }
 
+/** 打乱待学的顺序，同一道题拆出的保持相邻；不能恢复 */
+export function shufflePendingKnowledgePoints() {
+  return post<{ count: number }>('/api/knowledge-points/shuffle-pending')
+}
+
 /** 合并，不能撤销 */
 export function mergeKnowledgePoints(primaryId: number, mergedIds: number[]) {
   return post<void>('/api/knowledge-points/merge', { primaryId, mergedIds })
