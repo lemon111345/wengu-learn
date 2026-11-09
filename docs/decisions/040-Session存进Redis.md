@@ -18,6 +18,8 @@
 
 `spring.session.timeout` 必须写在配置里，取 `server.servlet.session.timeout` 的值。**只配置后者对 Spring Session 不生效**：`RedisSessionTest` 实测 Redis 中的 TTL 只有 30 分钟，不是 30 天。
 
+Cookie 设 `server.servlet.session.cookie.max-age: 400d`。不设的话是会话 Cookie，关闭浏览器后登录状态就丢了。Cookie 只在登录时写一次，之后的请求不会刷新，而 Redis 的 TTL 每次访问都会延长，所以 Max-Age 设成 Chrome 允许的上限 400 天，何时失效由 Redis 的“空闲 30 天”决定。Redis 中的 Session 过期后，浏览器里留下的 Cookie 就失效了，没有额外风险。代价是持续使用时，每 400 天要重新登录一次。
+
 ### 3. 读不出来的 Session 按未登录处理
 
 仍然用默认的 JDK 序列化，加一层容错（`RedisSessionConfig`）。升级依赖后旧 Session 可能读不出来，默认会抛异常，带着旧 Cookie 的每个请求都是 500，用户自己解决不了。容错之后按未登录处理，重新登录即可。
@@ -34,6 +36,7 @@
 
 - 普通测试在 `src/test/resources/application.properties` 中关掉 Spring Session，登录状态留在 `MockHttpSession` 中，现有测试不用改
 - `RedisSessionTest` 清空这一项，用 Testcontainers 启动真实的 Redis，验证存储、30 天 TTL、登录时更换 id、退出后删除、读不出来时按未登录处理
+- `server.servlet.session.cookie.*` 在 MockMvc 下不作用到 Spring Session 的 Cookie（没有真实的 Web 服务器），Max-Age、HttpOnly、SameSite 要在真实后端上验证
 
 ## 理由
 
@@ -49,6 +52,9 @@
 | JSON 序列化 | 要注册 Spring Security 的 Jackson 模块，还要给 `LoginUser` 写配置，收益不大 |
 | indexed 模式 | 依赖键空间通知，有些托管 Redis 默认关闭；这次用不上索引 |
 | 给 Redis 设默认密码 | 默认值人人知道，起不到保护作用，还多一项配置；只绑定本机更直接 |
+| Cookie 不设 Max-Age | 关闭浏览器后要重新登录，Redis 里的 Session 还在也用不上 |
+| Cookie 的 Max-Age 设 30 天 | Cookie 不随访问刷新，每天都在用的人也会在登录 30 天后掉线 |
+| 每次请求刷新 Cookie | 要自己写过滤器，还要多写响应头；设成 400 天已经够用 |
 
 ## 遗留问题
 

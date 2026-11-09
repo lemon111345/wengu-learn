@@ -66,3 +66,6 @@ server:
       cookie:
         # 跨站的页面发起的 POST 不带这个 Cookie，和 CSRF 令牌一起防伪造请求
         same-site: lax
+        # 不设的话是会话 Cookie，关闭浏览器后登录状态就丢了。Cookie 只在登录时写一次、不随访问刷新，
+        # 所以设成 Chrome 允许的上限 400 天，何时失效由 Redis 的“空闲 30 天”决定（决策 040）
+        max-age: 400d

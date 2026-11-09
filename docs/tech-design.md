@@ -202,7 +202,7 @@ frontend/src
 | 状态表与流水表分离 | card_state 存“现在”，review_log 存“全部历史”，供统计和 FSRS 参数优化 | 只更新状态，不留历史 |
 | 评分以用户确认为准，同时记录 AI 建议 | 用户最了解自己；保留差异以后可评估 AI 准确度 | 完全由 AI 评分 |
 | 只有多用户模式，不设管理员，注册开关放环境变量 | 一种模式只有一条路径，界面、测试、文档不用覆盖两种情况；管理员在 M1 没有专属功能，见 [决策 017](./decisions/017-只保留多用户模式.md) | 单用户 / 多用户用配置切换；维护两个分支；第一个注册的用户为管理员 |
-| 登录凭证是服务端 Session（HttpOnly Cookie），保留 CSRF 保护，令牌放在前端可读的 Cookie 中；登录接口自己写，Session 中只存用户 id 和用户名 | SSE 的 EventSource 自动带上 Cookie；退出登录立即生效；不多一个签名密钥，不引入 JWT 库。代价是重启后要重新登录，见 [决策 022](./decisions/022-登录凭证与认证.md) | Cookie 或请求头中的 JWT；关闭 CSRF 只靠 SameSite；配置 UserDetailsService 走标准认证链 |
+| 登录凭证是服务端 Session（HttpOnly Cookie），保留 CSRF 保护，令牌放在前端可读的 Cookie 中；登录接口自己写，Session 中只存用户 id 和用户名 | SSE 的 EventSource 自动带上 Cookie；退出登录立即生效；不多一个签名密钥，不引入 JWT 库。代价是要多运行一个 Redis 保存登录状态，见 [决策 022](./decisions/022-登录凭证与认证.md)、[决策 040](./decisions/040-Session存进Redis.md) | Cookie 或请求头中的 JWT；关闭 CSRF 只靠 SameSite；配置 UserDetailsService 走标准认证链 |
 | 评分：AI 建议同步生成、每个会话一次，评分不等它；fuzz 的随机数由知识点和上次复习时间决定；“当天完成”在算今天的计划时写入 | 评分页打开时才需要建议；预览和实际评分的日期一致，前端可以先显示“X月X日再见”；评分在 chat，chat 调 plan 会形成循环，见 [决策 026](./decisions/026-评分与调度.md) | 后台生成建议加轮询；关掉 fuzz；评分后立刻写“当天完成” |
 | 修改评分：评分时存快照，改分时恢复快照、用原来的评分时间重算；只能改最近一次 | FSRS 非线性、难度有截断，算不回去；结果和第一次就选这一档相同，见 [决策 039](./decisions/039-修改评分.md) | 从第一次评分起重放全部历史 |
 | 学习对话用 POST 返回 SSE，前端用 fetch 读流；回复生成和浏览器连接分开，断开后照样存库；标记从流中去掉、记在消息上；有效时长两次活动之间最多算 10 分钟 | EventSource 只能发 GET，带不上回答和 CSRF 令牌；刷新后能看到完整的回复；认真写的长回答不会被整段扣掉，见 [决策 025](./decisions/025-学习会话与流式对话.md) | EventSource；断开时取消生成；超过阈值整段不计时 |
