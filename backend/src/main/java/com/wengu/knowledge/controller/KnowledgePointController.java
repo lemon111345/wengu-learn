@@ -9,6 +9,7 @@ import com.wengu.knowledge.dto.LibrarySort;
 import com.wengu.knowledge.dto.LibraryView;
 import com.wengu.knowledge.dto.Mastery;
 import com.wengu.knowledge.dto.MergeKnowledgePointsRequest;
+import com.wengu.knowledge.dto.ShufflePendingResult;
 import com.wengu.knowledge.dto.SortDirection;
 import com.wengu.knowledge.dto.UpdateKnowledgePointRequest;
 import com.wengu.knowledge.service.KnowledgeLibraryService;
@@ -94,6 +95,12 @@ public class KnowledgePointController {
     public Result<Void> restore(@RequestBody KnowledgePointIdsRequest request) {
         knowledgePointService.restore(currentUser.id(), request.ids());
         return Result.ok();
+    }
+
+    /** 打乱待学知识点的顺序（#77）：同一道题拆出的保持相邻，学过的不受影响，不能恢复。 */
+    @PostMapping("/shuffle-pending")
+    public Result<ShufflePendingResult> shufflePending() {
+        return Result.ok(new ShufflePendingResult(knowledgePointService.shufflePending(currentUser.id())));
     }
 
     /** 合并：保留主知识点的标题、要点和复习进度，其他的来源并到主知识点上，然后删除（不能撤销）。 */
