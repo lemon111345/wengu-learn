@@ -2,6 +2,7 @@ package com.wengu.chat.service;
 
 import com.wengu.chat.dto.RateRequest;
 import com.wengu.chat.dto.RatingOption;
+import com.wengu.chat.dto.StudyRatedEvent;
 import com.wengu.chat.entity.SessionType;
 import com.wengu.chat.entity.StudySession;
 import com.wengu.common.exception.BusinessException;
@@ -12,6 +13,7 @@ import com.wengu.review.fsrs.Rating;
 import com.wengu.review.service.ReviewService;
 import com.wengu.user.dto.SettingsView;
 import com.wengu.user.service.UserSettingsService;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -35,14 +37,17 @@ public class RatingService {
     private final RatingSuggestionService suggestions;
     private final ReviewService reviewService;
     private final UserSettingsService settingsService;
+    private final ApplicationEventPublisher events;
     private final Clock clock;
 
     public RatingService(StudySessionService sessions, RatingSuggestionService suggestions,
-                         ReviewService reviewService, UserSettingsService settingsService, Clock clock) {
+                         ReviewService reviewService, UserSettingsService settingsService,
+                         ApplicationEventPublisher events, Clock clock) {
         this.sessions = sessions;
         this.suggestions = suggestions;
         this.reviewService = reviewService;
         this.settingsService = settingsService;
+        this.events = events;
         this.clock = clock;
     }
 
@@ -78,6 +83,8 @@ public class RatingService {
                 ? reviewService.changeRating(userId, sessionId, request.rating())
                 : reviewService.rate(userId, session.getKpId(), sessionId, request.rating(),
                         suggestions.suggestedRating(sessionId));
+        // plan 依赖 chat，这里不能直接调用 plan，由它监听事件检查今天是否学完（决策 041）
+        events.publishEvent(new StudyRatedEvent(userId));
         return option(result.rating(), result.due(), Instant.now(clock), settings);
     }
 

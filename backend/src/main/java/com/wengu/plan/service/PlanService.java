@@ -1,6 +1,7 @@
 package com.wengu.plan.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.wengu.chat.dto.StudyRatedEvent;
 import com.wengu.chat.service.StudySessionService;
 import com.wengu.common.time.StudyDay;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
@@ -16,12 +17,17 @@ import com.wengu.review.dto.ReviewRecord;
 import com.wengu.review.service.ReviewService;
 import com.wengu.user.dto.SettingsView;
 import com.wengu.user.service.UserSettingsService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.TemporalAdjusters;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,6 +44,8 @@ import java.util.stream.IntStream;
  */
 @Service
 public class PlanService {
+
+    private static final Logger log = LoggerFactory.getLogger(PlanService.class);
 
     private final UserSettingsService settingsService;
     private final ReviewService reviewService;
@@ -84,7 +92,47 @@ public class PlanService {
         return new TodayPlan(day.date(), settings.dailyNewLimit(), learned, reviews, newItems,
                 completed, upcomingReviews(userId, day, settings), knowledgePointService.count(userId),
                 sessionService.activeSecondsBetween(userId, day.start(), day.end()) / 60,
-                daysToFinish(allNew.size(), remaining, settings.dailyNewLimit()));
+                daysToFinish(allNew.size(), remaining, settings.dailyNewLimit()),
+                currentStreak(userId, day, settings), studiedMinutesThisWeek(userId, day, settings));
+    }
+
+    /**
+     * 评分后检查今天是否学完（决策 041）：学完最后一个直接关页面时，不会再有人打开今天页。
+     * 这个监听器和评分在同一个线程，异常要在这里挡住：评分已经成功，不能让前端看到失败。
+     * 没写上也没关系，下次打开今天页时还会检查。
+     */
+    @EventListener
+    public void onStudyRated(StudyRatedEvent event) {
+        try {
+            today(event.userId());
+        } catch (RuntimeException e) {
+            log.warn("评分后检查当天完成失败，userId={}", event.userId(), e);
+        }
+    }
+
+    /** 连续学习天数（决策 020）。只在缺完成记录的日子才查评分流水 */
+    private int currentStreak(long userId, StudyDay today, SettingsView settings) {
+        Set<LocalDate> completedDates = completionMapper.selectList(new LambdaQueryWrapper<StudyDayCompletion>()
+                        .select(StudyDayCompletion::getStudyDate)
+                        .eq(StudyDayCompletion::getUserId, userId))
+                .stream()
+                .map(StudyDayCompletion::getStudyDate)
+                .collect(Collectors.toSet());
+        return StudyStreak.count(today.date(), completedDates, date -> missedReview(userId,
+                StudyDay.ofDate(date, settings.zoneId(), settings.dayStartHour())));
+    }
+
+    /** review 不知道知识点是否暂停，由 knowledge 过滤（决策 002）。暂停的历史没有记录，按现在的状态算（决策 041） */
+    private boolean missedReview(long userId, StudyDay day) {
+        return !knowledgePointService.activeInOrder(userId,
+                reviewService.missedDueKpIds(userId, day.start(), day.end())).isEmpty();
+    }
+
+    /** 本周从周一所在的学习日开始，到今天的学习日结束 */
+    private int studiedMinutesThisWeek(long userId, StudyDay today, SettingsView settings) {
+        LocalDate monday = today.date().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        Instant weekStart = StudyDay.ofDate(monday, settings.zoneId(), settings.dayStartHour()).start();
+        return sessionService.activeSecondsBetween(userId, weekStart, today.end()) / 60;
     }
 
     /**
@@ -118,8 +166,8 @@ public class PlanService {
     /**
      * 记下“当天完成”（决策 020）：今天的计划变空、并且今天确实学过。这是已经发生的事实，不是计划的快照。
      * <p>
-     * 在算计划时写，而不是在评分后写：评分在 chat，判断计划是否变空要用 plan，chat 调 plan 会形成循环。
-     * 评分页的“下一个”本来就要重新取计划，学完最后一个时自然会走到这里。重复写由唯一索引挡住。
+     * 在算计划时写：判断计划是否变空的规则只有这一份。评分后由 {@link #onStudyRated} 算一次，
+     * 暂停或删除最后一个知识点时由下次打开今天页算。重复写由唯一索引挡住。
      */
     private void recordCompletion(long userId, LocalDate date) {
         if (completionMapper.exists(new LambdaQueryWrapper<StudyDayCompletion>()

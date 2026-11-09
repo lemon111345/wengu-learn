@@ -19,8 +19,11 @@ import java.util.List;
  * @param studiedMinutesToday 今天的有效学习时长（分钟，不足一分钟的舍去），来自今天开始的学习会话（决策 025）
  * @param daysToFinish    假设之后的名额都用来新学，至少还要几个学习日学完全部待学的新知识（含今天）；
  *                        每天学几个为 0 或没有待学的新知识时为 null。#85 起界面不再使用，接口约定不删除字段，所以保留
+ * @param currentStreak   连续学习天数（决策 020）；今天还没完成时算到昨天为止
+ * @param studiedMinutesThisWeek 本周的有效学习时长（分钟，不足一分钟的舍去），从周一的学习日开始
  */
 public record TodayPlan(LocalDate date, int dailyNewLimit, int newLearnedToday, List<PlanItem> reviews,
                         List<PlanItem> newItems, List<CompletedItem> completed, List<UpcomingDay> upcomingReviews,
-                        int knowledgePointCount, int studiedMinutesToday, Integer daysToFinish) {
+                        int knowledgePointCount, int studiedMinutesToday, Integer daysToFinish,
+                        int currentStreak, int studiedMinutesThisWeek) {
 }

@@ -16,6 +16,7 @@ import com.wengu.plan.dto.CompletedItem;
 import com.wengu.plan.dto.PlanItem;
 import com.wengu.plan.dto.TodayPlan;
 import com.wengu.plan.dto.UpcomingDay;
+import com.wengu.plan.entity.StudyDayCompletion;
 import com.wengu.plan.mapper.StudyDayCompletionMapper;
 import com.wengu.review.entity.CardState;
 import com.wengu.review.entity.ReviewLog;
@@ -745,5 +746,124 @@ class PlanServiceTest {
         assertThat(plan.reviews()).isEmpty();
         assertThat(plan.newItems()).isEmpty();
         assertThat(completionMapper.selectCount(null)).isZero();
+    }
+
+    private void completion(long userId, LocalDate date) {
+        StudyDayCompletion completion = new StudyDayCompletion();
+        completion.setUserId(userId);
+        completion.setStudyDate(date);
+        completion.setCompletedAt(NOW);
+        completionMapper.insert(completion);
+    }
+
+    /** 一条带下次到期时间的评分流水，连续天数靠它推算过去有没有到期的复习。 */
+    private void reviewDue(KnowledgePoint kp, Instant reviewedAt, Instant dueAfter) {
+        ReviewLog log = new ReviewLog();
+        log.setUserId(kp.getUserId());
+        log.setKpId(kp.getId());
+        log.setRatingUser(Rating.GOOD);
+        log.setStateBefore(State.REVIEW);
+        log.setFirstReview(false);
+        log.setReviewedAt(reviewedAt);
+        log.setDueAfter(dueAfter);
+        reviewLogMapper.insert(log);
+    }
+
+    private static final LocalDate OCT_26 = LocalDate.of(2026, 10, 26);
+    private static final LocalDate OCT_28 = LocalDate.of(2026, 10, 28);
+    /** 10 月 27 日这个学习日内的时刻（学习日是 [10-26T20:00Z, 10-27T20:00Z)） */
+    private static final Instant IN_OCT_27 = Instant.parse("2026-10-27T02:00:00Z");
+    private static final Instant BEFORE_OCT_27 = Instant.parse("2026-10-20T02:00:00Z");
+
+    @Test
+    void 连续天数_没有完成记录时为0() {
+        assertThat(planService.today(1).currentStreak()).isZero();
+    }
+
+    @Test
+    void 连续天数_今天完成后加上今天() {
+        completion(1, OCT_28);
+        firstReview(newKp("新知识", 1), NOW);
+
+        assertThat(planService.today(1).currentStreak()).isEqualTo(2);
+    }
+
+    @Test
+    void 连续天数_今天还没完成时算到昨天_今天有到期复习也不打断() {
+        completion(1, OCT_28);
+        reviewedKp("今天到期", 1, NOW);
+
+        assertThat(planService.today(1).currentStreak()).isEqualTo(1);
+    }
+
+    @Test
+    void 连续天数_没有记录但当天有到期复习时打断() {
+        completion(1, OCT_26);
+        completion(1, OCT_28);
+        reviewDue(kp(1, "漏掉的复习", 1, KnowledgePointStatus.ACTIVE), BEFORE_OCT_27, IN_OCT_27);
+
+        assertThat(planService.today(1).currentStreak()).isEqualTo(1);
+    }
+
+    @Test
+    void 连续天数_没有记录也没有到期复习时不计入也不打断() {
+        completion(1, OCT_26);
+        completion(1, OCT_28);
+        reviewDue(kp(1, "很久以后才到期", 1, KnowledgePointStatus.ACTIVE), BEFORE_OCT_27, NOW.plus(Duration.ofDays(20)));
+
+        assertThat(planService.today(1).currentStreak()).isEqualTo(2);
+    }
+
+    @Test
+    void 连续天数_到期的复习当天做了就不算漏掉() {
+        completion(1, OCT_26);
+        completion(1, OCT_28);
+        KnowledgePoint kp = kp(1, "当天复习了", 1, KnowledgePointStatus.ACTIVE);
+        reviewDue(kp, BEFORE_OCT_27, IN_OCT_27);
+        reviewDue(kp, IN_OCT_27, NOW.plus(Duration.ofDays(20)));
+
+        assertThat(planService.today(1).currentStreak()).isEqualTo(2);
+    }
+
+    @Test
+    void 连续天数_暂停的知识点不打断() {
+        completion(1, OCT_26);
+        completion(1, OCT_28);
+        reviewDue(kp(1, "暂停了", 1, KnowledgePointStatus.SUSPENDED), BEFORE_OCT_27, IN_OCT_27);
+
+        assertThat(planService.today(1).currentStreak()).isEqualTo(2);
+    }
+
+    @Test
+    void 连续天数_其他用户的记录和复习都不算() {
+        completion(1, OCT_26);
+        completion(1, OCT_28);
+        completion(2, LocalDate.of(2026, 10, 27));
+        reviewDue(kp(2, "别人漏掉的", 1, KnowledgePointStatus.ACTIVE), BEFORE_OCT_27, IN_OCT_27);
+
+        assertThat(planService.today(1).currentStreak()).isEqualTo(2);
+    }
+
+    @Test
+    void 本周时长从周一的学习日开始算() {
+        // 10 月 29 日是周四，周一的学习日从 10-25T20:00Z 开始
+        Instant mondayStart = Instant.parse("2026-10-25T20:00:00Z");
+        session(1, mondayStart, 600);
+        session(1, NOW, 150);
+        // 上周日的最后一秒、其他用户的都不算
+        session(1, mondayStart.minusSeconds(1), 1200);
+        session(2, NOW, 3000);
+
+        // 750 秒，不足一分钟的舍去
+        assertThat(planService.today(1).studiedMinutesThisWeek()).isEqualTo(12);
+    }
+
+    @Test
+    void 周一凌晨分界之前仍然算上一周() {
+        // 北京时间 10 月 26 日（周一）03:30，学习日还是 10 月 25 日（周日），本周从 10 月 19 日的学习日开始
+        setClock(Instant.parse("2026-10-25T19:30:00Z"));
+        session(1, Instant.parse("2026-10-18T20:00:00Z"), 600);
+
+        assertThat(planService.today(1).studiedMinutesThisWeek()).isEqualTo(10);
     }
 }
