@@ -47,6 +47,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -432,6 +433,70 @@ class KnowledgeLibraryServiceTest {
                 new SourceRef(second, "并发专题", List.of(2, 4, 6)));
         // 主知识点的复习进度不变：它自己的卡
         assertThat(detail.mastery()).isEqualTo(Mastery.NEW);
+    }
+
+    /** 从草稿来的待学知识点，create 时已经初始化成新卡 */
+    private long pending(long sourceId, String title, String questionIds) {
+        return fromDraft(sourceId, title, "要点", questionIds);
+    }
+
+    private int sortOrder(long kpId) {
+        return knowledgePointMapper.selectById(kpId).getSortOrder();
+    }
+
+    /** 这些知识点按现在的 sort_order 排列 */
+    private List<Long> byOrder(List<Long> kpIds) {
+        return kpIds.stream().sorted(Comparator.comparingInt(this::sortOrder)).toList();
+    }
+
+    @Test
+    void 打乱待学_同一道题相邻且先后不变_只在原来的位置之间分配_其他的都不动() {
+        long java = source("Java 面试题");
+        long os = source("操作系统");
+        long a1 = pending(java, "第 1 题的第一个", "1");
+        long a2 = pending(java, "第 1 题的第二个", "1");
+        // 来自多道题：用最小的题号，和第 1 题同组
+        long a3 = pending(java, "第 1、2 题的", "2,1");
+        long b = pending(java, "第 2 题的", "2");
+        // 题号相同但资料不同，是另一组
+        long c1 = pending(os, "操作系统第 1 题的第一个", "1");
+        long c2 = pending(os, "操作系统第 1 题的第二个", "1");
+        long pausedNew = pending(java, "暂停的待学", "9");
+        knowledgePointService.suspend(USER_ID, List.of(pausedNew));
+
+        List<Long> shuffledIds = List.of(newOne, newTwo, a1, a2, a3, b, c1, c2);
+        List<Integer> slots = shuffledIds.stream().map(this::sortOrder).sorted().toList();
+        List<Long> untouched = List.of(systemDesign, solid, fair, familiar, shaky, suspended, pausedNew);
+        Map<Long, Integer> untouchedOrders = untouched.stream().collect(Collectors.toMap(id -> id, this::sortOrder));
+        List<CardState> cardsBefore = cardStateMapper.selectList(null);
+
+        boolean differentSourcesApart = false;
+        for (int round = 0; round < 30; round++) {
+            assertThat(knowledgePointService.shufflePending(USER_ID)).isEqualTo(8);
+
+            List<Long> order = byOrder(shuffledIds);
+            assertThat(shuffledIds.stream().map(this::sortOrder).sorted().toList()).isEqualTo(slots);
+            assertThat(order.indexOf(a2)).isEqualTo(order.indexOf(a1) + 1);
+            assertThat(order.indexOf(a3)).isEqualTo(order.indexOf(a1) + 2);
+            assertThat(order.indexOf(c2)).isEqualTo(order.indexOf(c1) + 1);
+            differentSourcesApart |= order.indexOf(c1) != order.indexOf(a3) + 1 && order.indexOf(a1) != order.indexOf(c2) + 1;
+            untouchedOrders.forEach((id, value) -> assertThat(sortOrder(id)).isEqualTo(value));
+        }
+        assertThat(differentSourcesApart).as("题号相同、资料不同的不是一组").isTrue();
+        assertThat(cardStateMapper.selectList(null)).usingRecursiveFieldByFieldElementComparator()
+                .containsExactlyInAnyOrderElementsOf(cardsBefore);
+    }
+
+    @Test
+    void 打乱待学不影响别人_没有待学时什么都不做() {
+        long others = knowledgePointService.create(OTHER_USER_ID, null, List.of(point(KnowledgePointType.CONCEPT, "别人的待学")))
+                .getFirst();
+        int before = sortOrder(others);
+
+        knowledgePointService.shufflePending(USER_ID);
+
+        assertThat(sortOrder(others)).isEqualTo(before);
+        assertThat(knowledgePointService.shufflePending(999L)).isZero();
     }
 
     @Test

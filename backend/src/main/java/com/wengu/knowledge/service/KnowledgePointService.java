@@ -32,7 +32,10 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.Objects;
+import java.util.OptionalInt;
+import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -449,6 +452,99 @@ public class KnowledgePointService {
         return Math.toIntExact(knowledgePointMapper.selectCount(new LambdaQueryWrapper<KnowledgePoint>()
                 .eq(KnowledgePoint::getUserId, userId)
                 .isNull(KnowledgePoint::getDeletedAt)));
+    }
+
+    /**
+     * 打乱待学的顺序（#77）：按“来源资料 + 题号”分组，只打乱组与组之间的顺序，同一道题拆出的知识点保持先后。
+     * <p>
+     * 只在待学知识点原来占用的 sort_order 之间重新分配，学过的、暂停的、只收录的一行都不动。
+     * 待学的范围和知识库的“待学”一致。每日计划不用改，仍按 sort_order 派发。
+     *
+     * @return 打乱了多少个待学知识点
+     */
+    @Transactional
+    public int shufflePending(long userId) {
+        List<KnowledgePoint> pending = pendingInOrder(userId);
+        Map<Long, QuestionKey> keys = questionKeys(userId, pending);
+        // 找不到来源题的用知识点自己的 id 作 key，单独成组；Long 和 QuestionKey 不会相等
+        List<KnowledgePoint> shuffled = PendingShuffle.shuffle(pending,
+                kp -> keys.containsKey(kp.getId()) ? keys.get(kp.getId()) : kp.getId(), new Random());
+        for (int i = 0; i < shuffled.size(); i++) {
+            KnowledgePoint kp = shuffled.get(i);
+            // pending 按 sort_order 排好，第 i 个的 sort_order 就是第 i 个位置
+            Integer slot = pending.get(i).getSortOrder();
+            if (!slot.equals(kp.getSortOrder())) {
+                knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                        .eq(KnowledgePoint::getId, kp.getId())
+                        .set(KnowledgePoint::getSortOrder, slot));
+            }
+        }
+        return pending.size();
+    }
+
+    /** 一道来源题：不同资料的题号会重复，要连资料一起比较 */
+    private record QuestionKey(long sourceId, int questionId) {
+    }
+
+    /** 待学的知识点，按学习顺序：没学过、没暂停、没删除、参与调度 */
+    private List<KnowledgePoint> pendingInOrder(long userId) {
+        List<Long> newIds = reviewService.newKpIds(userId);
+        if (newIds.isEmpty()) {
+            return List.of();
+        }
+        return knowledgePointMapper.selectList(new LambdaQueryWrapper<KnowledgePoint>()
+                .select(KnowledgePoint::getId, KnowledgePoint::getSortOrder, KnowledgePoint::getDraftItemId)
+                .eq(KnowledgePoint::getUserId, userId)
+                .eq(KnowledgePoint::getStatus, KnowledgePointStatus.ACTIVE)
+                .isNull(KnowledgePoint::getDeletedAt)
+                .in(KnowledgePoint::getType, KnowledgePointType.scheduledTypes())
+                .in(KnowledgePoint::getId, newIds)
+                .orderByAsc(KnowledgePoint::getSortOrder)
+                .orderByAsc(KnowledgePoint::getId));
+    }
+
+    /**
+     * 每个知识点属于哪道来源题：知识点 → 草稿条目 → 草稿的资料和题号。找不到的不在结果中。
+     * 一个条目来自多道题时用最小的题号；合并过的知识点用主知识点自己的条目。
+     */
+    private Map<Long, QuestionKey> questionKeys(long userId, List<KnowledgePoint> pending) {
+        List<Long> itemIds = pending.stream().map(KnowledgePoint::getDraftItemId).filter(Objects::nonNull).distinct().toList();
+        if (itemIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, ExtractionDraftItem> items = draftItemMapper.selectList(new LambdaQueryWrapper<ExtractionDraftItem>()
+                        .eq(ExtractionDraftItem::getUserId, userId)
+                        .in(ExtractionDraftItem::getId, itemIds))
+                .stream().collect(Collectors.toMap(ExtractionDraftItem::getId, item -> item));
+        if (items.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, Long> draftSources = draftMapper.selectList(new LambdaQueryWrapper<ExtractionDraft>()
+                        .select(ExtractionDraft::getId, ExtractionDraft::getSourceId)
+                        .in(ExtractionDraft::getId, items.values().stream().map(ExtractionDraftItem::getDraftId).distinct().toList()))
+                .stream()
+                .filter(draft -> draft.getSourceId() != null)
+                .collect(Collectors.toMap(ExtractionDraft::getId, ExtractionDraft::getSourceId));
+
+        Map<Long, QuestionKey> keys = new HashMap<>();
+        for (KnowledgePoint kp : pending) {
+            ExtractionDraftItem item = items.get(kp.getDraftItemId());
+            Long sourceId = item == null ? null : draftSources.get(item.getDraftId());
+            OptionalInt question = item == null ? OptionalInt.empty() : smallestQuestion(item.getSourceQuestionIds());
+            if (sourceId != null && question.isPresent()) {
+                keys.put(kp.getId(), new QuestionKey(sourceId, question.getAsInt()));
+            }
+        }
+        return keys;
+    }
+
+    /** 逗号分隔的题号中最小的一个，如 "5,1,3" 是 1 */
+    private static OptionalInt smallestQuestion(String questionIds) {
+        if (questionIds == null || questionIds.isBlank()) {
+            return OptionalInt.empty();
+        }
+        return Arrays.stream(questionIds.split(",")).map(String::trim).filter(id -> !id.isEmpty())
+                .mapToInt(Integer::parseInt).min();
     }
 
     /**
