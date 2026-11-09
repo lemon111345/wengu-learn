@@ -2,6 +2,7 @@ package com.wengu.llm.service;
 
 import com.wengu.common.result.ErrorCode;
 import com.wengu.llm.dto.ChatTurn;
+import com.wengu.llm.dto.LlmImage;
 import com.wengu.llm.dto.LlmResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,10 +13,13 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.content.Media;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
+import org.springframework.util.MimeType;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -60,6 +64,42 @@ public class LlmService {
      */
     public String call(String prompt) {
         String content = guard(() -> chatClient.prompt().user(prompt).options(options(null)).call().content());
+        if (content == null || content.isBlank()) {
+            throw fail(new LlmException(ErrorCode.LLM_EMPTY_RESPONSE));
+        }
+        status.success();
+        return content;
+    }
+
+    /**
+     * 带图片的调用，返回模型的回复原文（决策 044）。
+     * <p>
+     * 服务商拒绝这个请求（400、422）时，多半是模型不支持图片，抛出 {@link ErrorCode#LLM_IMAGE_UNSUPPORTED}。
+     * 这不计入模型状态的失败：模型本身没有坏，不该让头像上出现红点。
+     *
+     * @param images      按顺序发送
+     * @param temperature 为 null 时不设置，使用服务商的默认值
+     * @throws LlmException 调用失败，或者没有返回正文
+     */
+    public String callWithImages(String system, String user, List<LlmImage> images, Double temperature) {
+        Media[] media = images.stream()
+                .map(image -> new Media(MimeType.valueOf(image.mimeType()), new ByteArrayResource(image.data())))
+                .toArray(Media[]::new);
+        String content;
+        try {
+            content = chatClient.prompt()
+                    .system(system)
+                    .user(spec -> spec.text(user).media(media))
+                    .options(options(temperature))
+                    .call()
+                    .content();
+        } catch (RuntimeException e) {
+            if (LlmException.imagesRejected(e)) {
+                log.warn("模型拒绝了带图片的请求: {}", e.toString());
+                throw new LlmException(ErrorCode.LLM_IMAGE_UNSUPPORTED, e);
+            }
+            throw fail(LlmException.from(e));
+        }
         if (content == null || content.isBlank()) {
             throw fail(new LlmException(ErrorCode.LLM_EMPTY_RESPONSE));
         }
