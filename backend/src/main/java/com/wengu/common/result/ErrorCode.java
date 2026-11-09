@@ -49,6 +49,8 @@ public enum ErrorCode {
     LLM_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "连不上 AI 模型，可以重试"),
     /** 其他调用错误，如 400 */
     LLM_FAILED(HttpStatus.BAD_GATEWAY, "AI 模型调用失败，可以重试"),
+    /** 带图片的请求被拒绝，或者模型表示没有收到图片（决策 044） */
+    LLM_IMAGE_UNSUPPORTED(HttpStatus.BAD_GATEWAY, "当前 AI 模型可能不支持图片，可以把题目粘贴成文字"),
     /** 调用成功，但输出重试后仍不符合要求。题目切分、评分建议有自己的返回码，这个用于抽取批次的失败原因 */
     LLM_INVALID_OUTPUT(HttpStatus.BAD_GATEWAY, "AI 模型的输出不符合要求，可以重试");
 

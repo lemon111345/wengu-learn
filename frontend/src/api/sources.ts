@@ -1,4 +1,4 @@
-import { post } from './http'
+import { get, post } from './http'
 
 /** 识别或整理出的一道题 */
 export interface SourceQuestion {
@@ -43,4 +43,30 @@ export function uploadSource(file: File, name: string, type: SourceType) {
     form.append('name', name.trim())
   }
   return post<ImportedSource>('/api/sources/upload', form)
+}
+
+/** 截图识别的限制，和后端 ImageRecognitionService 一致（决策 044） */
+export const MAX_IMAGES = 5
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+export const MAX_IMAGE_TOTAL_BYTES = 10 * 1024 * 1024
+export const IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp'
+
+/** 截图识别的进度和结果 */
+export interface ImageRecognitionView {
+  status: 'RUNNING' | 'DONE' | 'FAILED'
+  /** 识别出的文字，只有 DONE 时有 */
+  text: string | null
+  /** 给用户看的失败原因，只有 FAILED 时有 */
+  message: string | null
+}
+
+/** 提交截图，按顺序识别：马上返回任务 id，用 fetchImageRecognition 查结果 */
+export function startImageRecognition(files: File[]) {
+  const form = new FormData()
+  files.forEach((file) => form.append('files', file))
+  return post<{ taskId: string }>('/api/sources/image-recognitions', form)
+}
+
+export function fetchImageRecognition(taskId: string) {
+  return get<ImageRecognitionView>(`/api/sources/image-recognitions/${taskId}`)
 }

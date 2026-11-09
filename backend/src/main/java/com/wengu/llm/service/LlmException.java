@@ -1,5 +1,6 @@
 package com.wengu.llm.service;
 
+import com.openai.errors.BadRequestException;
 import com.openai.errors.InternalServerException;
 import com.openai.errors.NotFoundException;
 import com.openai.errors.OpenAIIoException;
@@ -7,6 +8,7 @@ import com.openai.errors.OpenAIServiceException;
 import com.openai.errors.PermissionDeniedException;
 import com.openai.errors.RateLimitException;
 import com.openai.errors.UnauthorizedException;
+import com.openai.errors.UnprocessableEntityException;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 
@@ -69,6 +71,16 @@ public class LlmException extends BusinessException {
             return ErrorCode.LLM_UNAVAILABLE;
         }
         return ErrorCode.LLM_FAILED;
+    }
+
+    /** 服务商拒绝了带图片的请求（400、422）：多半是模型不支持图片。只用于带图片的调用（决策 044） */
+    static boolean imagesRejected(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof BadRequestException || t instanceof UnprocessableEntityException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean has(List<Throwable> chain, Class<? extends Throwable> type) {

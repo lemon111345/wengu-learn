@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpServer;
 import com.wengu.NoDatabase;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.llm.dto.ChatTurn;
+import com.wengu.llm.dto.LlmImage;
 import com.wengu.llm.dto.LlmStatusView;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +22,7 @@ import java.io.UncheckedIOException;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executors;
@@ -40,6 +42,9 @@ class LlmErrorTest {
 
     /** 假服务这次怎么回应：HTTP 状态码，或者 ok、empty、slow */
     private static volatile String mode = "ok";
+
+    /** 最近一次收到的请求体 */
+    private static volatile String lastBody = "";
 
     private static final HttpServer server = startServer();
 
@@ -110,6 +115,44 @@ class LlmErrorTest {
         assertThat(LlmException.classify(new IllegalStateException("别的问题"))).isEqualTo(ErrorCode.LLM_FAILED);
     }
 
+    private static final List<LlmImage> IMAGES = List.of(new LlmImage(new byte[]{1, 2, 3}, "image/png"));
+
+    private String callWithImages() {
+        return llmService.callWithImages("系统", "转写", IMAGES, 0.0);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "400, LLM_IMAGE_UNSUPPORTED",
+            "422, LLM_IMAGE_UNSUPPORTED",
+            "401, LLM_AUTH_FAILED",
+            "500, LLM_UNAVAILABLE",
+            "slow, LLM_TIMEOUT"
+    })
+    void 带图片的调用按原因分类_被拒绝时算模型不支持图片(String serverMode, ErrorCode expected) {
+        mode = serverMode;
+
+        assertThat(codeOf(this::callWithImages)).isEqualTo(expected);
+    }
+
+    @Test
+    void 图片按dataURL发给模型() {
+        callWithImages();
+
+        assertThat(lastBody).contains("image_url")
+                .contains("data:image/png;base64," + Base64.getEncoder().encodeToString(new byte[]{1, 2, 3}));
+    }
+
+    @Test
+    void 模型不支持图片不算模型出错() {
+        callWithImages();
+
+        mode = "400";
+        codeOf(this::callWithImages);
+
+        assertThat(statusTracker.status().lastCall().ok()).isTrue();
+    }
+
     @Test
     void 记下最近一次调用的结果() {
         mode = "401";
@@ -140,6 +183,7 @@ class LlmErrorTest {
             HttpServer httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             httpServer.createContext("/", exchange -> {
                 String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+                lastBody = body;
                 boolean stream = body.contains("\"stream\":true");
                 String current = mode;
                 int status = 200;
