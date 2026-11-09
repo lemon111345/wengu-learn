@@ -18,17 +18,18 @@ docker compose up -d --build
 
 第一次启动要下载基础镜像和依赖、编译后端和前端，需要几分钟。完成后打开 http://localhost:8000 （端口可在 `.env` 中用 `WENGU_PORT` 修改）。
 
-启动了三个容器：
+启动了四个容器：
 
 | 容器 | 作用 |
 | --- | --- |
 | `web` | Nginx：提供前端页面，并把 `/api` 转给后端 |
 | `backend` | 后端，不直接对外开放 |
 | `mysql` | 数据库，数据保存在 Docker 卷 `mysql-data` 中；只对本机开放端口 3307（`WENGU_DB_PORT`），供备份使用 |
+| `redis` | 保存登录状态，数据保存在 Docker 卷 `redis-data` 中；只对本机开放端口 6380（`WENGU_REDIS_PORT`） |
 
 **第一次使用：**先注册自己的账号。不打算让别人注册的话，在 `.env` 中加上 `WENGU_ALLOW_REGISTRATION=false`，再执行一次 `docker compose up -d`（只会重建后端）。
 
-**修改配置：**改完 `.env` 后执行 `docker compose up -d`。**注意后端重建或重启后需要重新登录**：登录状态保存在后端的内存中。
+**修改配置：**改完 `.env` 后执行 `docker compose up -d`。后端重建或重启后不用重新登录：登录状态保存在 Redis 中。
 
 **升级：**
 
@@ -68,9 +69,9 @@ WENGU_LLM_MODEL=qwen2.5:7b
 需要 JDK 21 和 Docker。Maven 不用单独安装，使用项目自带的 Maven Wrapper：
 
 ```powershell
-docker compose up -d mysql   # 在仓库根目录只启动 MySQL 8.4（宿主机端口 3307）；不带服务名会把整个应用都启动起来
+docker compose up -d mysql redis   # 在仓库根目录只启动 MySQL 8.4（宿主机端口 3307）和 Redis（宿主机端口 6380）；不带服务名会把整个应用都启动起来
 cd backend
-.\mvnw.cmd test              # 运行测试（测试会用 Testcontainers 另起一个 MySQL，需要 Docker 在运行）
+.\mvnw.cmd test              # 运行测试（测试会用 Testcontainers 另起 MySQL 和 Redis，需要 Docker 在运行）
 .\mvnw.cmd spring-boot:run   # 启动后端，健康检查：http://localhost:8080/api/health（不需要登录）
 ```
 
@@ -80,6 +81,7 @@ cd backend
 | --- | --- | --- |
 | `WENGU_DB_URL` | JDBC 地址，需带 `connectionTimeZone=UTC` | `jdbc:mysql://localhost:3307/wengu?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true` |
 | `WENGU_DB_USERNAME` / `WENGU_DB_PASSWORD` | 数据库账号 | `wengu` / `wengu` |
+| `WENGU_REDIS_HOST` / `WENGU_REDIS_PORT` | Redis 地址，保存登录状态 | `localhost` / `6380` |
 | `WENGU_TIMEZONE` | 注册时读不到浏览器时区（或不合法）时使用的时区，以后可以在设置中修改 | `Asia/Shanghai` |
 | `WENGU_ALLOW_REGISTRATION` | 是否开放注册 | `true` |
 
@@ -103,7 +105,7 @@ npm run build   # 类型检查并打包到 frontend/dist
 1. 保持 `WENGU_ALLOW_REGISTRATION` 为默认的 `true`，启动后注册自己的账号
 2. 不打算让别人注册的话，把它设为 `false` 后重启。已有的账号照常登录，注册页显示“暂未开放注册”
 
-登录状态保存在后端的内存中，30 天不使用才会失效；**后端重启后需要重新登录**。
+登录状态保存在 Redis 中，30 天不使用才会失效；后端重启后不用重新登录，关闭浏览器后也不用。
 
 忘记密码目前只能直接改数据库：把 `user` 表中这个账号的 `password_hash` 换成新密码的 bcrypt 哈希（带 `{bcrypt}` 前缀）。
 
