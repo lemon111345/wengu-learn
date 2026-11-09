@@ -100,6 +100,9 @@ useShortcut('Escape', back)
         <h2>接着问</h2>
         <ChatThread :messages="followUpMessages" :teacher-name="session.teacherName" />
       </section>
+
+      <!-- 回顾页本身只读，继续问在问答记录里（决策 043） -->
+      <RouterLink v-if="session.ended" class="continue" :to="`/questions/${session.id}`">继续问</RouterLink>
     </article>
   </div>
 </template>
@@ -145,6 +148,14 @@ h1 {
 
 h2 {
   font-size: 18px;
+}
+
+.continue {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
 }
 
 .evaluation {
