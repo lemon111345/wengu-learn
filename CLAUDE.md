@@ -34,7 +34,7 @@ com.wengu
 
 - **模块之间只能调用对方的 Service**，不能直接使用对方的 Mapper 或访问对方的表。
 - **依赖方向单向，不允许循环依赖**。完整依赖关系（见 `docs/decisions/002-模块依赖边界.md`）：
-  - plan → knowledge、review、user、chat（今天的学习时长，决策 025）
+  - plan → knowledge、review、user、chat（学习时长，决策 025；监听评分事件，决策 041）
   - chat → knowledge、llm、review、user（评分时换算学习日，决策 026）
   - knowledge → source、llm、review、user（知识库显示学习日，决策 030）
   - source → llm（切分题目要调用模型，见决策 011）
