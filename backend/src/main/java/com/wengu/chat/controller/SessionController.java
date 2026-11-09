@@ -1,5 +1,6 @@
 package com.wengu.chat.controller;
 
+import com.wengu.chat.dto.FollowUpStatus;
 import com.wengu.chat.dto.RateRequest;
 import com.wengu.chat.dto.RatingOption;
 import com.wengu.chat.dto.RatingSuggestionView;
@@ -7,6 +8,7 @@ import com.wengu.chat.dto.SendMessageRequest;
 import com.wengu.chat.dto.SessionView;
 import com.wengu.chat.dto.StartSessionRequest;
 import com.wengu.chat.service.ChatService;
+import com.wengu.chat.service.FollowUpHistoryService;
 import com.wengu.chat.service.RatingService;
 import com.wengu.chat.service.RatingSuggestionService;
 import com.wengu.chat.service.StudySessionService;
@@ -32,15 +34,17 @@ public class SessionController {
     private final ChatService chatService;
     private final RatingSuggestionService ratingSuggestionService;
     private final RatingService ratingService;
+    private final FollowUpHistoryService followUpHistoryService;
     private final CurrentUser currentUser;
 
     public SessionController(StudySessionService sessionService, ChatService chatService,
                              RatingSuggestionService ratingSuggestionService, RatingService ratingService,
-                             CurrentUser currentUser) {
+                             FollowUpHistoryService followUpHistoryService, CurrentUser currentUser) {
         this.sessionService = sessionService;
         this.chatService = chatService;
         this.ratingSuggestionService = ratingSuggestionService;
         this.ratingService = ratingService;
+        this.followUpHistoryService = followUpHistoryService;
         this.currentUser = currentUser;
     }
 
@@ -57,6 +61,12 @@ public class SessionController {
     @PostMapping("/{id}/follow-up")
     public Result<SessionView> followUp(@PathVariable long id) {
         return Result.ok(sessionService.startFollowUp(currentUser.id(), id));
+    }
+
+    /** 一次学习的接着问状态，问答记录打开一条对话时用；只查不建（决策 043）。id 是学习会话 */
+    @GetMapping("/{id}/follow-up-status")
+    public Result<FollowUpStatus> followUpStatus(@PathVariable long id) {
+        return Result.ok(followUpHistoryService.status(currentUser.id(), id));
     }
 
     /**

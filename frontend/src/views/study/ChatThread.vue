@@ -37,11 +37,12 @@ const visible = computed(() => (expanded.value ? props.messages : props.messages
       {{ collapsedText }}，点击展开
     </button>
     <template v-for="m in visible" :key="m.id">
-      <div v-if="m.role === 'ASSISTANT'" class="teacher">
+      <!-- id 供问答记录的问题目录跳转 -->
+      <div v-if="m.role === 'ASSISTANT'" :id="`message-${m.id}`" class="teacher">
         <span class="speaker">{{ teacherName }}</span>
         <MessageContent :content="m.content" formatted />
       </div>
-      <div v-else class="student">
+      <div v-else :id="`message-${m.id}`" class="student">
         <span class="speaker">{{ userLabels[m.id] ?? '你' }}</span>
         <MessageContent :content="m.content" :formatted="false" />
       </div>
@@ -71,6 +72,7 @@ const visible = computed(() => (expanded.value ? props.messages : props.messages
 }
 
 .student {
+  scroll-margin-top: 16px;
   padding: 16px 18px;
   border-radius: var(--wg-radius-card);
   background: var(--wg-surface);

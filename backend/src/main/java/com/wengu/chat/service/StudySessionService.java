@@ -247,7 +247,7 @@ public class StudySessionService {
                 settingsService.get(session.getUserId()).teacherName());
     }
 
-    private StudySession findFollowUp(long studySessionId) {
+    StudySession findFollowUp(long studySessionId) {
         return sessionMapper.selectOne(new LambdaQueryWrapper<StudySession>()
                 .eq(StudySession::getParentSessionId, studySessionId)
                 .eq(StudySession::getType, SessionType.FOLLOW_UP)

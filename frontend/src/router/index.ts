@@ -31,6 +31,8 @@ const router = createRouter({
       children: [
         { path: '', component: () => import('@/views/today/TodayView.vue') },
         { path: 'library', component: () => import('@/views/library/LibraryView.vue') },
+        // 问答记录：id 是学习会话，没有 id 时只显示列表（决策 043）
+        { path: 'questions/:id?', component: () => import('@/views/questions/QuestionsView.vue'), props: true },
         { path: 'import', component: () => import('@/views/import/ImportPage.vue') },
         // 草稿：抽取进度、确认知识点、已确认的结果，按状态显示（决策 028）
         { path: 'drafts/:id', component: () => import('@/views/import/DraftPage.vue'), props: true },

@@ -215,7 +215,8 @@ class AuthControllerTest {
 
     @Test
     void 未登录访问业务接口返回统一格式的401() throws Exception {
-        for (String path : new String[]{"/api/settings", "/api/plan/today", "/api/auth/me", "/api/drafts/1"}) {
+        for (String path : new String[]{"/api/settings", "/api/plan/today", "/api/auth/me", "/api/drafts/1",
+                "/api/follow-ups", "/api/sessions/1/follow-up-status"}) {
             mockMvc.perform(get(path))
                     .andExpect(status().isUnauthorized())
                     .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
