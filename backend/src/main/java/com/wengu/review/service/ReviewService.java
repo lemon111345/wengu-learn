@@ -302,6 +302,14 @@ public class ReviewService {
                 .toList();
     }
 
+    /**
+     * 过去某个学习日 [start, end) 漏掉的到期复习（决策 020、041）：在 end 之前到期，这段时间内又没有复习的。
+     * 用评分流水推算，card_state 只有现在的状态。知识点是否暂停由调用方交给 knowledge 过滤。
+     */
+    public List<Long> missedDueKpIds(long userId, Instant start, Instant end) {
+        return reviewLogMapper.selectMissedDueKpIds(userId, start, end);
+    }
+
     /** [start, end) 之间的评分，按评分时间排列。每日计划用它显示今天已完成的条目（#48）。 */
     public List<ReviewRecord> reviewsBetween(long userId, Instant start, Instant end) {
         return reviewLogMapper.selectList(recordQuery(userId)

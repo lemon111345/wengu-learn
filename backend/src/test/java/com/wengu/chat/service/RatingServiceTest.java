@@ -105,6 +105,7 @@ class RatingServiceTest {
         jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
                 + " VALUES (1, 3, 'Asia/Shanghai', 4)");
         settingsService.update(USER_ID, new UpdateSettingsRequest("Asia/Shanghai", 4, 3));
+        jdbc.update("DELETE FROM study_day_completion");
         suggestionMapper.delete(null);
         messageMapper.delete(null);
         sessionMapper.delete(null);
@@ -159,6 +160,36 @@ class RatingServiceTest {
     /** 某个时刻属于北京时间凌晨 4 点分界的哪个学习日 */
     private static LocalDate studyDate(Instant instant) {
         return LocalDate.ofInstant(instant.minus(Duration.ofHours(4)), SHANGHAI);
+    }
+
+    private int completions() {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM study_day_completion", Integer.class);
+    }
+
+    @Test
+    void 学完最后一个后不打开今天页也记当天完成() {
+        ratingService.rate(USER_ID, session(SessionType.STUDY, true), new RateRequest(Rating.GOOD));
+
+        assertThat(completions()).isEqualTo(1);
+    }
+
+    @Test
+    void 今天还有没学完的时评分不记当天完成() {
+        KnowledgePoint other = new KnowledgePoint();
+        other.setUserId(USER_ID);
+        other.setType(KnowledgePointType.CONCEPT);
+        other.setTitle("还没学的");
+        other.setSummary("要点");
+        other.setStatus(KnowledgePointStatus.ACTIVE);
+        other.setSortOrder(2);
+        other.setCreatedAt(NOW);
+        other.setUpdatedAt(NOW);
+        knowledgePointMapper.insert(other);
+        reviewService.initCards(USER_ID, List.of(other.getId()));
+
+        ratingService.rate(USER_ID, session(SessionType.STUDY, true), new RateRequest(Rating.GOOD));
+
+        assertThat(completions()).isZero();
     }
 
     @Test

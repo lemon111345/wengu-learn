@@ -44,6 +44,10 @@ export interface TodayPlan {
   studiedMinutesToday: number
   /** 界面不再使用（#85），接口约定不删除字段，所以保留 */
   daysToFinish: number | null
+  /** 连续学习天数（决策 020）；今天还没完成时算到昨天为止 */
+  currentStreak: number
+  /** 本周的有效学习时长（分钟），从周一的学习日开始 */
+  studiedMinutesThisWeek: number
 }
 
 export function fetchTodayPlan() {

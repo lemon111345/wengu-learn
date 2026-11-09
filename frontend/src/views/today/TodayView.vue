@@ -13,6 +13,7 @@ import EmptyState from './EmptyState.vue'
 import OverviewPanel from './OverviewPanel.vue'
 import PendingBanner from './PendingBanner.vue'
 import PlanList from './PlanList.vue'
+import StudyTimePanel from './StudyTimePanel.vue'
 import UpcomingPanel from './UpcomingPanel.vue'
 import { nextItem } from './summary'
 
@@ -115,6 +116,11 @@ function onDailyNewSaved() {
     </main>
     <aside class="side">
       <UpcomingPanel :days="plan.upcomingReviews" :daily-new-limit="plan.dailyNewLimit" @saved="onDailyNewSaved" />
+      <StudyTimePanel
+        :today-minutes="plan.studiedMinutesToday"
+        :week-minutes="plan.studiedMinutesThisWeek"
+        :streak="plan.currentStreak"
+      />
     </aside>
   </div>
 </template>
