@@ -71,7 +71,7 @@ useAutoScroll(() => [messages.value.length, streamingText.value])
       <h1>{{ session.kpTitle }}</h1>
       <div v-if="canSkip" class="skip">
         <el-button @click="skipExplanation">这个我会，直接完整作答</el-button>
-        <span class="skip-hint">跳过讲解，讲完直接评分；没讲全的地方，老师会点出来</span>
+        <span class="skip-hint">跳过讲解，讲完直接评分；没讲全的地方，{{ session.teacherName }}会点出来</span>
       </div>
     </section>
 
@@ -82,6 +82,7 @@ useAutoScroll(() => [messages.value.length, streamingText.value])
         :streaming-text="streamingText"
         :collapsed="collapsed"
         :collapsed-text="`前面的 ${rounds} 轮对话已折叠`"
+        :teacher-name="session.teacherName"
       />
       <div v-if="error" class="chat-error" role="alert">
         <span>{{ error.message }}</span>
@@ -91,6 +92,7 @@ useAutoScroll(() => [messages.value.length, streamingText.value])
         <ChatInput
           :label="restating ? '完整作答：不看上面，把整个问题讲一遍' : '你的回答'"
           :busy="busy"
+          :teacher-name="session.teacherName"
           @send="send"
         />
       </div>

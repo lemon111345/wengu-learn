@@ -14,6 +14,8 @@ public class UserSettings {
     private String timezone;
     /** 一天从几点开始算，0～23 */
     private Integer dayStartHour;
+    /** 老师的称呼（V14，决策 042） */
+    private String teacherName;
 
     public Long getUserId() {
         return userId;
@@ -45,5 +47,13 @@ public class UserSettings {
 
     public void setDayStartHour(Integer dayStartHour) {
         this.dayStartHour = dayStartHour;
+    }
+
+    public String getTeacherName() {
+        return teacherName;
+    }
+
+    public void setTeacherName(String teacherName) {
+        this.teacherName = teacherName;
     }
 }

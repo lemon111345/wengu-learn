@@ -169,6 +169,7 @@ useShortcut('Enter', () => void next())
       :collapsed="collapsed"
       :collapsed-text="`前面的 ${collapsed} 条对话已折叠`"
       :user-labels="userLabels"
+      :teacher-name="session.teacherName"
     />
 
     <section class="rating-panel">

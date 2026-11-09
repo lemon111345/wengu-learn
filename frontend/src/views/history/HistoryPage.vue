@@ -88,13 +88,17 @@ useShortcut('Escape', back)
 
       <section class="thread">
         <h2>当时的对话</h2>
-        <ChatThread v-if="session.messages.length > 0" :messages="session.messages" />
+        <ChatThread
+          v-if="session.messages.length > 0"
+          :messages="session.messages"
+          :teacher-name="session.teacherName"
+        />
         <p v-else class="weak">这次没有留下对话</p>
       </section>
 
       <section v-if="followUpMessages.length > 0" class="thread">
         <h2>接着问</h2>
-        <ChatThread :messages="followUpMessages" />
+        <ChatThread :messages="followUpMessages" :teacher-name="session.teacherName" />
       </section>
     </article>
   </div>

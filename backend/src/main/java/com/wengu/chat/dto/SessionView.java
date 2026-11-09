@@ -17,8 +17,10 @@ import java.util.List;
  * @param ratingEditable     已经评过分时，这次评分还能不能修改；没评分、接着问、知识点已合并或删除时为 false（决策 039）
  * @param followUpSessionId  学习会话的接着问会话，回顾时用；没有接着问时为 null（#82）
  * @param messages           按时间排列
+ * @param teacherName        用户现在设置的老师称呼，界面显示用；历史对话也显示现在的称呼（决策 042）
  */
 public record SessionView(long id, SessionType type, Long kpId, Long parentSessionId, String kpTitle, boolean ended,
                           boolean skippedExplanation, boolean generating, int activeSeconds, RatingOption rating,
-                          boolean ratingEditable, Long followUpSessionId, List<MessageView> messages) {
+                          boolean ratingEditable, Long followUpSessionId, List<MessageView> messages,
+                          String teacherName) {
 }

@@ -33,29 +33,71 @@ class UserSettingsServiceTest {
     void restoreDefaults() {
         jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
                 + " VALUES (1, 3, 'Asia/Shanghai', 4)");
-        settingsService.update(1, new UpdateSettingsRequest("Asia/Shanghai", 4, 3));
+        settingsService.update(1, new UpdateSettingsRequest("Asia/Shanghai", 4, 3, "老师"));
     }
 
     @Test
     void 读取用户的设置() {
-        assertThat(settingsService.get(1)).isEqualTo(new SettingsView("Asia/Shanghai", 4, 3));
+        assertThat(settingsService.get(1)).isEqualTo(new SettingsView("Asia/Shanghai", 4, 3, "老师"));
+    }
+
+    @Test
+    void 修改称呼时去掉首尾空格_其他字段不变() {
+        SettingsView updated = settingsService.update(1, new UpdateSettingsRequest(null, null, null, "  小明  "));
+
+        assertThat(updated).isEqualTo(new SettingsView("Asia/Shanghai", 4, 3, "小明"));
+        assertThat(settingsService.get(1)).isEqualTo(updated);
+    }
+
+    @Test
+    void 不传称呼时不变() {
+        settingsService.update(1, new UpdateSettingsRequest(null, null, null, "小明"));
+
+        settingsService.update(1, new UpdateSettingsRequest(null, null, 5));
+
+        assertThat(settingsService.get(1).teacherName()).isEqualTo("小明");
+    }
+
+    @Test
+    void 清空称呼时恢复成老师() {
+        settingsService.update(1, new UpdateSettingsRequest(null, null, null, "小明"));
+
+        assertThat(settingsService.update(1, new UpdateSettingsRequest(null, null, null, "   ")).teacherName())
+                .isEqualTo(UserSettingsService.DEFAULT_TEACHER_NAME);
+    }
+
+    @Test
+    void 称呼按字数算_表情也算一个字() {
+        String tenEmoji = "😀".repeat(10);
+
+        assertThat(settingsService.update(1, new UpdateSettingsRequest(null, null, null, tenEmoji)).teacherName())
+                .isEqualTo(tenEmoji);
+    }
+
+    @Test
+    void 称呼太长或带换行时返回400且不修改() {
+        assertBadRequest(new UpdateSettingsRequest(null, null, null, "一二三四五六七八九十多"));
+        assertBadRequest(new UpdateSettingsRequest(null, null, null, "小\n明"));
+        assertBadRequest(new UpdateSettingsRequest(null, null, null, "小\t明"));
+
+        assertThat(settingsService.get(1).teacherName()).isEqualTo("老师");
     }
 
     @Test
     void 只修改传了的字段() {
         SettingsView updated = settingsService.update(1, new UpdateSettingsRequest(null, null, 5));
 
-        assertThat(updated).isEqualTo(new SettingsView("Asia/Shanghai", 4, 5));
+        assertThat(updated).isEqualTo(new SettingsView("Asia/Shanghai", 4, 5, "老师"));
         assertThat(settingsService.get(1)).isEqualTo(updated);
 
         settingsService.update(1, new UpdateSettingsRequest(" America/New_York ", 0, null));
-        assertThat(settingsService.get(1)).isEqualTo(new SettingsView("America/New_York", 0, 5));
+        assertThat(settingsService.get(1)).isEqualTo(new SettingsView("America/New_York", 0, 5, "老师"));
     }
 
     @Test
     void 边界值可以保存() {
         settingsService.update(1, new UpdateSettingsRequest(null, 23, 0));
-        assertThat(settingsService.get(1)).isEqualTo(new SettingsView("Asia/Shanghai", 23, 0));
+        assertThat(settingsService.get(1)).isEqualTo(new SettingsView("Asia/Shanghai", 23, 0, "老师"));
 
         settingsService.update(1, new UpdateSettingsRequest(null, null, UserSettingsService.MAX_DAILY_NEW_LIMIT));
         assertThat(settingsService.get(1).dailyNewLimit()).isEqualTo(UserSettingsService.MAX_DAILY_NEW_LIMIT);
@@ -71,7 +113,7 @@ class UserSettingsServiceTest {
         // 一个字段不合法时，同一请求中合法的字段也不保存
         assertBadRequest(new UpdateSettingsRequest(null, 5, 99));
 
-        assertThat(settingsService.get(1)).isEqualTo(new SettingsView("Asia/Shanghai", 4, 3));
+        assertThat(settingsService.get(1)).isEqualTo(new SettingsView("Asia/Shanghai", 4, 3, "老师"));
     }
 
     private void assertBadRequest(UpdateSettingsRequest request) {

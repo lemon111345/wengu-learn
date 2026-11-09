@@ -12,8 +12,9 @@ const props = withDefaults(
     busy?: boolean
     /** 不能输入（如会话已经结束） */
     disabled?: boolean
+    teacherName?: string
   }>(),
-  { placeholder: '', busy: false, disabled: false },
+  { placeholder: '', busy: false, disabled: false, teacherName: '老师' },
 )
 const emit = defineEmits<{ send: [content: string] }>()
 
@@ -41,12 +42,12 @@ useShortcut('Mod+Enter', send)
       type="textarea"
       :autosize="{ minRows: 3, maxRows: 10 }"
       resize="vertical"
-      :placeholder="busy ? '老师说完后再回答' : placeholder"
+      :placeholder="busy ? `${teacherName}说完后再回答` : placeholder"
       :disabled="disabled"
     />
     <div class="actions">
       <slot name="left" />
-      <span class="status" aria-live="polite">{{ busy ? '老师正在回复' : '' }}</span>
+      <span class="status" aria-live="polite">{{ busy ? `${teacherName}正在回复` : '' }}</span>
       <el-button type="primary" class="send" :disabled="busy || disabled || text.trim() === ''" @click="send">
         发送<kbd>{{ modKeyLabel }} Enter</kbd>
       </el-button>

@@ -239,6 +239,19 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"));
     }
 
+    @Test
+    void 新用户的称呼是老师_可以通过接口修改() throws Exception {
+        MockHttpSession session = registered(newUsername(), null);
+        mockMvc.perform(get("/api/settings").session(session))
+                .andExpect(jsonPath("$.data.teacherName").value("老师"));
+
+        mockMvc.perform(patch("/api/settings").session(session).with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"teacherName\": \"小明\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.teacherName").value("小明"));
+    }
+
     /** 不用测试工具伪造令牌，按浏览器的做法：从 Cookie 中读出令牌，放进请求头。前端就是这样做的。 */
     @Test
     void 从Cookie中读出CSRF令牌放进请求头就能通过() throws Exception {

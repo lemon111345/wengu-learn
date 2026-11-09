@@ -19,6 +19,7 @@ import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmService;
 import com.wengu.review.dto.ReviewRecord;
 import com.wengu.review.service.ReviewService;
+import com.wengu.user.service.UserSettingsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.codec.ServerSentEvent;
@@ -62,6 +63,7 @@ public class ChatService {
     private final ReviewService reviewService;
     private final RatingSuggestionService suggestions;
     private final LlmService llmService;
+    private final UserSettingsService settingsService;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
     private final String studyPrompt = LearningChatPrompt.system();
@@ -70,7 +72,7 @@ public class ChatService {
     public ChatService(StudySessionService sessions, StudySessionMapper sessionMapper, MessageMapper messageMapper,
                        KnowledgePointService knowledgePointService, ReviewService reviewService,
                        RatingSuggestionService suggestions, LlmService llmService,
-                       TransactionTemplate transactionTemplate, Clock clock) {
+                       UserSettingsService settingsService, TransactionTemplate transactionTemplate, Clock clock) {
         this.sessions = sessions;
         this.sessionMapper = sessionMapper;
         this.messageMapper = messageMapper;
@@ -78,6 +80,7 @@ public class ChatService {
         this.reviewService = reviewService;
         this.suggestions = suggestions;
         this.llmService = llmService;
+        this.settingsService = settingsService;
         this.transactionTemplate = transactionTemplate;
         this.clock = clock;
     }
@@ -215,10 +218,12 @@ public class ChatService {
 
     private Rules rules(StudySession session, List<Message> messages) {
         StudyMaterial material = knowledgePointService.studyMaterial(session.getUserId(), session.getKpId());
+        String teacherName = settingsService.get(session.getUserId()).teacherName();
         return switch (session.getType()) {
-            case STUDY -> new Rules(studyPrompt, LearningChatPrompt.history(material, review(session), messages),
+            case STUDY -> new Rules(LearningChatPrompt.withTeacherName(studyPrompt, teacherName),
+                    LearningChatPrompt.history(material, review(session), messages),
                     LearningChatPrompt.TEMPERATURE, LearningChatPrompt.MAX_ANSWERS, true);
-            case FOLLOW_UP -> new Rules(followUpPrompt,
+            case FOLLOW_UP -> new Rules(LearningChatPrompt.withTeacherName(followUpPrompt, teacherName),
                     FollowUpPrompt.history(material, sessions.messages(session.getParentSessionId()), messages),
                     FollowUpPrompt.TEMPERATURE, FollowUpPrompt.MAX_QUESTIONS, false);
             case QUESTION -> throw new BusinessException(ErrorCode.BAD_REQUEST, "从一个问题开始还没有实现");

@@ -47,6 +47,8 @@ export interface SessionView {
   /** 学习会话的接着问会话，没有接着问时为 null；回顾时用（#82） */
   followUpSessionId: number | null
   messages: MessageView[]
+  /** 用户现在设置的老师称呼（决策 042） */
+  teacherName: string
 }
 
 /** AI 评分建议（决策 026） */

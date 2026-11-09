@@ -11,6 +11,7 @@ import AccountCard from './AccountCard.vue'
 import ModelCard from './ModelCard.vue'
 import ScheduleCard from './ScheduleCard.vue'
 import ShortcutsCard from './ShortcutsCard.vue'
+import TeacherCard from './TeacherCard.vue'
 
 const settings = ref<Settings | null>(null)
 /** 取不到时为 null，卡片显示“暂时取不到” */
@@ -97,7 +98,7 @@ onMounted(load)
     <div class="column">
       <ScheduleCard v-if="settings" :settings="settings" @change="save" />
       <el-skeleton v-else class="skeleton" :rows="5" animated />
-      <!-- “老师”卡片在 #53 完成后加在这里 -->
+      <TeacherCard v-if="settings" :settings="settings" @change="save" />
     </div>
     <div class="column">
       <template v-if="settings">

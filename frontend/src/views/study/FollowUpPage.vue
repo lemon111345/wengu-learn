@@ -71,18 +71,19 @@ useAutoScroll(() => [messages.value.length, streamingText.value])
         :messages="study.messages"
         :collapsed="Math.max(0, study.messages.length - 3)"
         :collapsed-text="`前面的 ${Math.max(0, study.messages.length - 3)} 条对话已折叠`"
+        :teacher-name="study.teacherName"
       />
     </section>
 
     <section class="intro">
       <h1>接着问</h1>
       <p>
-        想问什么都可以，问到弄懂为止，不影响评分。老师只回答，不出题。
+        想问什么都可以，问到弄懂为止，不影响评分。{{ session.teacherName }}只回答，不出题。
       </p>
     </section>
 
     <!-- 学生在前、老师在后 -->
-    <ChatThread :messages="messages" :streaming-text="streamingText" />
+    <ChatThread :messages="messages" :streaming-text="streamingText" :teacher-name="session.teacherName" />
     <div v-if="error" class="chat-error" role="alert">
       <span>{{ error.message }}</span>
       <el-button v-if="error.retryable" text type="primary" @click="reply">重试</el-button>
@@ -95,6 +96,7 @@ useAutoScroll(() => [messages.value.length, streamingText.value])
         placeholder="比如：ConcurrentHashMap 扩容时是怎么做的？"
         :busy="busy"
         :disabled="session.ended"
+        :teacher-name="session.teacherName"
         @send="send"
       >
         <template #left>

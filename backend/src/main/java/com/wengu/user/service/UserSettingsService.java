@@ -21,6 +21,11 @@ public class UserSettingsService {
     /** 每天学几个（含复习）的上限，防止误填一个很大的数。 */
     public static final int MAX_DAILY_NEW_LIMIT = 50;
 
+    /** 老师的默认称呼（决策 042）。chat 用它判断要不要在 prompt 中说明称呼 */
+    public static final String DEFAULT_TEACHER_NAME = "老师";
+
+    static final int MAX_TEACHER_NAME_LENGTH = 10;
+
     /** 新用户的默认值（决策 009 第 5 条）。 */
     static final int DEFAULT_DAILY_NEW_LIMIT = 5;
     static final int DEFAULT_DAY_START_HOUR = 4;
@@ -45,6 +50,7 @@ public class UserSettingsService {
         settings.setDailyNewLimit(DEFAULT_DAILY_NEW_LIMIT);
         settings.setDayStartHour(DEFAULT_DAY_START_HOUR);
         settings.setTimezone(timezoneOrDefault(browserTimezone));
+        settings.setTeacherName(DEFAULT_TEACHER_NAME);
         settingsMapper.insert(settings);
     }
 
@@ -98,8 +104,26 @@ public class UserSettingsService {
             }
             settings.setDailyNewLimit(request.dailyNewLimit());
         }
+        if (request.teacherName() != null) {
+            settings.setTeacherName(validTeacherName(request.teacherName()));
+        }
         settingsMapper.updateById(settings);
         return toView(settings);
+    }
+
+    /** 称呼会进系统提示，长度和控制字符要在这里挡住。设置页自动保存，清空输入框不算填错，恢复成默认值 */
+    private static String validTeacherName(String name) {
+        String trimmed = name.strip();
+        if (trimmed.isEmpty()) {
+            return DEFAULT_TEACHER_NAME;
+        }
+        if (trimmed.codePointCount(0, trimmed.length()) > MAX_TEACHER_NAME_LENGTH) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "称呼最多 " + MAX_TEACHER_NAME_LENGTH + " 个字");
+        }
+        if (trimmed.codePoints().anyMatch(Character::isISOControl)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "称呼不能包含换行等控制字符");
+        }
+        return trimmed;
     }
 
     /** 必须是 IANA 时区（如 Asia/Shanghai）。也接受 +08:00 这样的固定偏移，但它没有夏令时，一般不推荐。 */
@@ -113,6 +137,7 @@ public class UserSettingsService {
     }
 
     private static SettingsView toView(UserSettings settings) {
-        return new SettingsView(settings.getTimezone(), settings.getDayStartHour(), settings.getDailyNewLimit());
+        return new SettingsView(settings.getTimezone(), settings.getDayStartHour(), settings.getDailyNewLimit(),
+                settings.getTeacherName());
     }
 }
