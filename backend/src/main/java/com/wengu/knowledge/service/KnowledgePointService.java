@@ -194,6 +194,15 @@ public class KnowledgePointService {
     }
 
     /**
+     * 知识点的标题，已删除、已合并的也返回：学习记录还在（决策 029），回顾当时的学习时要显示（#82）。
+     * 不存在或不属于该用户时为 null。
+     */
+    public String titleIncludingDeleted(long userId, long kpId) {
+        KnowledgePoint kp = knowledgePointMapper.selectById(kpId);
+        return kp == null || kp.getUserId() != userId ? null : kp.getTitle();
+    }
+
+    /**
      * 按 id 查标题和类型，供每日计划显示今天已完成的条目（#48）。
      * 暂停的也返回：“今天学过”是已经发生的事，暂停不改变它；删除的不返回，知识点没了，今天页也不再显示。
      * 不属于该用户的 id 不在结果中。

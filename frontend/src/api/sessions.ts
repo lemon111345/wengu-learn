@@ -44,6 +44,8 @@ export interface SessionView {
   rating: RatingOption | null
   /** 已经评过分时，这次评分还能不能修改（决策 039） */
   ratingEditable: boolean
+  /** 学习会话的接着问会话，没有接着问时为 null；回顾时用（#82） */
+  followUpSessionId: number | null
   messages: MessageView[]
 }
 
@@ -87,6 +89,11 @@ export function streamSkipExplanation(id: number, handlers: StreamHandlers, sign
 /** AI 评分建议：第一次调用要等模型十几到二十几秒 */
 export function fetchRatingSuggestion(id: number) {
   return post<RatingSuggestionView>(`/api/sessions/${id}/rating-suggestion`)
+}
+
+/** 已经生成的 AI 评分建议，没有时为 null。只读，不调用模型，回顾时用（#82） */
+export function fetchSavedRatingSuggestion(id: number) {
+  return get<RatingSuggestionView | null>(`/api/sessions/${id}/rating-suggestion`)
 }
 
 /** 四种评分的下次复习日期，按忘了、困难、良好、简单排列 */

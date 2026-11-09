@@ -13,6 +13,8 @@ export interface CompletedItem extends PlanItem {
   rating: Rating
   /** 是否为新学，否则是复习 */
   firstReview: boolean
+  /** 这次评分对应的学习会话，点开回顾；没有时为 null */
+  sessionId: number | null
 }
 
 export interface UpcomingDay {

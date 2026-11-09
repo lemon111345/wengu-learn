@@ -177,7 +177,7 @@ public class KnowledgeLibraryService {
         ids.add(kpId);
         return reviewService.reviewsOf(userId, ids).stream()
                 .map(r -> new StudyRecord(studyDate(r.reviewedAt(), settings), r.firstReview(), r.rating(),
-                        r.ratingAi(), mergedTitles.get(r.kpId())))
+                        r.ratingAi(), mergedTitles.get(r.kpId()), r.sessionId()))
                 .toList();
     }
 

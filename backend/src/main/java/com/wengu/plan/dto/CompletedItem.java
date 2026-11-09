@@ -11,6 +11,8 @@ import com.wengu.review.fsrs.Rating;
  * @param type        知识点类型
  * @param rating      今天的评分；同一个知识点今天评了多次时取最后一次
  * @param firstReview 是否为新学，否则是复习
+ * @param sessionId   这次评分对应的学习会话，点开回顾（#82）；没有时为 null
  */
-public record CompletedItem(long kpId, String title, KnowledgePointType type, Rating rating, boolean firstReview) {
+public record CompletedItem(long kpId, String title, KnowledgePointType type, Rating rating, boolean firstReview,
+                            Long sessionId) {
 }

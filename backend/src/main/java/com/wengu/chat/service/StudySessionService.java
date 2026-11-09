@@ -87,7 +87,7 @@ public class StudySessionService {
                 .orderByDesc(StudySession::getId)
                 .last("LIMIT 1"));
         if (latest != null && (latest.getEndedAt() == null || !reviewService.isRated(latest.getId()))) {
-            return view(latest, material.title());
+            return view(latest, material.title(), true);
         }
 
         Instant now = Instant.now(clock);
@@ -101,7 +101,7 @@ public class StudySessionService {
         session.setLastActiveAt(now);
         session.setPromptVersion(LearningChatPrompt.VERSION);
         sessionMapper.insert(session);
-        return view(session, material.title());
+        return view(session, material.title(), true);
     }
 
     /**
@@ -119,11 +119,7 @@ public class StudySessionService {
         if (study.getEndedAt() == null) {
             throw new BusinessException(ErrorCode.CONFLICT, "学完这个知识点之后才能接着问");
         }
-        StudySession followUp = sessionMapper.selectOne(new LambdaQueryWrapper<StudySession>()
-                .eq(StudySession::getParentSessionId, studySessionId)
-                .eq(StudySession::getType, SessionType.FOLLOW_UP)
-                .orderByDesc(StudySession::getId)
-                .last("LIMIT 1"));
+        StudySession followUp = findFollowUp(studySessionId);
         if (followUp == null) {
             Instant now = Instant.now(clock);
             followUp = new StudySession();
@@ -144,9 +140,13 @@ public class StudySessionService {
     /** 会话和全部消息，刷新后恢复用。 */
     public SessionView get(long userId, long sessionId) {
         StudySession session = find(userId, sessionId);
-        KnowledgePointSummary kp = session.getKpId() == null ? null
-                : knowledgePointService.summaries(userId, List.of(session.getKpId())).get(session.getKpId());
-        return view(session, kp == null ? null : kp.title());
+        if (session.getKpId() == null) {
+            return view(session, null, false);
+        }
+        KnowledgePointSummary kp = knowledgePointService.summaries(userId, List.of(session.getKpId())).get(session.getKpId());
+        // 知识点被合并或删除后学习记录还在（决策 029），回顾时仍要显示标题；它的调度状态已经不用了，不能再改分
+        return kp != null ? view(session, kp.title(), true)
+                : view(session, knowledgePointService.titleIncludingDeleted(userId, session.getKpId()), false);
     }
 
     /**
@@ -236,14 +236,31 @@ public class StudySessionService {
         return (int) Math.min(Duration.between(last, now).toSeconds(), IDLE_CAP.toSeconds());
     }
 
-    private SessionView view(StudySession session, String kpTitle) {
+    private SessionView view(StudySession session, String kpTitle, boolean kpExists) {
         List<MessageView> messages = messages(session.getId()).stream()
                 .map(m -> new MessageView(m.getId(), m.getRole(), m.getContent(), m.getMarker(), m.getCreatedAt()))
                 .toList();
         return new SessionView(session.getId(), session.getType(), session.getKpId(), session.getParentSessionId(), kpTitle,
                 session.getEndedAt() != null, Boolean.TRUE.equals(session.getSkippedExplanation()),
                 isGenerating(session.getId()), session.getActiveSeconds(), rating(session),
-                reviewService.isRatingChangeable(session.getId()), messages);
+                kpExists && reviewService.isRatingChangeable(session.getId()), followUpSessionId(session), messages);
+    }
+
+    private StudySession findFollowUp(long studySessionId) {
+        return sessionMapper.selectOne(new LambdaQueryWrapper<StudySession>()
+                .eq(StudySession::getParentSessionId, studySessionId)
+                .eq(StudySession::getType, SessionType.FOLLOW_UP)
+                .orderByDesc(StudySession::getId)
+                .last("LIMIT 1"));
+    }
+
+    /** 只查不建：回顾时不能因为打开页面就多出一个接着问的会话（#82） */
+    private Long followUpSessionId(StudySession session) {
+        if (session.getType() != SessionType.STUDY) {
+            return null;
+        }
+        StudySession followUp = findFollowUp(session.getId());
+        return followUp == null ? null : followUp.getId();
     }
 
     /** 学习会话已经评过分时，评分和下次复习的学习日；其他情况为 null */

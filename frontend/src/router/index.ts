@@ -35,6 +35,8 @@ const router = createRouter({
         // 草稿：抽取进度、确认知识点、已确认的结果，按状态显示（决策 028）
         { path: 'drafts/:id', component: () => import('@/views/import/DraftPage.vue'), props: true },
         { path: 'settings', component: () => import('@/views/settings/SettingsView.vue') },
+        // 回顾一次学习（只读）：读东西不是在学习，放在应用框架里，不用学习模式的进度和计时
+        { path: 'history/:id', component: () => import('@/views/history/HistoryPage.vue'), props: true },
       ],
     },
     {

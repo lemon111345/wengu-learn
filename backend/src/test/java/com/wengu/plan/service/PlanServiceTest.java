@@ -492,7 +492,12 @@ class PlanServiceTest {
 
     /** 写一条评分流水，不改调度状态：“今天已完成”只看流水。 */
     private void log(KnowledgePoint kp, Instant at, Rating rating, boolean first) {
+        log(kp, at, rating, first, null);
+    }
+
+    private void log(KnowledgePoint kp, Instant at, Rating rating, boolean first, Long sessionId) {
         ReviewLog log = new ReviewLog();
+        log.setSessionId(sessionId);
         log.setUserId(kp.getUserId());
         log.setKpId(kp.getId());
         log.setRatingUser(rating);
@@ -512,8 +517,17 @@ class PlanServiceTest {
         TodayPlan plan = planService.today(1);
 
         assertThat(plan.completed()).containsExactly(
-                new CompletedItem(learned.getId(), "新学的", KnowledgePointType.MECHANISM, Rating.GOOD, true),
-                new CompletedItem(reviewed.getId(), "复习的", KnowledgePointType.MECHANISM, Rating.HARD, false));
+                new CompletedItem(learned.getId(), "新学的", KnowledgePointType.MECHANISM, Rating.GOOD, true, null),
+                new CompletedItem(reviewed.getId(), "复习的", KnowledgePointType.MECHANISM, Rating.HARD, false, null));
+    }
+
+    @Test
+    void 今天已完成的带上最后一次评分的会话() {
+        KnowledgePoint kp = reviewedKp("评了两次的", 1, NOW.plus(Duration.ofDays(3)));
+        log(kp, NOW.minus(Duration.ofHours(2)), Rating.GOOD, false, 701L);
+        log(kp, NOW.minus(Duration.ofHours(1)), Rating.HARD, false, 702L);
+
+        assertThat(planService.today(1).completed()).extracting(CompletedItem::sessionId).containsExactly(702L);
     }
 
     @Test

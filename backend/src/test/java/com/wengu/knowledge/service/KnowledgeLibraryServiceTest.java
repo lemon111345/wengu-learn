@@ -423,15 +423,32 @@ class KnowledgeLibraryServiceTest {
         KnowledgePointDetail detail = libraryService.detail(USER_ID, primary);
 
         assertThat(detail.reviews()).containsExactly(
-                new StudyRecord(LocalDate.of(2026, 10, 28), true, Rating.GOOD, Rating.GOOD, null),
-                new StudyRecord(LocalDate.of(2026, 10, 25), false, Rating.EASY, Rating.GOOD, "volatile 有什么用？"),
-                new StudyRecord(LocalDate.of(2026, 10, 20), true, Rating.HARD, null, "volatile 有什么用？"),
-                new StudyRecord(LocalDate.of(2026, 10, 10), true, Rating.AGAIN, Rating.HARD, "volatile 的可见性是什么？"));
+                new StudyRecord(LocalDate.of(2026, 10, 28), true, Rating.GOOD, Rating.GOOD, null, null),
+                new StudyRecord(LocalDate.of(2026, 10, 25), false, Rating.EASY, Rating.GOOD, "volatile 有什么用？", null),
+                new StudyRecord(LocalDate.of(2026, 10, 20), true, Rating.HARD, null, "volatile 有什么用？", null),
+                new StudyRecord(LocalDate.of(2026, 10, 10), true, Rating.AGAIN, Rating.HARD, "volatile 的可见性是什么？", null));
         assertThat(detail.sources()).containsExactly(
                 new SourceRef(first, "Java 面试题", List.of(1)),
                 new SourceRef(second, "并发专题", List.of(2, 4, 6)));
         // 主知识点的复习进度不变：它自己的卡
         assertThat(detail.mastery()).isEqualTo(Mastery.NEW);
+    }
+
+    @Test
+    void 学习记录带上那次学习的会话() {
+        long kpId = knowledgePointService.create(USER_ID, null, List.of(point(KnowledgePointType.CONCEPT, "有会话的")))
+                .getFirst();
+        ReviewLog log = new ReviewLog();
+        log.setUserId(USER_ID);
+        log.setKpId(kpId);
+        log.setSessionId(777L);
+        log.setRatingUser(Rating.GOOD);
+        log.setStateBefore(State.LEARNING);
+        log.setFirstReview(true);
+        log.setReviewedAt(Instant.parse("2026-10-20T02:00:00Z"));
+        reviewLogMapper.insert(log);
+
+        assertThat(libraryService.detail(USER_ID, kpId).reviews()).extracting(StudyRecord::sessionId).containsExactly(777L);
     }
 
     @Test

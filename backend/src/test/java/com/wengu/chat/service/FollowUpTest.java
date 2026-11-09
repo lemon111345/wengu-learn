@@ -133,6 +133,19 @@ class FollowUpTest {
     }
 
     @Test
+    void 回顾时查得到接着问的会话且读取不会新建() {
+        finishStudy();
+
+        assertThat(sessionService.get(USER_ID, studyId).followUpSessionId()).isNull();
+        assertThat(sessionMapper.selectCount(null)).isEqualTo(1);
+
+        long followUpId = sessionService.startFollowUp(USER_ID, studyId).id();
+
+        assertThat(sessionService.get(USER_ID, studyId).followUpSessionId()).isEqualTo(followUpId);
+        assertThat(sessionService.get(USER_ID, followUpId).followUpSessionId()).isNull();
+    }
+
+    @Test
     void 学完之后才能接着问且再次进入是同一个会话() {
         assertError(() -> sessionService.startFollowUp(USER_ID, studyId), ErrorCode.CONFLICT);
         finishStudy();

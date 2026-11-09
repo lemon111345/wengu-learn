@@ -47,6 +47,8 @@ export interface StudyRecord {
   ratingAi: Rating | null
   /** 来自被合并的知识点时为它的标题 */
   mergedFrom: string | null
+  /** 那次学习的会话，点开回顾；没有时为 null */
+  sessionId: number | null
 }
 
 export interface SourceRef {

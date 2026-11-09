@@ -154,6 +154,7 @@ class ReviewServiceTest {
         withAi.setStateBefore(State.REVIEW);
         withAi.setFirstReview(false);
         withAi.setReviewedAt(NOW);
+        withAi.setSessionId(9501L);
         reviewLogMapper.insert(withAi);
         log(503, 1, true, NOW);
         log(501, 2, true, NOW);
@@ -161,7 +162,7 @@ class ReviewServiceTest {
         List<ReviewRecord> records = reviewService.reviewsOf(1, List.of(501L, 502L));
 
         assertThat(records).extracting(ReviewRecord::kpId).containsExactly(501L, 502L, 501L);
-        assertThat(records.getFirst()).isEqualTo(new ReviewRecord(501, Rating.HARD, Rating.AGAIN, false, NOW));
+        assertThat(records.getFirst()).isEqualTo(new ReviewRecord(501, Rating.HARD, Rating.AGAIN, false, NOW, 9501L));
         assertThat(records.get(2).ratingAi()).isNull();
         assertThat(reviewService.reviewsOf(1, List.of())).isEmpty();
     }
