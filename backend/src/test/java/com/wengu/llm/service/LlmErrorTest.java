@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "spring.ai.openai.chat.options.model=test-model"})
 class LlmErrorTest {
 
-    /** 假服务这次怎么回应：HTTP 状态码，或者 ok、empty、slow */
+    /** 假服务这次怎么回应：HTTP 状态码，或者 ok、empty、slow、truncated（用量明显少于发送的内容） */
     private static volatile String mode = "ok";
 
     /** 最近一次收到的请求体 */
@@ -153,6 +153,50 @@ class LlmErrorTest {
         assertThat(statusTracker.status().lastCall().ok()).isTrue();
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "你好, 2",
+            "你好，世界。, 6",
+            "abcdefg, 2",
+            "你好abcdefg, 4",
+            "'', 0"
+    })
+    void 估算token_中日韩字符算1个_其余按3点5个字符算1个(String text, long expected) {
+        assertThat(LlmService.estimateTokens(text)).isEqualTo(expected);
+    }
+
+    /** 数字来自 qwen2.5:7b、上下文 16384 的实测：估算约 2 万时，正常的实际值是 1.6 万，截断后固定为 8194（决策 045） */
+    @ParameterizedTest
+    @CsvSource({
+            "16259, false",
+            "12001, false",
+            "11999, true",
+            "8194, true"
+    })
+    void 实际token明显少于估算时算截断(int promptTokens, boolean truncated) {
+        String twentyThousand = "题".repeat(20000);
+
+        assertThat(LlmService.promptTruncated("", twentyThousand, promptTokens)).isEqualTo(truncated);
+    }
+
+    @Test
+    void 服务商没有返回用量时不判断截断() {
+        String longText = "题".repeat(20000);
+
+        assertThat(LlmService.promptTruncated("", longText, null)).isFalse();
+        assertThat(LlmService.promptTruncated("", longText, 0)).isFalse();
+    }
+
+    @Test
+    void 提示词被截断时给出明确原因_不算模型出错() {
+        assertThat(llmService.call("系统", "你好", Reply.class).content()).isEqualTo(new Reply("hi"));
+
+        mode = "truncated";
+
+        assertThat(callError()).isEqualTo(ErrorCode.LLM_CONTEXT_EXCEEDED);
+        assertThat(statusTracker.status().lastCall().ok()).isTrue();
+    }
+
     @Test
     void 记下最近一次调用的结果() {
         mode = "401";
@@ -208,7 +252,8 @@ class LlmErrorTest {
                             : "{\"id\":\"x\",\"object\":\"chat.completion\",\"created\":1,\"model\":\"test-model\","
                             + "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\""
                             + (text.isEmpty() ? "" : json) + "\"},\"finish_reason\":\"stop\"}],"
-                            + "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}";
+                            + "\"usage\":{\"prompt_tokens\":" + (current.equals("truncated") ? 1 : 100000)
+                            + ",\"completion_tokens\":1,\"total_tokens\":2}}";
                 }
                 byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type",
