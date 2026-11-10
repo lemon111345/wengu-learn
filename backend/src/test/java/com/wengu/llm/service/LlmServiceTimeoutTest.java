@@ -134,7 +134,7 @@ class LlmServiceTimeoutTest {
                         """ : """
                         {"id":"x","object":"chat.completion","created":1,"model":"test-model",
                          "choices":[{"index":0,"message":{"role":"assistant","content":"{\\"answer\\":\\"hi\\"}"},"finish_reason":"stop"}],
-                         "usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}
+                         "usage":{"prompt_tokens":100000,"completion_tokens":1,"total_tokens":2}}
                         """).getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", stream ? "text/event-stream" : "application/json");
                 try {

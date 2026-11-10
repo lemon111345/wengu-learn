@@ -45,6 +45,9 @@ public class LlmService {
 
     private static final Logger log = LoggerFactory.getLogger(LlmService.class);
 
+    /** 实际 token 数不到估算值的这个比例时，认为提示词被截断了。实测正常 0.73～0.89，截断时不超过 0.41（决策 045） */
+    private static final double TRUNCATED_PROMPT_RATIO = 0.6;
+
     private final ChatClient chatClient;
     private final Duration timeout;
     private final LlmStatusTracker status;
@@ -198,7 +201,7 @@ public class LlmService {
      * 文本按原样发送，不做模板渲染，其中的花括号不需要转义。
      *
      * @throws LlmOutputParseException 返回内容无法解析时抛出，携带原始返回
-     * @throws LlmException            调用失败，或者没有返回正文
+     * @throws LlmException            调用失败、没有返回正文，或者提示词被截断
      */
     public <T> LlmResult<T> call(String system, String user, Class<T> type) {
         return call(system, user, type, null);
@@ -211,9 +214,10 @@ public class LlmService {
      */
     public <T> LlmResult<T> call(String system, String user, Class<T> type, Double temperature) {
         BeanOutputConverter<T> converter = new BeanOutputConverter<>(type);
+        String fullUser = user + "\n\n" + converter.getFormat();
         ChatResponse response = guard(() -> chatClient.prompt()
                 .system(system)
-                .user(user + "\n\n" + converter.getFormat())
+                .user(fullUser)
                 .options(options(temperature))
                 .call()
                 .chatResponse());
@@ -229,6 +233,13 @@ public class LlmService {
                 generation.getMetadata().getFinishReason(),
                 usage == null ? null : usage.getPromptTokens(),
                 usage == null ? null : usage.getCompletionTokens());
+        // 放在空正文判断之前：提示词残缺时，后面的任何结果都不可信。
+        // 和不支持图片一样，模型本身没有坏，不计入模型状态的失败（决策 044、045）
+        if (promptTruncated(system, fullUser, raw.promptTokens())) {
+            log.warn("提示词疑似被截断: promptTokens={}, 估算={}", raw.promptTokens(),
+                    estimateTokens(system) + estimateTokens(fullUser));
+            throw new LlmException(ErrorCode.LLM_CONTEXT_EXCEEDED);
+        }
         // 正常结束却没有正文：不当作“输出不合格”，否则调用方会重试，而这多半每次都一样（决策 032）。
         // 被截断（length）的空输出仍然算输出问题，交给下面的解析
         if ((raw.rawText() == null || raw.rawText().isBlank()) && !raw.truncated()) {
@@ -244,5 +255,30 @@ public class LlmService {
             String reason = raw.truncated() ? "输出达到长度上限被截断" : "返回内容不符合要求的 JSON 结构";
             throw new LlmOutputParseException(reason, raw, e);
         }
+    }
+
+    /**
+     * 提示词有没有被截断：模型实际读到的 token 数明显少于发送内容的估算值。
+     * <p>
+     * Ollama 的 OpenAI 兼容接口在提示词超过上下文时不报错，只是悄悄丢掉一部分（决策 032、045）。
+     *
+     * @param promptTokens 服务商返回的提示词 token 数，没有返回时不判断
+     */
+    static boolean promptTruncated(String system, String user, Integer promptTokens) {
+        if (promptTokens == null || promptTokens <= 0) {
+            return false;
+        }
+        return promptTokens < TRUNCATED_PROMPT_RATIO * (estimateTokens(system) + estimateTokens(user));
+    }
+
+    /** 粗略估算 token 数：中日韩字符和全角符号算 1 个，其余 3.5 个字符算 1 个 */
+    static long estimateTokens(String text) {
+        long wide = text.codePoints().filter(LlmService::isWide).count();
+        long others = text.codePointCount(0, text.length()) - wide;
+        return Math.round(wide + others / 3.5);
+    }
+
+    private static boolean isWide(int codePoint) {
+        return (codePoint >= 0x3000 && codePoint <= 0x9FFF) || (codePoint >= 0xFF00 && codePoint <= 0xFFEF);
     }
 }
