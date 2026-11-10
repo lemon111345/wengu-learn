@@ -71,6 +71,8 @@ onBeforeUnmount(() => clearTimeout(timer))
 
 .list {
   flex: 0 0 340px;
+  /* flex 子元素默认不能比内容窄，不换行的长问题会把左栏撑开（#108） */
+  min-width: 0;
 }
 
 .detail {
