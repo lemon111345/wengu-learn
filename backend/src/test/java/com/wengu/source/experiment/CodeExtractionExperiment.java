@@ -37,13 +37,14 @@ import java.util.stream.Stream;
  * <pre>
  * .\mvnw.cmd test "-Dtest=CodeExtractionExperiment" "-Dllm.experiment=true"
  * </pre>
- * 只跑部分组、改次数：-Dcode.sets=A,D -Dcode.runs=1。换模型：设置 WENGU_LLM_MODEL 环境变量。
+ * 只跑部分组、改次数：-Dcode.sets=A,D -Dcode.runs=1。换 prompt 版本：-Dcode.prompt.version=v1（默认 v2）。
+ * 换模型：设置 WENGU_LLM_MODEL 环境变量。
  */
 @SpringBootTest(properties = {NoDatabase.PROPERTY, NoDatabase.LAZY_PROPERTY, NoDatabase.NO_RECOVERY_PROPERTY})
 @EnabledIfSystemProperty(named = "llm.experiment", matches = "true")
 class CodeExtractionExperiment {
 
-    static final String PROMPT_VERSION = "v1";
+    static final String PROMPT_VERSION = System.getProperty("code.prompt.version", "v2");
 
     /** 和题目抽取一样用 0.2，结果要稳定。 */
     private static final double TEMPERATURE = 0.2;

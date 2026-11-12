@@ -101,12 +101,12 @@ class CodeExtractionSupportTest {
 
     @Test
     void 没有依据的知识点会被指出() {
-        KnowledgePoint noEvidence = new KnowledgePoint("CHAIN", List.of(), 1, "要点", "标题？", List.of());
+        KnowledgePoint noEvidence = new KnowledgePoint("CHAIN", List.of(), 1, null, "要点", null, "标题？", List.of());
 
         assertThat(CodeExtractionSupport.checkEvidence(FILES, noEvidence)).containsExactly("第 1 个知识点：没有代码依据");
     }
 
     private static KnowledgePoint kp(Evidence evidence) {
-        return new KnowledgePoint("CHAIN", List.of(evidence), 1, "要点", "标题？", List.of());
+        return new KnowledgePoint("CHAIN", List.of(evidence), 1, null, "要点", null, "标题？", List.of());
     }
 }

@@ -18,8 +18,9 @@ final class CodeExtractionSupport {
 
     private static final String BOM = "﻿";
 
-    private static final List<String> HEADER = List.of("组", "第几次", "序号", "角度", "标题", "要点", "代码依据",
-            "代码证明不了的问题", "依据校验", "值得学（Y/N）", "事实错误（Y/N）", "编造动机（Y/N）", "粒度合适（Y/N）", "备注");
+    private static final List<String> HEADER = List.of("组", "第几次", "序号", "角度", "标题", "要点", "细节", "前置概念",
+            "代码依据", "代码证明不了的问题", "依据校验", "值得学（Y/N）", "事实错误（Y/N）", "编造动机（Y/N）", "粒度合适（Y/N）",
+            "前置卡有错（Y/N）", "备注");
 
     private CodeExtractionSupport() {
     }
@@ -135,17 +136,27 @@ final class CodeExtractionSupport {
                 .sum();
     }
 
-    /** 给作者标注的表：一行一个知识点，最后五列留空。带 BOM 和 \r\n，Excel 打开不乱码。 */
+    /** 给作者标注的表：一行一个知识点，最后六列留空。带 BOM 和 \r\n，Excel 打开不乱码。 */
     static String annotationCsv(String setName, int run, Map<String, String> files, CodeExtractionResult result) {
         Stream<List<String>> rows = result.knowledgePoints().stream()
                 .sorted(Comparator.comparingInt(KnowledgePoint::order))
                 .map(kp -> List.of(setName, String.valueOf(run), String.valueOf(kp.order()), nullToEmpty(kp.angle()),
-                        nullToEmpty(kp.title()), nullToEmpty(kp.summary()), evidenceText(kp),
+                        nullToEmpty(kp.title()), nullToEmpty(kp.summary()), nullToEmpty(kp.summaryDetails()),
+                        prerequisiteText(kp), evidenceText(kp),
                         kp.unverifiable() == null ? "" : String.join("\n", kp.unverifiable()),
-                        String.join("\n", checkEvidence(files, kp)), "", "", "", "", ""));
+                        String.join("\n", checkEvidence(files, kp)), "", "", "", "", "", ""));
         return BOM + Stream.concat(Stream.of(HEADER), rows)
                 .map(CodeExtractionSupport::csvLine)
                 .collect(Collectors.joining("\r\n")) + "\r\n";
+    }
+
+    private static String prerequisiteText(KnowledgePoint kp) {
+        if (kp.prerequisites() == null) {
+            return "";
+        }
+        return kp.prerequisites().stream()
+                .map(p -> p.concept() + "：" + p.explanation())
+                .collect(Collectors.joining("\n"));
     }
 
     private static String evidenceText(KnowledgePoint kp) {
