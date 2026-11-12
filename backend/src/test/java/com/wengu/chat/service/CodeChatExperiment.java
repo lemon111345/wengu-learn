@@ -1,7 +1,6 @@
 package com.wengu.chat.service;
 
 import com.wengu.NoDatabase;
-import com.wengu.WenguApplication;
 import com.wengu.chat.dto.RatingSuggestionResult;
 import com.wengu.chat.entity.Marker;
 import com.wengu.chat.service.CodeChatSupport.CodeKp;
@@ -12,9 +11,6 @@ import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmOutputParseException;
 import com.wengu.llm.service.LlmService;
 import com.wengu.review.fsrs.Rating;
-import org.springframework.boot.Banner;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.WebApplicationType;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.env.Environment;
 import tools.jackson.databind.SerializationFeature;
@@ -79,12 +75,7 @@ public class CodeChatExperiment {
     }
 
     public static void main(String[] args) throws IOException {
-        SpringApplication app = new SpringApplication(WenguApplication.class);
-        app.setWebApplicationType(WebApplicationType.NONE);
-        app.setBannerMode(Banner.Mode.OFF);
-        app.setDefaultProperties(Map.of("logging.level.root", "WARN", NoDatabase.EXCLUDE_KEY, NoDatabase.EXCLUDE_VALUE,
-                NoDatabase.LAZY_KEY, "true", NoDatabase.NO_RECOVERY_KEY, "false"));
-        try (ConfigurableApplicationContext context = app.run(args)) {
+        try (ConfigurableApplicationContext context = NoDatabase.start(args)) {
             new CodeChatExperiment(context.getBean(LlmService.class), context.getEnvironment()).run();
         }
     }
