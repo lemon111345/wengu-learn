@@ -56,6 +56,7 @@ public class CodeChatRehearsal {
             %s
             - 回答老师的问题时用一到三句话，大约一半能答对，其余有遗漏或说错，偶尔直接说“这个忘了”。
             - 老师问当时为什么这样设计时，有时给出一个说得通的理由，有时说“不记得了，这段是 AI 写的”。
+            - 大约每两次回答里有一次会反问老师用到的基础概念，比如“这个事件是什么东西？”，偶尔一条消息里问两个问题。
             - 老师要求完整作答时，用四到六句话回答，漏掉一两个要点。
             - 只输出学生说的话，不要解释你在扮演。""";
 
@@ -70,8 +71,8 @@ public class CodeChatRehearsal {
     CodeChatRehearsal(LlmService llm, Environment env) throws IOException {
         this.llm = llm;
         this.kps = CodeChatExperiment.selectedKnowledgePoints(JsonMapper.builder().build(), env);
-        this.chatPrompt = LearningChatPrompt.load("prompts/code-learning-chat-" + env.getProperty("code.chat.version", "v1") + ".md");
-        this.ratingPrompt = LearningChatPrompt.load("prompts/code-rating-suggestion-" + env.getProperty("code.rating.version", "v1") + ".md");
+        this.chatPrompt = LearningChatPrompt.load("prompts/code-learning-chat-" + env.getProperty("code.chat.version", CodeChatExperiment.DEFAULT_VERSION) + ".md");
+        this.ratingPrompt = LearningChatPrompt.load("prompts/code-rating-suggestion-" + env.getProperty("code.rating.version", CodeChatExperiment.DEFAULT_VERSION) + ".md");
     }
 
     public static void main(String[] args) throws Exception {
@@ -167,7 +168,7 @@ public class CodeChatRehearsal {
                 + "\n\n**AI 评分：**" + ratingText + "\n";
         // 复习用的 lastRating 在预演里没有自评，固定为 HARD；真实实验用作者的自评
         SessionRecord record = new SessionRecord(kp.order(), kp.title(), kp.angle(), "study", "", "", answers, ended, 0, 0, dialogue,
-                Rating.HARD, "", "", "", "", suggestion, null);
+                Rating.HARD, "", "", "", "", suggestion, null, null);
         return new Flow(text, record);
     }
 

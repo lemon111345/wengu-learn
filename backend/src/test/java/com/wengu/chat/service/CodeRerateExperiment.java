@@ -37,7 +37,7 @@ import java.util.stream.Stream;
  * <pre>
  * .\mvnw.cmd -q spring-boot:test-run "-Dspring-boot.run.main-class=com.wengu.chat.service.CodeRerateExperiment"
  * </pre>
- * 参数和 {@link CodeChatExperiment} 相同：--code.round、--code.result、--code.rating.version。
+ * 参数和 {@link CodeChatExperiment} 相同：--code.round、--code.result、--code.rating.version，默认也是当前这一轮。
  */
 public class CodeRerateExperiment {
 
@@ -60,8 +60,8 @@ public class CodeRerateExperiment {
 
     void run() throws IOException {
         Path experiments = CodeChatExperiment.DATA.resolve("experiments");
-        Path roundDir = experiments.resolve("code-chat-round" + env.getProperty("code.round", "1"));
-        String ratingVersion = env.getProperty("code.rating.version", "v1");
+        Path roundDir = experiments.resolve("code-chat-round" + env.getProperty("code.round", CodeChatExperiment.DEFAULT_ROUND));
+        String ratingVersion = env.getProperty("code.rating.version", CodeChatExperiment.DEFAULT_VERSION);
         String ratingPrompt = LearningChatPrompt.load("prompts/code-rating-suggestion-" + ratingVersion + ".md");
         Path result = experiments.resolve(env.getProperty("code.result", CodeChatExperiment.DEFAULT_RESULT)).resolve("result.json");
         Map<Integer, CodeKp> kps = json.readValue(Files.readString(result), Extraction.class).knowledgePoints().stream()

@@ -22,9 +22,24 @@ final class CodeChatSupport {
     record Evidence(String file, String symbol) {
     }
 
-    /** 抽取实验 result.json 中的一个知识点。 */
-    record CodeKp(String angle, List<Evidence> evidence, int order, String summary, String title,
-                  List<String> unverifiable) {
+    /** 抽取实验 result.json 中的一个前置概念（抽取 v2 起有）。 */
+    record Prerequisite(String concept, String explanation) {
+    }
+
+    /**
+     * 抽取实验 result.json 中的一个知识点。prerequisites、summaryDetails 是抽取 v2 加的，读 v1 的结果时为 null；
+     * v2 的 summary 只有核心要点。
+     */
+    record CodeKp(String angle, List<Evidence> evidence, int order, List<Prerequisite> prerequisites, String summary,
+                  String summaryDetails, String title, List<String> unverifiable) {
+
+        boolean hasPrerequisites() {
+            return prerequisites != null && !prerequisites.isEmpty();
+        }
+
+        boolean hasDetails() {
+            return summaryDetails != null && !summaryDetails.isBlank();
+        }
     }
 
     record Extraction(List<CodeKp> knowledgePoints) {
@@ -39,12 +54,13 @@ final class CodeChatSupport {
      * @param codeDependent 作者判断：追问是否离不开这份代码
      * @param teacherWrong  作者判断：老师有没有说错代码
      * @param suggestion    AI 的评分建议，调用失败时为 null
+     * @param prerequisitesHelpful 作者判断：前置卡有没有帮助。没有显示前置卡时（复习、v1 的知识点）为 null
      */
     record SessionRecord(int order, String title, String angle, String mode, String chatPromptVersion,
                          String ratingPromptVersion, int answers, boolean endedByModel, long durationSeconds,
                          int kickoffChars, List<ChatTurn> dialogue, Rating selfRating, String understood,
                          String codeDependent, String teacherWrong, String note, RatingSuggestionResult suggestion,
-                         String ratingError) {
+                         String ratingError, String prerequisitesHelpful) {
     }
 
     private CodeChatSupport() {
@@ -55,18 +71,36 @@ final class CodeChatSupport {
         return kp.evidence().stream().map(Evidence::file).distinct().toList();
     }
 
-    /** 第一条消息：正式的知识点信息和复习信息，再加上代码证明不了的问题和源码。 */
+    /**
+     * 第一条消息：正式的知识点信息和复习信息，再加上细节、代码证明不了的问题和源码。
+     * 第一次学习时，学生开始前读过前置卡，也告诉老师读了哪几张；复习时不显示前置卡，也就不提。
+     */
     static String kickoff(CodeKp kp, Map<String, String> files, LearningChatPrompt.Review review) {
         StudyMaterial material = new StudyMaterial(0, kp.title(), KnowledgePointType.EXPERIENCE, kp.summary(), List.of());
         String base = LearningChatPrompt.kickoff(material, review);
         String head = base.substring(0, base.lastIndexOf("请开始。")).stripTrailing();
-        return head + "\n\n" + codeContext(kp, files) + "\n\n请开始。";
+        String details = kp.hasDetails() ? "\n细节（漏了不影响掌握）：" + kp.summaryDetails() : "";
+        String cards = review == null && kp.hasPrerequisites()
+                ? "\n\n学生开始前读过这几张前置卡：\n" + prerequisiteCards(kp) : "";
+        return head + details + cards + "\n\n" + codeContext(kp, files) + "\n\n请开始。";
     }
 
-    /** 评分建议的输入：知识点、这次是学习还是复习（EASY 的标准不同）、源码和对话记录。 */
+    /**
+     * 评分建议的输入：知识点、这次是学习还是复习（EASY 的标准不同）、要点、源码和对话记录。
+     * 有细节时把核心要点和细节分开写；v1 的知识点没有细节，写法和以前一样，第一轮的记录重评时输入不变。
+     */
     static String ratingInput(CodeKp kp, Map<String, String> files, boolean isReview, List<ChatTurn> dialogue) {
-        return "知识点：" + kp.title() + "\n这次对话：" + (isReview ? "复习" : "第一次学习") + "\n要点：" + kp.summary()
+        String points = kp.hasDetails() ? "\n核心要点：" + kp.summary() + "\n细节：" + kp.summaryDetails()
+                : "\n要点：" + kp.summary();
+        return "知识点：" + kp.title() + "\n这次对话：" + (isReview ? "复习" : "第一次学习") + points
                 + "\n\n" + codeContext(kp, files) + "\n\n对话记录：\n\n" + formatDialogue(dialogue);
+    }
+
+    /** 前置卡：学生读的和告诉老师的是同一份文字。 */
+    static String prerequisiteCards(CodeKp kp) {
+        return kp.prerequisites().stream()
+                .map(p -> "【" + p.concept() + "】\n" + p.explanation().strip())
+                .collect(Collectors.joining("\n\n"));
     }
 
     private static String codeContext(CodeKp kp, Map<String, String> files) {
@@ -107,6 +141,7 @@ final class CodeChatSupport {
                 + "\n\n## 对话\n\n" + formatDialogue(r.dialogue())
                 + "\n\n## 自评\n\n- 评分：" + r.selfRating() + "\n- 学懂了吗：" + r.understood()
                 + "\n- 追问离不开这份代码吗：" + r.codeDependent() + "\n- 老师说错代码了吗：" + r.teacherWrong()
+                + (r.prerequisitesHelpful() == null ? "" : "\n- 前置卡有帮助吗：" + r.prerequisitesHelpful())
                 + "\n- 备注：" + r.note() + "\n\n## AI 评分建议\n\n" + ai + "\n";
     }
 

@@ -18,7 +18,10 @@ class CodeChatSupportTest {
 
     private static final CodeKp KP = new CodeKp("FAILURE",
             List.of(new Evidence("a/A.java", "A#x"), new Evidence("a/A.java", "A#y"), new Evidence("b/B.java", "B")),
-            2, "要点内容", "连点两次会怎样？", List.of("当时为什么这样选？"));
+            2, null, "要点内容", null, "连点两次会怎样？", List.of("当时为什么这样选？"));
+    private static final CodeKp KP_V2 = new CodeKp("CHAIN", List.of(new Evidence("a/A.java", "A#x")), 3,
+            List.of(new CodeChatSupport.Prerequisite("唯一索引", "  同一列不能有两条一样的值。  ")), "1. 核心", "1. 细节",
+            "这里怎么做的？", List.of());
     private static final Map<String, String> FILES = Map.of("a/A.java", "class A {}\n");
 
     @Test
@@ -75,8 +78,44 @@ class CodeChatSupportTest {
         assertThat(CodeChatSupport.ratingInput(KP, FILES, true, dialogue)).contains("这次对话：复习");
     }
 
+    @Test
+    void 没有细节时评分输入和第一轮一样_重评第一轮的记录输入不变() {
+        String input = CodeChatSupport.ratingInput(KP, FILES, false, List.of());
+
+        assertThat(input).contains("\n要点：要点内容\n").doesNotContain("核心要点", "细节");
+    }
+
+    @Test
+    void 有细节时评分输入分开写核心要点和细节() {
+        String input = CodeChatSupport.ratingInput(KP_V2, FILES, false, List.of());
+
+        assertThat(input).contains("\n核心要点：1. 核心\n细节：1. 细节\n").doesNotContain("\n要点：");
+    }
+
+    @Test
+    void 第一次学习时第一条消息带上细节和前置卡() {
+        String kickoff = CodeChatSupport.kickoff(KP_V2, FILES, null);
+
+        assertThat(kickoff).contains("细节（漏了不影响掌握）：1. 细节", "学生开始前读过这几张前置卡：\n【唯一索引】\n同一列不能有两条一样的值。");
+        assertThat(kickoff.indexOf("前置卡")).isLessThan(kickoff.indexOf("相关源码"));
+    }
+
+    @Test
+    void 复习时不提前置卡_学生这次没有读() {
+        LearningChatPrompt.Review review = new LearningChatPrompt.Review(1, Rating.HARD, List.of(), List.of());
+
+        assertThat(CodeChatSupport.kickoff(KP_V2, FILES, review)).contains("细节（漏了不影响掌握）").doesNotContain("前置卡");
+    }
+
+    @Test
+    void 第一轮的知识点没有前置卡和细节() {
+        assertThat(KP.hasPrerequisites()).isFalse();
+        assertThat(KP.hasDetails()).isFalse();
+        assertThat(CodeChatSupport.kickoff(KP, FILES, null)).doesNotContain("前置卡", "细节");
+    }
+
     private static SessionRecord record(List<ChatTurn> dialogue, RatingSuggestionResult suggestion) {
         return new SessionRecord(2, "标题", "FAILURE", "study", "v1", "v1", 2, true, 10, 100, dialogue, Rating.GOOD,
-                "懂了", "y", "n", "", suggestion, null);
+                "懂了", "y", "n", "", suggestion, null, null);
     }
 }
