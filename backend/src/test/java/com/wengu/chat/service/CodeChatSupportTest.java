@@ -114,8 +114,18 @@ class CodeChatSupportTest {
         assertThat(CodeChatSupport.kickoff(KP, FILES, null)).doesNotContain("前置卡", "细节");
     }
 
+    @Test
+    void 记录里有主线清不清楚时才写进记录_之前几轮的记录不多出这一行() {
+        SessionRecord old = record(List.of(), null);
+        SessionRecord v3 = new SessionRecord(2, "标题", "FAILURE", "study", "v3", "v2", 2, true, 10, 100, List.of(),
+                Rating.GOOD, "懂了", "y", "n", "", null, "失败", null, "清楚");
+
+        assertThat(CodeChatSupport.transcript(old)).doesNotContain("主线清楚吗");
+        assertThat(CodeChatSupport.transcript(v3)).contains("- 主线清楚吗：清楚");
+    }
+
     private static SessionRecord record(List<ChatTurn> dialogue, RatingSuggestionResult suggestion) {
         return new SessionRecord(2, "标题", "FAILURE", "study", "v1", "v1", 2, true, 10, 100, dialogue, Rating.GOOD,
-                "懂了", "y", "n", "", suggestion, null, null);
+                "懂了", "y", "n", "", suggestion, null, null, null);
     }
 }

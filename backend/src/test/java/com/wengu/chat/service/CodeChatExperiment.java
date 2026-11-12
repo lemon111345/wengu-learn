@@ -40,21 +40,24 @@ import java.util.Map;
  * <pre>
  * .\mvnw.cmd -q spring-boot:test-run "-Dspring-boot.run.main-class=com.wengu.chat.service.CodeChatExperiment"
  * </pre>
- * 不加参数时是当前这一轮（第二轮）。用 -Dspring-boot.run.arguments 改参数，例如回到第一轮：
+ * 不加参数时是当前这一轮（第三轮：对话 v3，评分 v2）。用 -Dspring-boot.run.arguments 改参数，例如回到第一轮：
  * "-Dspring-boot.run.arguments=--code.round=1 --code.result=code-20261109-232743-deepseek/A-1 --code.kps=2+8+9+10
  * --code.chat.version=v1 --code.rating.version=v1"。知识点序号在命令行上用 + 分隔：Maven 会把参数里的逗号拆开。
  * 不要先运行 chcp 65001，原因见 LearningChatExperiment。
  * <p>
  * 第一次学习的知识点有前置卡（抽取 v2 起）时，先显示前置卡，读完按回车再开始对话，自评时多问一句前置卡有没有帮助。
+ * 第三轮起自评还问一句主线清不清楚：对话 v3 改成先给路线图、逐点讲解，看这个改动有没有用。
+ * 第三轮复习的 #9 是第二轮学的，开始前把 code-chat-round2/kp-09-study.json 复制到第三轮的目录。
  */
 public class CodeChatExperiment {
 
     static final Path DATA = Path.of("..", "data-private");
     static final Path SOURCE_ROOT = Path.of("src/main/java/com/wengu");
-    static final String DEFAULT_ROUND = "2";
+    static final String DEFAULT_ROUND = "3";
     static final String DEFAULT_RESULT = "code-20261112-144623-deepseek/A-1";
-    static final String DEFAULT_KPS = "6,8,9";
-    static final String DEFAULT_VERSION = "v2";
+    static final String DEFAULT_KPS = "9,12,13";
+    static final String DEFAULT_CHAT_VERSION = "v3";
+    static final String DEFAULT_RATING_VERSION = "v2";
     static final double RATING_TEMPERATURE = 0.2;
     static final int MAX_REPLY_ATTEMPTS = 3;
 
@@ -73,8 +76,8 @@ public class CodeChatExperiment {
     CodeChatExperiment(LlmService llm, Environment env) throws IOException {
         this.llm = llm;
         this.kps = selectedKnowledgePoints(json, env);
-        this.chatVersion = env.getProperty("code.chat.version", DEFAULT_VERSION);
-        this.ratingVersion = env.getProperty("code.rating.version", DEFAULT_VERSION);
+        this.chatVersion = env.getProperty("code.chat.version", DEFAULT_CHAT_VERSION);
+        this.ratingVersion = env.getProperty("code.rating.version", DEFAULT_RATING_VERSION);
         this.chatPrompt = LearningChatPrompt.load("prompts/code-learning-chat-" + chatVersion + ".md");
         this.ratingPrompt = LearningChatPrompt.load("prompts/code-rating-suggestion-" + ratingVersion + ".md");
         this.outputDir = Files.createDirectories(
@@ -197,6 +200,7 @@ public class CodeChatExperiment {
         String codeDependent = promptNonNull("追问离不开这份代码吗（换个项目就不成立）？");
         String teacherWrong = promptNonNull("老师说错代码了吗？");
         String prerequisitesHelpful = showCards ? promptNonNull("前置卡有帮助吗？") : null;
+        String mainLineClear = promptNonNull("主线清楚吗（知道这题分几点、讲到哪了）？");
         String note = promptNonNull("备注（可以留空）：");
 
         RatingSuggestionResult suggestion = null;
@@ -220,7 +224,7 @@ public class CodeChatExperiment {
 
         SessionRecord record = new SessionRecord(kp.order(), kp.title(), kp.angle(), mode, chatVersion, ratingVersion, answers,
                 endedByModel, seconds, kickoff.length(), dialogue, self, understood, codeDependent, teacherWrong, note,
-                suggestion, ratingError, prerequisitesHelpful);
+                suggestion, ratingError, prerequisitesHelpful, mainLineClear);
         Files.writeString(file(kp, mode, "json"), json.writeValueAsString(record), StandardCharsets.UTF_8);
         Files.writeString(file(kp, mode, "md"), CodeChatSupport.transcript(record), StandardCharsets.UTF_8);
         System.out.println("已保存到 " + file(kp, mode, "md").toAbsolutePath().normalize());

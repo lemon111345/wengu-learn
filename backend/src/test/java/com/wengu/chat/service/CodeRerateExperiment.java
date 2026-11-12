@@ -61,7 +61,7 @@ public class CodeRerateExperiment {
     void run() throws IOException {
         Path experiments = CodeChatExperiment.DATA.resolve("experiments");
         Path roundDir = experiments.resolve("code-chat-round" + env.getProperty("code.round", CodeChatExperiment.DEFAULT_ROUND));
-        String ratingVersion = env.getProperty("code.rating.version", CodeChatExperiment.DEFAULT_VERSION);
+        String ratingVersion = env.getProperty("code.rating.version", CodeChatExperiment.DEFAULT_RATING_VERSION);
         String ratingPrompt = LearningChatPrompt.load("prompts/code-rating-suggestion-" + ratingVersion + ".md");
         Path result = experiments.resolve(env.getProperty("code.result", CodeChatExperiment.DEFAULT_RESULT)).resolve("result.json");
         Map<Integer, CodeKp> kps = json.readValue(Files.readString(result), Extraction.class).knowledgePoints().stream()

@@ -71,8 +71,8 @@ public class CodeChatRehearsal {
     CodeChatRehearsal(LlmService llm, Environment env) throws IOException {
         this.llm = llm;
         this.kps = CodeChatExperiment.selectedKnowledgePoints(JsonMapper.builder().build(), env);
-        this.chatPrompt = LearningChatPrompt.load("prompts/code-learning-chat-" + env.getProperty("code.chat.version", CodeChatExperiment.DEFAULT_VERSION) + ".md");
-        this.ratingPrompt = LearningChatPrompt.load("prompts/code-rating-suggestion-" + env.getProperty("code.rating.version", CodeChatExperiment.DEFAULT_VERSION) + ".md");
+        this.chatPrompt = LearningChatPrompt.load("prompts/code-learning-chat-" + env.getProperty("code.chat.version", CodeChatExperiment.DEFAULT_CHAT_VERSION) + ".md");
+        this.ratingPrompt = LearningChatPrompt.load("prompts/code-rating-suggestion-" + env.getProperty("code.rating.version", CodeChatExperiment.DEFAULT_RATING_VERSION) + ".md");
     }
 
     public static void main(String[] args) throws Exception {
@@ -168,7 +168,7 @@ public class CodeChatRehearsal {
                 + "\n\n**AI 评分：**" + ratingText + "\n";
         // 复习用的 lastRating 在预演里没有自评，固定为 HARD；真实实验用作者的自评
         SessionRecord record = new SessionRecord(kp.order(), kp.title(), kp.angle(), "study", "", "", answers, ended, 0, 0, dialogue,
-                Rating.HARD, "", "", "", "", suggestion, null, null);
+                Rating.HARD, "", "", "", "", suggestion, null, null, null);
         return new Flow(text, record);
     }
 
