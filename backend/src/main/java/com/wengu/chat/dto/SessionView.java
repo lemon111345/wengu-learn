@@ -18,9 +18,10 @@ import java.util.List;
  * @param followUpSessionId  学习会话的接着问会话，回顾时用；没有接着问时为 null（#82）
  * @param messages           按时间排列
  * @param teacherName        用户现在设置的老师称呼，界面显示用；历史对话也显示现在的称呼（决策 042）
+ * @param referenceAnswer    学习会话结束后，从收尾中切出的面试参考答法；没结束、不是学习会话、收尾里没有找到时为 null（决策 047）
  */
 public record SessionView(long id, SessionType type, Long kpId, Long parentSessionId, String kpTitle, boolean ended,
                           boolean skippedExplanation, boolean generating, int activeSeconds, RatingOption rating,
                           boolean ratingEditable, Long followUpSessionId, List<MessageView> messages,
-                          String teacherName) {
+                          String teacherName, String referenceAnswer) {
 }
