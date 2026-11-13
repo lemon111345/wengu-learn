@@ -7,6 +7,8 @@ import AccountMenu from './AccountMenu.vue'
 const navItems = [
   { to: '/', label: '今天', icon: 'M4 6h16v14H4zM4 10h16M9 3v4M15 3v4' },
   { to: '/library', label: '知识库', icon: 'M5 4h10a4 4 0 0 1 4 4v12H9a4 4 0 0 1-4-4zM5 16a4 4 0 0 1 4-4h10' },
+  // 一页纸上几行字：答法速查（#112）
+  { to: '/answers', label: '答法速查', icon: 'M6 3h9l3 3v15H6zM9 10h6M9 14h6M9 18h4' },
   { to: '/questions', label: '问答记录', icon: 'M4 5h16v11H10l-4 4v-4H4z' },
   { to: '/import', label: '导入资料', icon: 'M4 13l2.5-7h11l2.5 7v6H4zM4 13h5l1 2h4l1-2h5' },
   { to: '/settings', label: '设置', icon: 'M5 6h14M5 12h14M5 18h14M9 4v4M15 10v4M11 16v4' },
