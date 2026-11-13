@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 回顾一次学习 /history/:id（ui.md 5.11，#82）：只读。评分和 AI 评价在前，后面是当时的对话和接着问。
+// 回顾一次学习 /history/:id（ui.md 5.11，#82）：只读。参考答法最前（#111），然后是评分和 AI 评价，后面是当时的对话和接着问。
 // 只用只读的接口：打开页面不调用模型，也不会新建接着问的会话
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -10,6 +10,7 @@ import { useShortcut } from '@/shortcuts/useShortcut'
 import { formatMonthDay } from '@/utils/date'
 import { ratingColors, ratingLabels } from '@/utils/labels'
 import ChatThread from '@/views/study/ChatThread.vue'
+import ReferenceAnswer from './ReferenceAnswer.vue'
 
 const props = defineProps<{ id: string }>()
 const router = useRouter()
@@ -67,6 +68,12 @@ useShortcut('Escape', back)
     <el-skeleton v-else-if="!session" :rows="8" animated aria-busy="true" />
     <article v-else class="history">
       <h1>{{ session.kpTitle ?? '这个知识点已经不在了' }}</h1>
+
+      <!-- 参考答法放在最前面（ui.md 5.11，#111）；没有找到时不显示，答法仍在下面的对话里 -->
+      <section v-if="session.referenceAnswer" class="answer">
+        <h2>面试参考答法</h2>
+        <ReferenceAnswer :session-id="session.id" :answer="session.referenceAnswer" :show-link="false" />
+      </section>
 
       <section class="evaluation">
         <div class="mine">
@@ -203,6 +210,12 @@ h2 {
 .weak {
   color: var(--wg-text-muted);
   font-size: 14px;
+}
+
+.answer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .thread {

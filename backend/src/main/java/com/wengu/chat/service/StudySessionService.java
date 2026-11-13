@@ -7,6 +7,7 @@ import com.wengu.chat.dto.RatingOption;
 import com.wengu.chat.dto.SessionView;
 import com.wengu.chat.dto.StartSessionRequest;
 import com.wengu.chat.entity.Message;
+import com.wengu.chat.entity.MessageRole;
 import com.wengu.chat.entity.SessionType;
 import com.wengu.chat.entity.StudySession;
 import com.wengu.chat.mapper.MessageMapper;
@@ -237,14 +238,30 @@ public class StudySessionService {
     }
 
     private SessionView view(StudySession session, String kpTitle, boolean kpExists) {
-        List<MessageView> messages = messages(session.getId()).stream()
+        List<Message> all = messages(session.getId());
+        List<MessageView> messages = all.stream()
                 .map(m -> new MessageView(m.getId(), m.getRole(), m.getContent(), m.getMarker(), m.getCreatedAt()))
                 .toList();
         return new SessionView(session.getId(), session.getType(), session.getKpId(), session.getParentSessionId(), kpTitle,
                 session.getEndedAt() != null, Boolean.TRUE.equals(session.getSkippedExplanation()),
                 isGenerating(session.getId()), session.getActiveSeconds(), rating(session),
                 kpExists && reviewService.isRatingChangeable(session.getId()), followUpSessionId(session), messages,
-                settingsService.get(session.getUserId()).teacherName());
+                settingsService.get(session.getUserId()).teacherName(), referenceAnswer(session, all));
+    }
+
+    /**
+     * 学习会话结束后，最后一条老师回复就是收尾，从中切出参考答法（决策 047）。
+     * 回答达到上限时收尾里可能没有【学习结束】，所以不按标记找，按“结束后的最后一条老师回复”找。
+     */
+    private static String referenceAnswer(StudySession session, List<Message> messages) {
+        if (session.getType() != SessionType.STUDY || session.getEndedAt() == null) {
+            return null;
+        }
+        return messages.reversed().stream()
+                .filter(m -> m.getRole() == MessageRole.ASSISTANT)
+                .findFirst()
+                .map(m -> ReferenceAnswers.extract(m.getContent()))
+                .orElse(null);
     }
 
     StudySession findFollowUp(long studySessionId) {

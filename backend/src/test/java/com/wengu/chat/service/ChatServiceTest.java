@@ -301,6 +301,20 @@ class ChatServiceTest {
     }
 
     @Test
+    void 学习结束后会话带上从收尾中切出的参考答法_结束前没有() {
+        modelReplies("开场");
+        collect(chatService.reply(USER_ID, sessionId));
+        modelReplies("请完整回答这个问题。\n【完整作答】");
+        collect(chatService.send(USER_ID, sessionId, new SendMessageRequest("懂了")));
+        assertThat(sessionService.get(USER_ID, sessionId).referenceAnswer()).isNull();
+
+        modelReplies("还漏了一点。\n\n**参考答法**：容量翻倍，按高低位拆分。\n【学习结束】");
+        collect(chatService.send(USER_ID, sessionId, new SendMessageRequest("完整作答")));
+
+        assertThat(sessionService.get(USER_ID, sessionId).referenceAnswer()).isEqualTo("容量翻倍，按高低位拆分。");
+    }
+
+    @Test
     void 第7次回答要求完整作答第8次要求收尾之后会话结束() {
         modelReplies("继续");
         collect(chatService.reply(USER_ID, sessionId));

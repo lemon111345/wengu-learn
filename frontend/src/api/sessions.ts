@@ -49,6 +49,8 @@ export interface SessionView {
   messages: MessageView[]
   /** 用户现在设置的老师称呼（决策 042） */
   teacherName: string
+  /** 学习结束后从收尾中切出的面试参考答法；没结束、不是学习会话、收尾里没有找到时为 null（决策 047） */
+  referenceAnswer: string | null
 }
 
 /** AI 评分建议（决策 026） */

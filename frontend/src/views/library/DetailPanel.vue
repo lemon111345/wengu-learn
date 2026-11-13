@@ -18,6 +18,7 @@ import type { KnowledgePointType } from '@/api/types'
 import { formatMonthDay } from '@/utils/date'
 import { masteryLabels, typeLabels } from '@/utils/labels'
 import MasteryDot from './MasteryDot.vue'
+import ReferenceAnswer from '@/views/history/ReferenceAnswer.vue'
 import { nextReviewText, sourceText, studyRecordText } from './format'
 
 const props = defineProps<{ id: number }>()
@@ -62,10 +63,15 @@ async function load() {
   }
 }
 
+/** 参考答法用最近一次有会话的学习记录（记录最近的在前）；合并进来的记录也算 */
+const latestSessionId = computed(() => detail.value?.reviews.find((r) => r.sessionId !== null)?.sessionId ?? null)
+const answerOpen = ref(false)
+
 watch(
   () => props.id,
   () => {
     detail.value = null
+    answerOpen.value = false
     void load()
   },
   { immediate: true },
@@ -200,6 +206,18 @@ function toggleSuspend() {
           要点是评分的标准，由 AI 根据原题写成，可能有遗漏或错误。手上有参考答案的话，可以照着改；不要为了好过而删掉难的部分。
         </p>
       </div>
+
+      <!-- 默认折叠：知识库里也能看到还没到期的，直接显示等于复习前先看了答案（ui.md 5.9，#111） -->
+      <section v-if="latestSessionId !== null" class="block divided">
+        <div class="answer-head">
+          <h2>面试参考答法</h2>
+          <span class="muted">最近一次学习</span>
+          <button type="button" class="link toggle" :aria-expanded="answerOpen" @click="answerOpen = !answerOpen">
+            {{ answerOpen ? '收起' : '展开' }}
+          </button>
+        </div>
+        <ReferenceAnswer v-if="answerOpen" :key="latestSessionId" :session-id="latestSessionId" />
+      </section>
 
       <section class="block divided">
         <h2>学习记录</h2>
@@ -342,6 +360,20 @@ h2 {
   flex-direction: column;
   gap: 8px;
   font-size: 14px;
+}
+
+.answer-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.answer-head .muted {
+  font-size: 13px;
+}
+
+.toggle {
+  margin-left: auto;
 }
 
 .divided {
