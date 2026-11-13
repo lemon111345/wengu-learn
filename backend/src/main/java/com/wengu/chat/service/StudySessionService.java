@@ -14,19 +14,25 @@ import com.wengu.chat.mapper.MessageMapper;
 import com.wengu.chat.mapper.StudySessionMapper;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
+import com.wengu.common.time.StudyDay;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.knowledge.service.KnowledgePointService;
 import com.wengu.review.service.ReviewService;
+import com.wengu.user.dto.SettingsView;
 import com.wengu.user.service.UserSettingsService;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * 学习会话：开始或恢复、读取、自动计时（决策 025）。对话本身见 {@link ChatService}。
@@ -262,6 +268,19 @@ public class StudySessionService {
                 .findFirst()
                 .map(m -> ReferenceAnswers.extract(m.getContent()))
                 .orElse(null);
+    }
+
+    /**
+     * 这些知识点中今天要复习、还没复习的，口径和每日计划第 2 步相同：暂停的由 knowledge 过滤（决策 002）。
+     * 问答记录（决策 043）和答法速查（#112）共用。
+     */
+    Set<Long> dueToday(long userId, Collection<Long> kpIds, SettingsView settings) {
+        StudyDay today = StudyDay.of(Instant.now(clock), settings.zoneId(), settings.dayStartHour());
+        Set<Long> candidates = new HashSet<>(reviewService.dueKpIds(userId, today.end()));
+        candidates.retainAll(kpIds);
+        return knowledgePointService.activeInOrder(userId, candidates).stream()
+                .map(KnowledgePointSummary::id)
+                .collect(Collectors.toSet());
     }
 
     StudySession findFollowUp(long studySessionId) {

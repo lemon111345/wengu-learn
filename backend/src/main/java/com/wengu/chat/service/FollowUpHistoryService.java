@@ -14,15 +14,11 @@ import com.wengu.common.result.ErrorCode;
 import com.wengu.common.time.StudyDay;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.service.KnowledgePointService;
-import com.wengu.review.service.ReviewService;
 import com.wengu.user.dto.SettingsView;
 import com.wengu.user.service.UserSettingsService;
 import org.springframework.stereotype.Service;
 
-import java.time.Clock;
 import java.time.Instant;
-import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -45,20 +41,16 @@ public class FollowUpHistoryService {
     private final StudySessionMapper sessionMapper;
     private final MessageMapper messageMapper;
     private final KnowledgePointService knowledgePointService;
-    private final ReviewService reviewService;
     private final UserSettingsService settingsService;
-    private final Clock clock;
 
     public FollowUpHistoryService(StudySessionService sessions, StudySessionMapper sessionMapper,
                                   MessageMapper messageMapper, KnowledgePointService knowledgePointService,
-                                  ReviewService reviewService, UserSettingsService settingsService, Clock clock) {
+                                  UserSettingsService settingsService) {
         this.sessions = sessions;
         this.sessionMapper = sessionMapper;
         this.messageMapper = messageMapper;
         this.knowledgePointService = knowledgePointService;
-        this.reviewService = reviewService;
         this.settingsService = settingsService;
-        this.clock = clock;
     }
 
     /**
@@ -84,7 +76,7 @@ public class FollowUpHistoryService {
         SettingsView settings = settingsService.get(userId);
         Set<Long> kpIds = asked.stream().map(StudySession::getKpId).collect(Collectors.toSet());
         Map<Long, KnowledgePointSummary> existing = knowledgePointService.summaries(userId, kpIds);
-        Set<Long> due = dueToday(userId, kpIds, settings);
+        Set<Long> due = sessions.dueToday(userId, kpIds, settings);
         String normalized = keyword == null ? "" : keyword.strip().toLowerCase(Locale.ROOT);
 
         return asked.stream()
@@ -110,7 +102,7 @@ public class FollowUpHistoryService {
         String reason = readOnlyReason(study, followUp, existing.containsKey(study.getKpId()));
         return new FollowUpStatus(studySessionId, followUp == null ? null : followUp.getId(),
                 title(userId, study.getKpId(), existing), reason == null, reason,
-                dueToday(userId, List.of(study.getKpId()), settings).contains(study.getKpId()),
+                sessions.dueToday(userId, List.of(study.getKpId()), settings).contains(study.getKpId()),
                 settings.teacherName());
     }
 
@@ -168,15 +160,5 @@ public class FollowUpHistoryService {
     private String title(long userId, long kpId, Map<Long, KnowledgePointSummary> existing) {
         KnowledgePointSummary kp = existing.get(kpId);
         return kp != null ? kp.title() : knowledgePointService.titleIncludingDeleted(userId, kpId);
-    }
-
-    /** 这些知识点中今天要复习、还没复习的，口径和每日计划第 2 步相同：暂停的由 knowledge 过滤（决策 002） */
-    private Set<Long> dueToday(long userId, Collection<Long> kpIds, SettingsView settings) {
-        StudyDay today = StudyDay.of(Instant.now(clock), settings.zoneId(), settings.dayStartHour());
-        Set<Long> candidates = new HashSet<>(reviewService.dueKpIds(userId, today.end()));
-        candidates.retainAll(kpIds);
-        return knowledgePointService.activeInOrder(userId, candidates).stream()
-                .map(KnowledgePointSummary::id)
-                .collect(Collectors.toSet());
     }
 }
