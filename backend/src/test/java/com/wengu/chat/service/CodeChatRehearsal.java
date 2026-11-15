@@ -168,7 +168,7 @@ public class CodeChatRehearsal {
                 + "\n\n**AI 评分：**" + ratingText + "\n";
         // 复习用的 lastRating 在预演里没有自评，固定为 HARD；真实实验用作者的自评
         SessionRecord record = new SessionRecord(kp.order(), kp.title(), kp.angle(), "study", "", "", answers, ended, 0, 0, dialogue,
-                Rating.HARD, "", "", "", "", suggestion, null, null, null);
+                Rating.HARD, "", "", "", "", suggestion, null, null, null, null);
         return new Flow(text, record);
     }
 

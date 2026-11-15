@@ -118,14 +118,27 @@ class CodeChatSupportTest {
     void 记录里有主线清不清楚时才写进记录_之前几轮的记录不多出这一行() {
         SessionRecord old = record(List.of(), null);
         SessionRecord v3 = new SessionRecord(2, "标题", "FAILURE", "study", "v3", "v2", 2, true, 10, 100, List.of(),
-                Rating.GOOD, "懂了", "y", "n", "", null, "失败", null, "清楚");
+                Rating.GOOD, "懂了", "y", "n", "", null, "失败", null, "清楚", null);
 
         assertThat(CodeChatSupport.transcript(old)).doesNotContain("主线清楚吗");
         assertThat(CodeChatSupport.transcript(v3)).contains("- 主线清楚吗：清楚");
     }
 
+    @Test
+    void 认同AI评分理由的回答写在AI评分建议后面_没问过时不写() {
+        RatingSuggestionResult suggestion = new RatingSuggestionResult("依据", List.of(), Rating.HARD, List.of());
+        SessionRecord v4 = new SessionRecord(2, "标题", "FAILURE", "study", "v4", "v2", 2, true, 10, 100, List.of(),
+                Rating.GOOD, "懂了", "y", "n", "", suggestion, null, null, "清楚", "认同");
+
+        String transcript = CodeChatSupport.transcript(v4);
+
+        assertThat(transcript).contains("- 认同 AI 的评分理由吗：认同");
+        assertThat(transcript.indexOf("认同 AI")).isGreaterThan(transcript.indexOf("## AI 评分建议"));
+        assertThat(CodeChatSupport.transcript(record(List.of(), null))).doesNotContain("认同 AI");
+    }
+
     private static SessionRecord record(List<ChatTurn> dialogue, RatingSuggestionResult suggestion) {
         return new SessionRecord(2, "标题", "FAILURE", "study", "v1", "v1", 2, true, 10, 100, dialogue, Rating.GOOD,
-                "懂了", "y", "n", "", suggestion, null, null, null);
+                "懂了", "y", "n", "", suggestion, null, null, null, null);
     }
 }

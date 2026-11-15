@@ -56,12 +56,13 @@ final class CodeChatSupport {
      * @param suggestion    AI 的评分建议，调用失败时为 null
      * @param prerequisitesHelpful 作者判断：前置卡有没有帮助。没有显示前置卡时（复习、v1 的知识点）为 null
      * @param mainLineClear 作者判断：主线清不清楚。第三轮起才问，之前的记录为 null
+     * @param agreesWithAi  看完 AI 的评分建议后，作者认不认同它的理由。对话 v4 起才问；评分建议失败时为 null
      */
     record SessionRecord(int order, String title, String angle, String mode, String chatPromptVersion,
                          String ratingPromptVersion, int answers, boolean endedByModel, long durationSeconds,
                          int kickoffChars, List<ChatTurn> dialogue, Rating selfRating, String understood,
                          String codeDependent, String teacherWrong, String note, RatingSuggestionResult suggestion,
-                         String ratingError, String prerequisitesHelpful, String mainLineClear) {
+                         String ratingError, String prerequisitesHelpful, String mainLineClear, String agreesWithAi) {
     }
 
     private CodeChatSupport() {
@@ -144,7 +145,8 @@ final class CodeChatSupport {
                 + "\n- 追问离不开这份代码吗：" + r.codeDependent() + "\n- 老师说错代码了吗：" + r.teacherWrong()
                 + (r.prerequisitesHelpful() == null ? "" : "\n- 前置卡有帮助吗：" + r.prerequisitesHelpful())
                 + (r.mainLineClear() == null ? "" : "\n- 主线清楚吗：" + r.mainLineClear())
-                + "\n- 备注：" + r.note() + "\n\n## AI 评分建议\n\n" + ai + "\n";
+                + "\n- 备注：" + r.note() + "\n\n## AI 评分建议\n\n" + ai
+                + (r.agreesWithAi() == null ? "" : "\n- 认同 AI 的评分理由吗：" + r.agreesWithAi()) + "\n";
     }
 
     private static String join(List<String> items) {

@@ -40,7 +40,7 @@ import java.util.Map;
  * <pre>
  * .\mvnw.cmd -q spring-boot:test-run "-Dspring-boot.run.main-class=com.wengu.chat.service.CodeChatExperiment"
  * </pre>
- * 不加参数时是当前这一轮（第三轮：对话 v3，评分 v2）。用 -Dspring-boot.run.arguments 改参数，例如回到第一轮：
+ * 不加参数时是当前这一轮（第三轮：对话 v4，评分 v2；#12、#13 是用 v3 学的）。用 -Dspring-boot.run.arguments 改参数，例如回到第一轮：
  * "-Dspring-boot.run.arguments=--code.round=1 --code.result=code-20261109-232743-deepseek/A-1 --code.kps=2+8+9+10
  * --code.chat.version=v1 --code.rating.version=v1"。知识点序号在命令行上用 + 分隔：Maven 会把参数里的逗号拆开。
  * 不要先运行 chcp 65001，原因见 LearningChatExperiment。
@@ -48,6 +48,7 @@ import java.util.Map;
  * 第一次学习的知识点有前置卡（抽取 v2 起）时，先显示前置卡，读完按回车再开始对话，自评时多问一句前置卡有没有帮助。
  * 第三轮起自评还问一句主线清不清楚：对话 v3 改成先给路线图、逐点讲解，看这个改动有没有用。
  * 第三轮复习的 #9 是第二轮学的，开始前把 code-chat-round2/kp-09-study.json 复制到第三轮的目录。
+ * v4 起看完 AI 的评分建议后再问一句认不认同它的理由：v4 把评分标准摊开给学生，看自评和 AI 评分的分歧是不是变小了。
  */
 public class CodeChatExperiment {
 
@@ -55,8 +56,8 @@ public class CodeChatExperiment {
     static final Path SOURCE_ROOT = Path.of("src/main/java/com/wengu");
     static final String DEFAULT_ROUND = "3";
     static final String DEFAULT_RESULT = "code-20261112-144623-deepseek/A-1";
-    static final String DEFAULT_KPS = "9,12,13";
-    static final String DEFAULT_CHAT_VERSION = "v3";
+    static final String DEFAULT_KPS = "1,9,12";
+    static final String DEFAULT_CHAT_VERSION = "v4";
     static final String DEFAULT_RATING_VERSION = "v2";
     static final double RATING_TEMPERATURE = 0.2;
     static final int MAX_REPLY_ATTEMPTS = 3;
@@ -205,6 +206,7 @@ public class CodeChatExperiment {
 
         RatingSuggestionResult suggestion = null;
         String ratingError = null;
+        String agreesWithAi = null;
         try {
             suggestion = llm.call(ratingPrompt, CodeChatSupport.ratingInput(kp, files, isReview, dialogue),
                     RatingSuggestionResult.class, RATING_TEMPERATURE).content();
@@ -218,13 +220,14 @@ public class CodeChatExperiment {
             System.out.println("判断依据：" + suggestion.analysis());
             System.out.println("还没掌握的点：" + suggestion.weakPoints());
             System.out.println("超出范围的缺口：" + suggestion.outOfScopeGaps());
+            agreesWithAi = promptNonNull("\n你认同 AI 的评分理由吗（不认同的话说说哪里不对）？");
         } else {
             System.out.println("\n[评分建议失败] " + ratingError);
         }
 
         SessionRecord record = new SessionRecord(kp.order(), kp.title(), kp.angle(), mode, chatVersion, ratingVersion, answers,
                 endedByModel, seconds, kickoff.length(), dialogue, self, understood, codeDependent, teacherWrong, note,
-                suggestion, ratingError, prerequisitesHelpful, mainLineClear);
+                suggestion, ratingError, prerequisitesHelpful, mainLineClear, agreesWithAi);
         Files.writeString(file(kp, mode, "json"), json.writeValueAsString(record), StandardCharsets.UTF_8);
         Files.writeString(file(kp, mode, "md"), CodeChatSupport.transcript(record), StandardCharsets.UTF_8);
         System.out.println("已保存到 " + file(kp, mode, "md").toAbsolutePath().normalize());
