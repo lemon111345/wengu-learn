@@ -1,16 +1,12 @@
 package com.wengu.chat.service;
 
 import com.wengu.NoDatabase;
-import com.wengu.WenguApplication;
 import com.wengu.chat.entity.Marker;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.llm.dto.ChatTurn;
 import com.wengu.llm.service.LlmService;
 import com.wengu.review.fsrs.Rating;
-import org.springframework.boot.Banner;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.WebApplicationType;
 import org.springframework.context.ConfigurableApplicationContext;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
@@ -80,12 +76,7 @@ public class ReviewAngleExperiment {
     }
 
     public static void main(String[] args) throws IOException {
-        SpringApplication app = new SpringApplication(WenguApplication.class);
-        app.setWebApplicationType(WebApplicationType.NONE);
-        app.setBannerMode(Banner.Mode.OFF);
-        app.setDefaultProperties(Map.of("logging.level.root", "WARN", NoDatabase.EXCLUDE_KEY, NoDatabase.EXCLUDE_VALUE,
-                NoDatabase.LAZY_KEY, "true", NoDatabase.NO_RECOVERY_KEY, "false"));
-        try (ConfigurableApplicationContext context = app.run(args)) {
+        try (ConfigurableApplicationContext context = NoDatabase.start(args)) {
             String model = context.getEnvironment().getProperty("spring.ai.openai.chat.options.model", "unknown");
             new ReviewAngleExperiment(context.getBean(LlmService.class), model).run();
         }
