@@ -137,9 +137,11 @@ frontend/src
 | --- | --- | --- |
 | user | 用户 | id、username（唯一，按数据库排序规则比较，不区分大小写）、password_hash（bcrypt，带 `{bcrypt}` 前缀，见决策 022） |
 | user_settings | 用户设置 | user_id、daily_new_limit（每天学几个，含复习，默认 5；列名沿用，见决策 016 的修订）、timezone（注册时取浏览器时区，读不到或不合法时用环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点）、teacher_name（老师的称呼，默认“老师”，V14，见决策 042） |
-| source | 导入的学习材料 | id、user_id、type（QUESTION 题目清单 / DOCUMENT 讲解资料，#26；源码以后添加；截图识别出的文字和粘贴的原文一样处理，决策 044）、name、content（用户粘贴的原文，包括答案；上传的文件存提取出的文字）、questions（识别或整理出的题目 JSON，V2 添加，见决策 011、037） |
+| source | 导入的学习材料 | id、user_id、type（QUESTION 题目清单 / DOCUMENT 讲解资料，#26；CODE 源码，#90，content 存文件清单、questions 为空，见决策 050；截图识别出的文字和粘贴的原文一样处理，决策 044）、name、content（用户粘贴的原文，包括答案；上传的文件存提取出的文字）、questions（识别或整理出的题目 JSON，V2 添加，见决策 011、037） |
 | knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（ACTIVE / SUSPENDED）、sort_order（新知识按 sort_order、id 派发；确认草稿时接在已有知识点之后）、draft_item_id（来自哪个草稿条目，V6 添加，见决策 015）、deleted_at（软删除，为空表示没删）、merged_into（被合并时指向主知识点，同时写 deleted_at）（V11 添加，见决策 029） |
+| source_file | 源码导入的文件快照（#90） | id、user_id、source_id、path、content、chars、file_order；导入后不再修改，见决策 050 |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id、user_id |
+| kp_code | 源码知识点特有的数据（#90） | kp_id（主键）、user_id、source_id、details（细节）、evidence（代码依据 JSON：[{file, symbol}]）、unverifiable（代码证明不了的问题 JSON）、prerequisites（前置概念 JSON：[{concept, explanation}]）；题库抽出的个人经历题没有这一行，见决策 050 |
 | kp_revision | 知识点每次修改前的快照（V11） | id、user_id、kp_id、type、title、summary、created_at；只在确实有改动时写。AI 的原文在草稿条目中，加上快照每一版都能拼出来（#9 的数据），见决策 029 |
 | card_state | 调度状态（每次复习都更新） | kp_id、user_id（冗余）、state（学习中 / 复习 / 重学）、step（学习步或重学步序号，复习状态为空）、due、stability、difficulty、last_review（为空表示新知识） |
 | study_session | 一次学习会话，也是自动计时的来源 | id、user_id、type（STUDY / FOLLOW_UP / QUESTION）、kp_id（从一个问题开始时为空）、parent_session_id（接着问指向原来的学习会话，V9 添加）、started_at、ended_at（学习结束或回答到上限时写入）、skipped_explanation、active_seconds（两次活动之间最多算 10 分钟）、last_active_at、prompt_version（V8 添加），见决策 025 |
@@ -150,6 +152,7 @@ frontend/src
 | extraction_draft | 一次抽取，用户确认后才生成知识点（V3 添加，V4 精简） | id、user_id、source_id（会话来源由 #31 添加，见决策 008）、created_at、confirmed_at（V6 添加）；状态不存库：确认后为 CONFIRMED，之前由批次推算（RUNNING / READY / FAILED），见决策 012、013、015 |
 | extraction_batch | 草稿中的一批，每批调用一次抽取（V4 添加） | id、user_id、draft_id、batch_no（重试时新增一行、批号不变，旧行保留）、status（PENDING / RUNNING / READY / FAILED）、questions（发给模型的题目）、context（这一批用的去重上下文，V5 添加）、covered（被已有内容覆盖的题，换回了知识点 id 或条目 id，带标题快照，V5 添加，见决策 014）、raw_output、error（原始信息，不返回前端）、error_code（失败原因的返回码，V12 添加，见决策 032）、attempts、prompt_version、model、prompt_tokens、completion_tokens（多次调用累加）、created_at、started_at、finished_at，见决策 013 |
 | extraction_draft_item | 草稿中的一个知识点（V3 添加） | id、user_id、draft_id、batch_id（V4 添加）、item_order（批内顺序）、title、summary、type、source_question_ids（如 "1,3,5"，对应 source 中的题号）、decision（确认时的处理：ACCEPTED / REJECTED，V6 添加，见决策 015） |
+| extraction_draft_item_code | 草稿条目中源码知识点特有的数据（#90） | item_id（主键）、user_id、details、evidence、unverifiable、prerequisites；确认时被接受的复制到 kp_code，见决策 050 |
 | model_config | 模型配置（M4；M1 用环境变量，见决策 007） | user_id、base_url、model、api_key_encrypted |
 
 关键索引：
@@ -249,7 +252,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 列举 | ENUMERATION | “有哪些” | 偏记忆，快问快答 |
 | 排查实战 | TROUBLESHOOTING | “线上出了问题怎么办” | 情景模拟，考察步骤和工具 |
 | 系统设计 | SYSTEM_DESIGN | “设计一个 XX 系统” | 综合多个知识点；M1 只标记、不进入每日计划，学法在 M3 定，以后做模拟面试 |
-| 个人经历 | EXPERIENCE | “你项目里怎么做的” | 必须结合用户源码追问；M1 只标记、不进入每日计划，M2 有源码导入后启用 |
+| 个人经历 | EXPERIENCE | “你项目里怎么做的” | 必须结合用户源码追问；M1 只标记、不进入每日计划，#90 第二步启用。源码导入抽出的要点每条带 2～3 个得分点（决策 050） |
 
 加 type 字段的理由：不同类型的复习方式差别很大，用类型选择不同的对话 prompt，成本几乎为零，却直接决定学习体验。
 
@@ -332,9 +335,10 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | --- | --- | --- | --- | --- |
 | `POST /api/sources` | 导入资料并识别（或整理）题目（#15、#16、#26） | `{name, content, type?}`，type 为 QUESTION（默认，从原文中识别题目）或 DOCUMENT（讲解资料，根据内容整理题目） | `{id, name, type, questions: [{id, text, followUps}]}` | 同步调用模型，只有题目时几秒到几十秒，10 万字带答案的资料最长约 95 秒；原文不超过 100000 字、题目不超过 200 道，否则返回 400 和处理建议；识别重试后仍失败返回 502 `QUESTION_SPLIT_FAILED`，整理重试后仍失败（出处不在资料中等）返回 502 `QUESTION_GENERATE_FAILED`；模型调用失败返回对应的 `LLM_*`（见下文“大模型调用失败”）。见决策 011、037 |
 | `POST /api/sources/upload` | 上传文件导入（#26） | multipart：`file`（PDF、DOCX、Markdown、txt，最大 10 MB）、`name?`（不填时用文件名）、`type?` | 同上 | 提取文字后和粘贴的资料一样处理。格式不支持（包括旧版 .doc）、文件损坏、PDF 有打开密码或没有文字（扫描件）、超过 10 MB 时返回 400 和提示。见决策 037 |
+| `POST /api/sources/code` | 导入源码（#90） | `{name, files: [{path, content}]}`，由前端读出勾选文件的文字 | `{id, name, type: "CODE", files: [{path, chars}]}` | 只保存，不调用模型；之后用 `POST /api/drafts` 发起抽取。合计不超过 150000 字符、最多 300 个文件、路径不超过 500 字符且不重复、内容不为空，否则 400 和处理建议。见决策 050 |
 | `POST /api/sources/image-recognitions` | 提交截图识别文字（#88） | multipart：`files`（PNG、JPG、WebP，最多 5 张，每张 5 MB，合计 10 MB，按顺序） | `{taskId}` | 异步：提交后马上返回，不写 `source` 表，图片用完即弃。张数、大小、格式不对 400；排队的任务太多 409。见决策 044 |
 | `GET /api/sources/image-recognitions/{taskId}` | 查询识别结果（#88） | — | `{status, text, message}` | status 为 RUNNING、DONE、FAILED；DONE 时 text 是识别出的文字，FAILED 时 message 是给用户看的原因（模型不支持图片为 `LLM_IMAGE_UNSUPPORTED` 的提示）。任务 30 分钟后过期，过期、不存在或不属于当前用户 404。见决策 044 |
-| `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, sourceName, status, batches: [{no, status, questionIds, failureReason}], items: [{id, order, title, summary, type, sourceQuestionIds, decision}], covered: [{questionId, titles}], uncovered: [{questionId, text}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；covered 是被已有知识点或同一草稿中其他批次覆盖的题（决策 014）；uncovered 是成功批次中既没有条目、也不在 covered 中的题及原文，最后一次尝试只漏了题时这一批照样成功（决策 028）；sourceName 是资料名称；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。见决策 012、013 |
+| `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, sourceName, status, batches: [{no, status, questionIds, failureReason}], items: [{id, order, title, summary, type, sourceQuestionIds, decision}], covered: [{questionId, titles}], uncovered: [{questionId, text}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；covered 是被已有知识点或同一草稿中其他批次覆盖的题（决策 014）；uncovered 是成功批次中既没有条目、也不在 covered 中的题及原文，最后一次尝试只漏了题时这一批照样成功（决策 028）；sourceName 是资料名称；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。源码材料（CODE，#90）只抽一批、不做去重，传 questionIds 返回 400，条目多一个 evidence（代码依据 [{file, symbol}]，其他材料为 null），covered、uncovered 为空。见决策 012、013、050 |
 | `GET /api/drafts` | 草稿列表（#48） | — | `[{id, sourceId, sourceName, status, itemCount, createdAt}]` | 未确认的全部返回，已确认的只返回最近 10 份，新的在前，不分页；status 和详情的算法相同；itemCount 是成功批次中的条目数。见决策 024 |
 | `GET /api/drafts/{id}` | 查看草稿和抽取进度（#15、#16） | — | 同上 | 不存在或不属于当前用户 404 |
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中或已确认 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
