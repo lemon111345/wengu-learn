@@ -91,7 +91,8 @@ class CodeImportExperiment {
         for (ExtractionBatch b : batches) {
             out.append("- 批次：").append(b.getStatus()).append("，调用 ").append(b.getAttempts()).append(" 次，")
                     .append(b.getPromptTokens()).append(" + ").append(b.getCompletionTokens()).append(" token，模型 ")
-                    .append(b.getModel()).append("\n");
+                    .append(b.getModel()).append("，耗时 ")
+                    .append(java.time.Duration.between(b.getStartedAt(), b.getFinishedAt()).toSeconds()).append(" 秒\n");
             if (b.getError() != null) {
                 out.append("- 最后一次的问题：\n\n```\n").append(b.getError()).append("\n```\n");
             }
