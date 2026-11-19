@@ -14,12 +14,13 @@ import {
   updateKnowledgePoint,
   type KnowledgePointDetail,
 } from '@/api/knowledgePoints'
+import { pickToday } from '@/api/plan'
 import type { KnowledgePointType } from '@/api/types'
 import { formatMonthDay } from '@/utils/date'
 import { masteryLabels, typeLabels } from '@/utils/labels'
 import MasteryDot from './MasteryDot.vue'
 import ReferenceAnswer from '@/views/history/ReferenceAnswer.vue'
-import { nextReviewText, sourceText, studyRecordText } from './format'
+import { nextReviewText, pickResultText, sourceText, studyRecordText } from './format'
 
 const props = defineProps<{ id: number }>()
 const emit = defineEmits<{
@@ -150,6 +151,26 @@ function toggleSuspend() {
     void run(() => suspendKnowledgePoints([d.id]), '已暂停复习', '没有暂停成功，请重试')
   }
 }
+
+/**
+ * 加入今天（#128）。详情不知道这道题在不在今天里（knowledge 不依赖 plan），按钮不随状态变化，点了按结果提示。
+ * 不走 run：加入今天不改变详情和列表，不用重新取
+ */
+async function pick() {
+  const d = detail.value
+  if (!d || busy.value) {
+    return
+  }
+  busy.value = true
+  try {
+    const result = await pickToday([d.id])
+    ElMessage({ type: result.added > 0 ? 'success' : 'info', message: pickResultText(result) })
+  } catch (e) {
+    ElMessage.error(e instanceof ApiError ? e.message : '没有加入成功，请重试')
+  } finally {
+    busy.value = false
+  }
+}
 </script>
 
 <template>
@@ -163,8 +184,11 @@ function toggleSuspend() {
       <div class="state">
         <MasteryDot :mastery="detail.mastery" />{{ masteryLabels[detail.mastery] }}
         <span class="next">{{ nextLabel }}</span>
-        <!-- 只有待学的能开始学（#81）。有没保存的修改时，页面离开前的确认弹窗同样会问 -->
-        <el-button v-if="detail.mastery === 'NEW'" @click="router.push(`/study/${detail!.id}`)">开始学</el-button>
+        <!-- 只有待学的能加入今天（#128）、开始学（#81）。开始学时有没保存的修改，页面离开前的确认弹窗同样会问 -->
+        <template v-if="detail.mastery === 'NEW'">
+          <el-button :disabled="busy" @click="pick">加入今天</el-button>
+          <el-button @click="router.push(`/study/${detail!.id}`)">开始学</el-button>
+        </template>
       </div>
 
       <div class="field">

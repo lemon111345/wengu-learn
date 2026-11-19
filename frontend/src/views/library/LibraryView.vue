@@ -18,6 +18,7 @@ import {
   type Mastery,
   type SortDirection,
 } from '@/api/knowledgePoints'
+import { pickToday } from '@/api/plan'
 import type { KnowledgePointType } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
 import { modKeyLabel, useShortcut } from '@/shortcuts/useShortcut'
@@ -26,6 +27,7 @@ import KnowledgeTable from './KnowledgeTable.vue'
 import LibraryFilters from './LibraryFilters.vue'
 import MergeDialog from './MergeDialog.vue'
 import UndoToast from './UndoToast.vue'
+import { pickResultText } from './format'
 
 const router = useRouter()
 const route = useRoute()
@@ -158,6 +160,27 @@ async function setStatusChecked(action: (ids: number[]) => Promise<unknown>, don
 
 const suspendChecked = () => setStatusChecked(suspendKnowledgePoints, '已暂停', '没有暂停成功，请重试')
 const resumeChecked = () => setStatusChecked(resumeKnowledgePoints, '已恢复', '没有恢复成功，请重试')
+
+/**
+ * 把勾选的加入今天（#128）。按钮一直可点：后端只加入其中待学的，其余分别计数，这里照着提示。
+ * 加入今天不改变知识库的任何一列，所以不重新取列表
+ */
+async function pickChecked() {
+  const ids = [...checked.value.keys()]
+  if (busy.value || ids.length === 0) {
+    return
+  }
+  busy.value = true
+  try {
+    const result = await pickToday(ids)
+    ElMessage({ type: result.added > 0 ? 'success' : 'info', message: pickResultText(result) })
+    uncheck(ids)
+  } catch (e) {
+    ElMessage.error(e instanceof ApiError ? e.message : '没有加入成功，请重试')
+  } finally {
+    busy.value = false
+  }
+}
 
 // ---- 打乱待学顺序（#77） ----
 // 数量随类型筛选变化：筛选时只看得到一部分，而打乱的始终是全部待学的，所以按钮照常显示，弹窗不写数字
@@ -349,6 +372,7 @@ onMounted(async () => {
       <div v-if="checked.size > 0" class="batch-bar">
         <span class="batch-count">已选 {{ checked.size }} 个</span>
         <div class="batch-actions">
+          <button type="button" class="batch-btn" :disabled="busy" @click="pickChecked">加入今天</button>
           <button type="button" class="batch-btn" :disabled="checked.size < 2 || busy" @click="mergeOpen = true">
             合并
           </button>
