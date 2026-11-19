@@ -34,14 +34,24 @@ public enum KnowledgePointType {
     }
 
     /**
-     * 是否参与调度（进入每日计划）。不参与的类型不初始化 card_state，由 knowledge 在创建知识点时判断（决策 007）：
-     * SYSTEM_DESIGN 在 M1 只标记；EXPERIENCE 要结合用户源码追问，M2 有了源码导入后再启用。
+     * 这个类型本身是否参与调度（进入每日计划）。不参与的类型不初始化 card_state，由 knowledge 在创建知识点时判断（决策 007）：
+     * SYSTEM_DESIGN 的学法在 M3 定；EXPERIENCE 要结合用户源码追问，带源码的另外算，见 {@link #isScheduled(boolean)}。
      */
     public boolean isScheduled() {
         return this != SYSTEM_DESIGN && this != EXPERIENCE;
     }
 
-    /** 参与调度的全部类型，每日计划用它排除只收录的（决策 029） */
+    /**
+     * 一个知识点是否参与调度（决策 051）：类型本身参与调度，或者是带源码（有 kp_code）的个人经历题。
+     * 题库抽出的个人经历题没有源码，老师没有事实依据，仍然只收录。
+     *
+     * @param hasCode 这个知识点有没有源码数据（kp_code）
+     */
+    public boolean isScheduled(boolean hasCode) {
+        return isScheduled() || (this == EXPERIENCE && hasCode);
+    }
+
+    /** 类型本身参与调度的全部类型，每日计划用它排除只收录的（决策 029）；带源码的个人经历题另外加上（决策 051） */
     public static List<KnowledgePointType> scheduledTypes() {
         return Arrays.stream(values()).filter(KnowledgePointType::isScheduled).toList();
     }

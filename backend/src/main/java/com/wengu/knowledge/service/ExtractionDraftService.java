@@ -278,11 +278,13 @@ public class ExtractionDraftService {
             }
 
             List<ExtractionDraftItem> accepted = items.stream().filter(item -> !rejected.contains(item.getId())).toList();
+            // 先查出哪些条目带源码：带源码的个人经历题在生成时就初始化调度状态（决策 051）
+            Map<Long, ExtractionDraftItemCode> codes = itemCodes(accepted);
             List<Long> kpIds = knowledgePointService.create(draft.getUserId(), draft.getSourceId(), accepted.stream()
                     .map(item -> new KnowledgePointService.NewKnowledgePoint(
-                            item.getType(), item.getTitle(), item.getSummary(), item.getId()))
+                            item.getType(), item.getTitle(), item.getSummary(), item.getId(), codes.containsKey(item.getId())))
                     .toList());
-            copyCode(accepted, kpIds, draft.getSourceId());
+            copyCode(accepted, kpIds, draft.getSourceId(), codes);
             if (draft.getSourceId() != null) {
                 knowledgePointService.linkToSource(draft.getUserId(), draft.getSourceId(), coveredKnowledgePoints(batches));
             }
@@ -295,18 +297,26 @@ public class ExtractionDraftService {
         return get(userId, draftId);
     }
 
+    /** 条目的源码数据，按条目 id；题目条目没有，不在结果中（#90） */
+    private Map<Long, ExtractionDraftItemCode> itemCodes(List<ExtractionDraftItem> items) {
+        if (items.isEmpty()) {
+            return Map.of();
+        }
+        return itemCodeMapper.selectList(new LambdaQueryWrapper<ExtractionDraftItemCode>()
+                        .in(ExtractionDraftItemCode::getItemId, items.stream().map(ExtractionDraftItem::getId).toList()))
+                .stream()
+                .collect(Collectors.toMap(ExtractionDraftItemCode::getItemId, code -> code));
+    }
+
     /**
      * 源码条目的细节、代码依据等复制到 kp_code（#90，决策 050）。kpIds 和 accepted 按顺序一一对应（create 的约定）；
      * 题目条目没有源码数据，跳过。在确认的事务中执行。
      */
-    private void copyCode(List<ExtractionDraftItem> accepted, List<Long> kpIds, Long sourceId) {
-        if (accepted.isEmpty() || sourceId == null) {
+    private void copyCode(List<ExtractionDraftItem> accepted, List<Long> kpIds, Long sourceId,
+                          Map<Long, ExtractionDraftItemCode> codes) {
+        if (sourceId == null) {
             return;
         }
-        Map<Long, ExtractionDraftItemCode> codes = itemCodeMapper.selectList(new LambdaQueryWrapper<ExtractionDraftItemCode>()
-                        .in(ExtractionDraftItemCode::getItemId, accepted.stream().map(ExtractionDraftItem::getId).toList()))
-                .stream()
-                .collect(Collectors.toMap(ExtractionDraftItemCode::getItemId, code -> code));
         for (int i = 0; i < accepted.size(); i++) {
             ExtractionDraftItemCode code = codes.get(accepted.get(i).getId());
             if (code != null) {

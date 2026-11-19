@@ -37,16 +37,17 @@ public enum Mastery {
     /**
      * 判断一个知识点的掌握程度，按先后顺序：
      * <ol>
-     *   <li>类型不参与调度 → 只收录。这个类型本来就学不了，暂不暂停都一样；改过来时保留的调度状态也不看（决策 029）</li>
+     *   <li>不参与调度（类型本身不参与，又不是带源码的个人经历题，决策 051）→ 只收录。这个类型本来就学不了，暂不暂停都一样；改过来时保留的调度状态也不看（决策 029）</li>
      *   <li>暂停 → 暂停</li>
      *   <li>没有调度状态或还没复习过 → 待学</li>
      *   <li>其余按稳定性分档</li>
      * </ol>
      *
-     * @param card 调度状态，没有时为 null
+     * @param scheduled 这个知识点是否参与调度，见 {@link KnowledgePointType#isScheduled(boolean)}
+     * @param card      调度状态，没有时为 null
      */
-    public static Mastery of(KnowledgePointType type, KnowledgePointStatus status, CardProgress card) {
-        if (!type.isScheduled()) {
+    public static Mastery of(boolean scheduled, KnowledgePointStatus status, CardProgress card) {
+        if (!scheduled) {
             return RECORD_ONLY;
         }
         if (status == KnowledgePointStatus.SUSPENDED) {

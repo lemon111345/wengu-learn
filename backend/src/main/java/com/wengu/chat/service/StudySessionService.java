@@ -84,7 +84,7 @@ public class StudySessionService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "缺少知识点 id");
         }
         StudyMaterial material = knowledgePointService.studyMaterial(userId, request.kpId());
-        if (!material.type().isScheduled()) {
+        if (!material.type().isScheduled(material.code() != null)) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "这类知识点暂时只收录，不能学习");
         }
         StudySession latest = sessionMapper.selectOne(new LambdaQueryWrapper<StudySession>()

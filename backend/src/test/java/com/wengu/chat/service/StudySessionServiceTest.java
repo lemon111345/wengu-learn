@@ -16,11 +16,15 @@ import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
+import com.wengu.knowledge.entity.KpCode;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.knowledge.mapper.KpCodeMapper;
 import com.wengu.review.fsrs.Rating;
 import com.wengu.review.mapper.CardStateMapper;
 import com.wengu.review.mapper.ReviewLogMapper;
 import com.wengu.review.service.ReviewService;
+import com.wengu.source.dto.ImportCodeRequest;
+import com.wengu.source.service.SourceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,6 +69,12 @@ class StudySessionServiceTest {
     private KnowledgePointMapper knowledgePointMapper;
 
     @Autowired
+    private KpCodeMapper kpCodeMapper;
+
+    @Autowired
+    private SourceService sourceService;
+
+    @Autowired
     private ReviewService reviewService;
 
     @Autowired
@@ -86,6 +96,7 @@ class StudySessionServiceTest {
         cardStateMapper.delete(null);
         messageMapper.delete(null);
         sessionMapper.delete(null);
+        kpCodeMapper.delete(null);
         knowledgePointMapper.delete(null);
     }
 
@@ -153,6 +164,26 @@ class StudySessionServiceTest {
         assertError(() -> sessionService.start(USER_ID, new StartSessionRequest(others)), ErrorCode.NOT_FOUND);
         assertError(() -> sessionService.start(USER_ID, new StartSessionRequest(null)), ErrorCode.BAD_REQUEST);
         assertThat(sessionMapper.selectCount(null)).isZero();
+    }
+
+    @Test
+    void 带源码的个人经历题可以学_用源码的prompt版本_题库来的个人经历题不能学() {
+        long plain = kp(USER_ID, "你项目里限流怎么做的？", KnowledgePointType.EXPERIENCE);
+        long code = kp(USER_ID, "发一条消息时依次发生了什么？", KnowledgePointType.EXPERIENCE);
+        long sourceId = sourceService.importCode(USER_ID, new ImportCodeRequest("wengu-learn",
+                List.of(new ImportCodeRequest.CodeFile("chat/ChatService.java", "class ChatService {}\n")))).id();
+        KpCode kpCode = new KpCode();
+        kpCode.setKpId(code);
+        kpCode.setUserId(USER_ID);
+        kpCode.setSourceId(sourceId);
+        kpCode.setEvidence("[{\"file\":\"chat/ChatService.java\",\"symbol\":\"ChatService\"}]");
+        kpCode.setUnverifiable("[]");
+        kpCode.setPrerequisites("[]");
+        kpCodeMapper.insert(kpCode);
+
+        assertError(() -> sessionService.start(USER_ID, new StartSessionRequest(plain)), ErrorCode.BAD_REQUEST);
+        long sessionId = sessionService.start(USER_ID, new StartSessionRequest(code)).id();
+        assertThat(sessionMapper.selectById(sessionId).getPromptVersion()).isEqualTo(CodeChatPrompt.VERSION);
     }
 
     @Test
