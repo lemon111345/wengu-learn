@@ -1,5 +1,6 @@
 package com.wengu.source.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.wengu.TestcontainersConfiguration;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
@@ -8,13 +9,18 @@ import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmOutputParseException;
 import com.wengu.source.dto.GenerateResult;
 import com.wengu.source.dto.GeneratedQuestion;
+import com.wengu.source.dto.ImportCodeRequest;
+import com.wengu.source.dto.ImportCodeRequest.CodeFile;
 import com.wengu.source.dto.ImportQuestionsRequest;
+import com.wengu.source.dto.ImportedCode;
 import com.wengu.source.dto.ImportedSource;
 import com.wengu.source.dto.SourceQuestion;
 import com.wengu.source.dto.SplitQuestion;
 import com.wengu.source.dto.SplitResult;
 import com.wengu.source.entity.Source;
+import com.wengu.source.entity.SourceFile;
 import com.wengu.source.entity.SourceType;
+import com.wengu.source.mapper.SourceFileMapper;
 import com.wengu.source.mapper.SourceMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,6 +66,9 @@ class SourceServiceTest {
     private SourceMapper sourceMapper;
 
     @Autowired
+    private SourceFileMapper sourceFileMapper;
+
+    @Autowired
     private JsonMapper jsonMapper;
 
     @MockitoBean
@@ -67,6 +76,7 @@ class SourceServiceTest {
 
     @BeforeEach
     void clean() {
+        sourceFileMapper.delete(null);
         sourceMapper.delete(null);
     }
 
@@ -295,6 +305,71 @@ class SourceServiceTest {
 
         assertThat(imported.type()).isEqualTo(SourceType.QUESTION);
         verify(generateService, never()).generate(anyString());
+    }
+
+    @Test
+    void 导入源码_保存材料和文件_路径统一成斜杠_换行统一后数字符() {
+        ImportedCode imported = sourceService.importCode(USER_ID, new ImportCodeRequest(" wengu-learn ", List.of(
+                new CodeFile("chat\\ChatService.java", "class ChatService {\r\n}\r\n"),
+                new CodeFile("chat/RatingService.java", "class RatingService {}\n"))));
+
+        assertThat(imported.name()).isEqualTo("wengu-learn");
+        assertThat(imported.type()).isEqualTo(SourceType.CODE);
+        assertThat(imported.files()).containsExactly(
+                new ImportedCode.FileSummary("chat/ChatService.java", 22),
+                new ImportedCode.FileSummary("chat/RatingService.java", 23));
+
+        Source source = sourceMapper.selectById(imported.id());
+        assertThat(source.getContent()).isEqualTo("chat/ChatService.java\nchat/RatingService.java");
+        assertThat(source.getQuestions()).isNull();
+        List<SourceFile> files = sourceFileMapper.selectList(new LambdaQueryWrapper<SourceFile>()
+                .eq(SourceFile::getSourceId, imported.id()).orderByAsc(SourceFile::getFileOrder));
+        assertThat(files).extracting(SourceFile::getFileOrder).containsExactly(1, 2);
+        assertThat(files.getFirst().getContent()).isEqualTo("class ChatService {\n}\n");
+        assertThat(files.getFirst().getUserId()).isEqualTo(USER_ID);
+    }
+
+    @Test
+    void 源码按统一换行后的字符数算上限_刚好15万可以_多1个不行且不保存() {
+        String exactly = "a\r\n".repeat(SourceService.MAX_CODE_CHARS / 2);
+
+        sourceService.importCode(USER_ID, new ImportCodeRequest("刚好", List.of(new CodeFile("A.java", exactly))));
+
+        assertRejected(new ImportCodeRequest("超出", List.of(new CodeFile("A.java", exactly), new CodeFile("B.java", "b"))),
+                "共 150001 字符");
+        assertThat(sourceMapper.selectCount(null)).isOne();
+    }
+
+    @Test
+    void 源码的校验_都不保存() {
+        assertRejected(new ImportCodeRequest("项目", List.of()), "请至少勾选一个文件");
+        assertRejected(new ImportCodeRequest(" ", List.of(new CodeFile("A.java", "a"))), "请填写材料名称");
+        assertRejected(new ImportCodeRequest("项目", List.of(new CodeFile("a\\A.java", "a"), new CodeFile("a/A.java", "b"))),
+                "文件重复了：a/A.java");
+        assertRejected(new ImportCodeRequest("项目", List.of(new CodeFile("Empty.java", " \n"))), "文件是空的：Empty.java");
+        assertRejected(new ImportCodeRequest("项目", List.of(new CodeFile("logo.png", "PNG\0\0"))), "看起来不是文本文件：logo.png");
+        assertRejected(new ImportCodeRequest("项目", List.of(new CodeFile("x".repeat(501), "a"))), "文件路径不能超过 500 个字符");
+        assertRejected(new ImportCodeRequest("项目", IntStream.rangeClosed(1, 301)
+                .mapToObj(i -> new CodeFile(i + ".java", "a")).toList()), "勾选了 301 个文件");
+        assertThat(sourceMapper.selectCount(null)).isZero();
+        assertThat(sourceFileMapper.selectCount(null)).isZero();
+    }
+
+    @Test
+    void 源码不能走粘贴导入() {
+        assertThatThrownBy(() -> sourceService.importQuestions(USER_ID,
+                new ImportQuestionsRequest("项目", "class A {}", SourceType.CODE)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("源码请用“源码”方式导入");
+        verify(splitService, never()).split(anyString());
+    }
+
+    private void assertRejected(ImportCodeRequest request, String message) {
+        assertThatThrownBy(() -> sourceService.importCode(USER_ID, request))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST);
+                    assertThat(e.getMessage()).contains(message);
+                });
     }
 
     private static LlmOutputParseException parseException() {

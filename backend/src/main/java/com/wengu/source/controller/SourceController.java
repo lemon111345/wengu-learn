@@ -4,7 +4,9 @@ import com.wengu.common.context.CurrentUser;
 import com.wengu.common.result.Result;
 import com.wengu.source.dto.ImageRecognitionTask;
 import com.wengu.source.dto.ImageRecognitionView;
+import com.wengu.source.dto.ImportCodeRequest;
 import com.wengu.source.dto.ImportQuestionsRequest;
+import com.wengu.source.dto.ImportedCode;
 import com.wengu.source.dto.ImportedSource;
 import com.wengu.source.entity.SourceType;
 import com.wengu.source.service.ImageRecognitionService;
@@ -43,6 +45,12 @@ public class SourceController {
     @PostMapping
     public Result<ImportedSource> importQuestions(@RequestBody ImportQuestionsRequest request) {
         return Result.ok(sourceService.importQuestions(currentUser.id(), request));
+    }
+
+    /** 导入源码（#90，决策 050）：前端读出勾选文件的文字发过来。只保存、不调用模型，之后用 POST /api/drafts 发起抽取。 */
+    @PostMapping("/code")
+    public Result<ImportedCode> importCode(@RequestBody ImportCodeRequest request) {
+        return Result.ok(sourceService.importCode(currentUser.id(), request));
     }
 
     /**

@@ -6,25 +6,32 @@ import com.wengu.common.result.ErrorCode;
 import com.wengu.llm.dto.LlmResult;
 import com.wengu.llm.service.LlmOutputParseException;
 import com.wengu.source.dto.GenerateResult;
+import com.wengu.source.dto.ImportCodeRequest;
 import com.wengu.source.dto.ImportQuestionsRequest;
+import com.wengu.source.dto.ImportedCode;
 import com.wengu.source.dto.ImportedSource;
 import com.wengu.source.dto.SourceQuestion;
 import com.wengu.source.dto.SplitQuestion;
 import com.wengu.source.dto.SplitResult;
 import com.wengu.source.entity.Source;
+import com.wengu.source.entity.SourceFile;
 import com.wengu.source.entity.SourceType;
+import com.wengu.source.mapper.SourceFileMapper;
 import com.wengu.source.mapper.SourceMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -52,15 +59,29 @@ public class SourceService {
 
     private static final int NAME_MAX_LENGTH = 255;
 
+    /**
+     * 源码的总字符数上限（决策 050）。#89 实验中 14.5 万字符 DeepSeek 一次抽取完、约 1 分钟；
+     * 后端不知道用户的上下文长度（决策 045），用固定上限。
+     */
+    public static final int MAX_CODE_CHARS = 150_000;
+
+    /** 源码一次最多导入的文件数（决策 050）。 */
+    public static final int MAX_CODE_FILES = 300;
+
+    /** 源码文件路径的长度上限，和 source_file.path 的列宽一致。 */
+    public static final int MAX_PATH_LENGTH = 500;
+
     private final SourceMapper sourceMapper;
+    private final SourceFileMapper sourceFileMapper;
     private final QuestionSplitService splitService;
     private final QuestionGenerateService generateService;
     private final Clock clock;
     private final JsonMapper jsonMapper;
 
-    public SourceService(SourceMapper sourceMapper, QuestionSplitService splitService,
+    public SourceService(SourceMapper sourceMapper, SourceFileMapper sourceFileMapper, QuestionSplitService splitService,
                          QuestionGenerateService generateService, Clock clock, JsonMapper jsonMapper) {
         this.sourceMapper = sourceMapper;
+        this.sourceFileMapper = sourceFileMapper;
         this.splitService = splitService;
         this.generateService = generateService;
         this.clock = clock;
@@ -104,6 +125,9 @@ public class SourceService {
      * @param type 为 null 时按题目清单处理
      */
     public ImportedSource importContent(long userId, String rawName, String rawContent, SourceType type) {
+        if (type == SourceType.CODE) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "源码请用“源码”方式导入");
+        }
         SourceType sourceType = type == null ? SourceType.QUESTION : type;
         boolean document = sourceType == SourceType.DOCUMENT;
         String name = rawName == null ? "" : rawName.strip();
@@ -146,6 +170,82 @@ public class SourceService {
         source.setCreatedAt(Instant.now(clock));
         sourceMapper.insert(source);
         return new ImportedSource(source.getId(), name, sourceType, questions);
+    }
+
+    /**
+     * 导入源码（#90，决策 050）：校验后在一个事务里保存材料和全部文件，不调用模型。之后由 POST /api/drafts 发起抽取。
+     * <p>
+     * 路径的 \ 统一换成 /，内容的 \r\n 统一换成 \n 后再数字符，前端按同样的算法显示已选字符数。
+     * 内容原样保存，不去掉首尾空白：行号要和用户自己的文件对得上。
+     */
+    @Transactional
+    public ImportedCode importCode(long userId, ImportCodeRequest request) {
+        String name = request.name() == null ? "" : request.name().strip();
+        if (name.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请填写材料名称");
+        }
+        if (name.length() > NAME_MAX_LENGTH) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "材料名称不能超过 " + NAME_MAX_LENGTH + " 个字");
+        }
+        List<ImportCodeRequest.CodeFile> input = request.files() == null ? List.of() : request.files();
+        if (input.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请至少勾选一个文件");
+        }
+        if (input.size() > MAX_CODE_FILES) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "勾选了 " + input.size() + " 个文件，一次最多 "
+                    + MAX_CODE_FILES + " 个。只选一条业务链路的文件效果更好");
+        }
+
+        Set<String> paths = new HashSet<>();
+        List<SourceFile> files = new ArrayList<>();
+        int total = 0;
+        for (ImportCodeRequest.CodeFile file : input) {
+            String path = file.path() == null ? "" : file.path().strip().replace('\\', '/');
+            if (path.isEmpty()) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "有文件没有路径");
+            }
+            if (path.length() > MAX_PATH_LENGTH) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "文件路径不能超过 " + MAX_PATH_LENGTH + " 个字符：" + path);
+            }
+            if (!paths.add(path)) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "文件重复了：" + path);
+            }
+            String content = file.content() == null ? "" : file.content().replace("\r\n", "\n");
+            if (content.isBlank()) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "文件是空的：" + path);
+            }
+            if (content.indexOf('\0') >= 0) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "看起来不是文本文件：" + path);
+            }
+            total += content.length();
+            SourceFile entity = new SourceFile();
+            entity.setUserId(userId);
+            entity.setPath(path);
+            entity.setContent(content);
+            entity.setChars(content.length());
+            entity.setFileOrder(files.size() + 1);
+            files.add(entity);
+        }
+        if (total > MAX_CODE_CHARS) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "勾选的文件共 " + total + " 字符，超过了 " + MAX_CODE_CHARS
+                    + " 字符的上限。取消勾选一些文件，或者只选一条业务链路");
+        }
+
+        Source source = new Source();
+        source.setUserId(userId);
+        source.setType(SourceType.CODE);
+        source.setName(name);
+        // 文件清单，一行一个路径，供以后“这次导入了哪些文件”显示；文件内容在 source_file
+        source.setContent(files.stream().map(SourceFile::getPath).collect(Collectors.joining("\n")));
+        source.setCreatedAt(Instant.now(clock));
+        sourceMapper.insert(source);
+        for (SourceFile file : files) {
+            file.setSourceId(source.getId());
+            sourceFileMapper.insert(file);
+        }
+        return new ImportedCode(source.getId(), name, SourceType.CODE, files.stream()
+                .map(f -> new ImportedCode.FileSummary(f.getPath(), f.getChars()))
+                .toList());
     }
 
     /**
