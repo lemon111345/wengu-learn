@@ -32,27 +32,36 @@ class MasteryTest {
             "0.1, SHAKY"
     })
     void 学过的按稳定性分档_含下限不含上限(double stability, Mastery expected) {
-        assertThat(Mastery.of(KnowledgePointType.CONCEPT, ACTIVE, reviewed(stability))).isEqualTo(expected);
+        assertThat(Mastery.of(KnowledgePointType.CONCEPT.isScheduled(false), ACTIVE, reviewed(stability))).isEqualTo(expected);
     }
 
     @Test
     void 还没复习过或没有调度状态的是待学() {
         CardProgress newCard = new CardProgress(1, null, NOW, null);
-        assertThat(Mastery.of(KnowledgePointType.CONCEPT, ACTIVE, newCard)).isEqualTo(Mastery.NEW);
-        assertThat(Mastery.of(KnowledgePointType.CONCEPT, ACTIVE, null)).isEqualTo(Mastery.NEW);
+        assertThat(Mastery.of(KnowledgePointType.CONCEPT.isScheduled(false), ACTIVE, newCard)).isEqualTo(Mastery.NEW);
+        assertThat(Mastery.of(KnowledgePointType.CONCEPT.isScheduled(false), ACTIVE, null)).isEqualTo(Mastery.NEW);
     }
 
     @Test
     void 暂停优先于待学和稳定性() {
-        assertThat(Mastery.of(KnowledgePointType.CONCEPT, SUSPENDED, reviewed(30))).isEqualTo(Mastery.SUSPENDED);
-        assertThat(Mastery.of(KnowledgePointType.CONCEPT, SUSPENDED, null)).isEqualTo(Mastery.SUSPENDED);
+        assertThat(Mastery.of(KnowledgePointType.CONCEPT.isScheduled(false), SUSPENDED, reviewed(30))).isEqualTo(Mastery.SUSPENDED);
+        assertThat(Mastery.of(KnowledgePointType.CONCEPT.isScheduled(false), SUSPENDED, null)).isEqualTo(Mastery.SUSPENDED);
     }
 
     @Test
     void 只收录的类型优先于暂停_改过来时保留的调度状态也不看() {
-        assertThat(Mastery.of(KnowledgePointType.SYSTEM_DESIGN, ACTIVE, null)).isEqualTo(Mastery.RECORD_ONLY);
-        assertThat(Mastery.of(KnowledgePointType.EXPERIENCE, SUSPENDED, null)).isEqualTo(Mastery.RECORD_ONLY);
-        assertThat(Mastery.of(KnowledgePointType.SYSTEM_DESIGN, ACTIVE, reviewed(30))).isEqualTo(Mastery.RECORD_ONLY);
+        assertThat(Mastery.of(KnowledgePointType.SYSTEM_DESIGN.isScheduled(false), ACTIVE, null)).isEqualTo(Mastery.RECORD_ONLY);
+        assertThat(Mastery.of(KnowledgePointType.EXPERIENCE.isScheduled(false), SUSPENDED, null)).isEqualTo(Mastery.RECORD_ONLY);
+        assertThat(Mastery.of(KnowledgePointType.SYSTEM_DESIGN.isScheduled(false), ACTIVE, reviewed(30))).isEqualTo(Mastery.RECORD_ONLY);
+    }
+
+    @Test
+    void 带源码的个人经历题参与调度_题库来的仍然只收录() {
+        assertThat(KnowledgePointType.EXPERIENCE.isScheduled(true)).isTrue();
+        assertThat(KnowledgePointType.EXPERIENCE.isScheduled(false)).isFalse();
+        // 系统设计带不带源码都不参与调度
+        assertThat(KnowledgePointType.SYSTEM_DESIGN.isScheduled(true)).isFalse();
+        assertThat(Mastery.of(KnowledgePointType.EXPERIENCE.isScheduled(true), ACTIVE, null)).isEqualTo(Mastery.NEW);
     }
 
     @Test

@@ -15,6 +15,7 @@ import com.wengu.knowledge.dto.DraftItemView;
 import com.wengu.knowledge.dto.DraftView;
 import com.wengu.knowledge.dto.KnowledgePointDetail;
 import com.wengu.knowledge.dto.KnowledgePointType;
+import com.wengu.knowledge.dto.Mastery;
 import com.wengu.knowledge.entity.BatchStatus;
 import com.wengu.knowledge.entity.DraftStatus;
 import com.wengu.knowledge.entity.ExtractionBatch;
@@ -255,7 +256,7 @@ class CodeDraftTest {
     }
 
     @Test
-    void 确认后写入kp_code_取消勾选的不写_个人经历不初始化调度状态() {
+    void 确认后写入kp_code_取消勾选的不写_带源码的个人经历题当场初始化调度状态() {
         when(codeExtractionService.extract(anyList())).thenReturn(twoPoints());
         long draftId = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null)).id();
         executor.runAll();
@@ -276,7 +277,9 @@ class CodeDraftTest {
         assertThat(code.getDetails()).isEqualTo("1. 内容不超过 5000 字。");
         assertThat(code.getEvidence()).contains("ChatService#send");
         assertThat(kpCodeMapper.selectCount(null)).isOne();
-        assertThat(cardStateMapper.selectCount(null)).isZero();
+        // 带源码的个人经历题参与调度（决策 051），确认时就建好调度状态
+        assertThat(cardStateMapper.selectById(kpId)).isNotNull();
+        assertThat(cardStateMapper.selectCount(null)).isOne();
     }
 
     @Test
@@ -295,6 +298,7 @@ class CodeDraftTest {
 
         KnowledgePointDetail detail = libraryService.detail(USER_ID, kpId);
 
+        assertThat(detail.mastery()).isEqualTo(Mastery.NEW);
         assertThat(detail.sources()).singleElement().satisfies(source -> {
             assertThat(source.name()).isEqualTo("wengu-learn");
             assertThat(source.questionIds()).isEmpty();
@@ -325,6 +329,30 @@ class CodeDraftTest {
         });
         assertThat(knowledgePointService.studyMaterial(USER_ID, second).code().files()).extracting(f -> f.path())
                 .containsExactly("chat/ChatService.java", "chat/RatingService.java");
+    }
+
+    @Test
+    void 每日计划派发带源码的个人经历题_题库来的个人经历题不派发() {
+        when(codeExtractionService.extract(anyList())).thenReturn(twoPoints());
+        long draftId = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null)).id();
+        executor.runAll();
+        draftService.confirm(USER_ID, draftId, null);
+        // 题库抽出的个人经历题：没有 kp_code，就算有调度状态（从别的类型改过来时保留的）也不派发
+        var plain = new com.wengu.knowledge.entity.KnowledgePoint();
+        plain.setUserId(USER_ID);
+        plain.setType(KnowledgePointType.EXPERIENCE);
+        plain.setTitle("你项目里限流怎么做的？");
+        plain.setSummary("要点");
+        plain.setStatus(com.wengu.knowledge.entity.KnowledgePointStatus.ACTIVE);
+        plain.setSortOrder(99);
+        plain.setCreatedAt(java.time.Instant.now());
+        plain.setUpdatedAt(java.time.Instant.now());
+        knowledgePointMapper.insert(plain);
+        List<Long> all = knowledgePointMapper.selectList(null).stream().map(kp -> kp.getId()).toList();
+
+        assertThat(knowledgePointService.activeInOrder(USER_ID, all)).extracting(s -> s.title())
+                .containsExactly("发一条消息时依次发生了什么？", "评分前后怎么衔接？");
+        assertThat(knowledgePointService.shufflePending(USER_ID)).isEqualTo(2);
     }
 
     /** 两个合格的知识点：第 1 个依据一个文件，第 2 个依据两个文件（其中一个引用了两次） */

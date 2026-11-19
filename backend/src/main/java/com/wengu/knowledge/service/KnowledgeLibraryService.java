@@ -112,12 +112,14 @@ public class KnowledgeLibraryService {
                 .orderByAsc(KnowledgePoint::getId));
         Map<Long, CardProgress> progress = reviewService.progressOf(userId,
                 kps.stream().map(KnowledgePoint::getId).toList());
+        Set<Long> withCode = codeKpIds(userId);
 
         List<Row> typed = kps.stream()
                 .filter(kp -> type == null || kp.getType() == type)
                 .map(kp -> {
                     CardProgress card = progress.get(kp.getId());
-                    return new Row(kp, Mastery.of(kp.getType(), kp.getStatus(), card), card);
+                    boolean scheduled = kp.getType().isScheduled(withCode.contains(kp.getId()));
+                    return new Row(kp, Mastery.of(scheduled, kp.getStatus(), card), card);
                 })
                 .toList();
 
@@ -164,7 +166,7 @@ public class KnowledgeLibraryService {
                 .eq(KnowledgePoint::getMergedInto, kpId));
 
         CardProgress card = reviewService.progressOf(userId, List.of(kpId)).get(kpId);
-        Mastery mastery = Mastery.of(kp.getType(), kp.getStatus(), card);
+        Mastery mastery = Mastery.of(kp.getType().isScheduled(kpCodeMapper.selectById(kpId) != null), kp.getStatus(), card);
         SettingsView settings = settingsService.get(userId);
         LocalDate today = studyDate(Instant.now(clock), settings);
 
@@ -242,6 +244,16 @@ public class KnowledgeLibraryService {
                 .map(id -> new SourceRef(id, names.get(id), List.copyOf(questions.getOrDefault(id, Set.of())),
                         files.get(id)))
                 .toList();
+    }
+
+    /** 这个用户带源码（有 kp_code）的知识点 id，决定个人经历题是否参与调度（决策 051） */
+    private Set<Long> codeKpIds(long userId) {
+        return kpCodeMapper.selectList(new LambdaQueryWrapper<KpCode>()
+                        .select(KpCode::getKpId)
+                        .eq(KpCode::getUserId, userId))
+                .stream()
+                .map(KpCode::getKpId)
+                .collect(Collectors.toSet());
     }
 
     /** 源码知识点依据的文件，按材料分组，去重后保持顺序：先自己的，再按 id 排并进来的（#90）。 */

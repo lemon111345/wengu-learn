@@ -252,7 +252,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | 列举 | ENUMERATION | “有哪些” | 偏记忆，快问快答 |
 | 排查实战 | TROUBLESHOOTING | “线上出了问题怎么办” | 情景模拟，考察步骤和工具 |
 | 系统设计 | SYSTEM_DESIGN | “设计一个 XX 系统” | 综合多个知识点；M1 只标记、不进入每日计划，学法在 M3 定，以后做模拟面试 |
-| 个人经历 | EXPERIENCE | “你项目里怎么做的” | 必须结合用户源码追问；M1 只标记、不进入每日计划，#90 第二步启用。源码导入抽出的要点每条带 2～3 个得分点（决策 050） |
+| 个人经历 | EXPERIENCE | “你项目里怎么做的” | 必须结合用户源码追问；只有带源码（有 kp_code）的进入每日计划，题库抽出的没有源码，仍然只收录（决策 051）。源码导入抽出的要点每条带 2～3 个得分点（决策 050） |
 
 加 type 字段的理由：不同类型的复习方式差别很大，用类型选择不同的对话 prompt，成本几乎为零，却直接决定学习体验。
 
@@ -343,7 +343,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `GET /api/drafts` | 草稿列表（#48） | — | `[{id, sourceId, sourceName, status, itemCount, createdAt}]` | 未确认的全部返回，已确认的只返回最近 10 份，新的在前，不分页；status 和详情的算法相同；itemCount 是成功批次中的条目数。见决策 024 |
 | `GET /api/drafts/{id}` | 查看草稿和抽取进度（#15、#16） | — | 同上 | 不存在或不属于当前用户 404 |
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中或已确认 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
-| `POST /api/drafts/{id}/confirm` | 确认草稿，生成知识点（#17） | `{rejectedItemIds?}`，取消勾选的条目 id，不传则全部接受 | 同上，status 为 CONFIRMED，每个条目的 decision 为 ACCEPTED 或 REJECTED | 一个事务中生成知识点（sort_order 接在已有之后）、关联材料、初始化 card_state（SYSTEM_DESIGN、EXPERIENCE 不初始化）；covered 引用的已有知识点也关联到这份材料。草稿不是 READY 或已确认 409，条目不属于这份草稿 400。见决策 015 |
+| `POST /api/drafts/{id}/confirm` | 确认草稿，生成知识点（#17） | `{rejectedItemIds?}`，取消勾选的条目 id，不传则全部接受 | 同上，status 为 CONFIRMED，每个条目的 decision 为 ACCEPTED 或 REJECTED | 一个事务中生成知识点（sort_order 接在已有之后）、关联材料、初始化 card_state（SYSTEM_DESIGN 和不带源码的 EXPERIENCE 不初始化，决策 051）；covered 引用的已有知识点也关联到这份材料。草稿不是 READY 或已确认 409，条目不属于这份草稿 400。见决策 015 |
 | `GET /api/knowledge-points?mastery=&type=&sort=&direction=` | 知识库列表（#50） | mastery、type 各选一个，不传为全部；sort 为 ORDER（默认，学习顺序）/ MASTERY / NEXT_REVIEW；direction 为 ASC（默认）/ DESC | `{total, counts: {SOLID, FAMILIAR, FAIR, SHAKY, NEW, SUSPENDED, RECORD_ONLY}, items: [{id, title, type, mastery, nextReview: {date, days}}]}` | total 是全部没删除的知识点数；counts 只受类型筛选影响；items 两种筛选都生效。掌握程度见上文“掌握程度”。MASTERY 按稳定性（ASC 生疏在前），NEXT_REVIEW 按到期时间；两种下待学、暂停、只收录都依次排在最后，方向只影响学过的；ORDER 不分方向。nextReview 只有学过的才有，date 是学习日，days 为 1 是明天、≤ 0 是已经到期。不分页。参数不合法 400。见决策 030 |
 | `GET /api/knowledge-points/{id}` | 知识点详情（#50） | — | `{id, title, type, status, mastery, nextReview, summary, aiSummary, summaryEdited, reviews: [{date, firstReview, rating, ratingAi, mergedFrom, sessionId}], sources: [{sourceId, name, questionIds, files}]}` | aiSummary 是草稿条目中的 AI 原文（不是从草稿来的为 null），summaryEdited 是要点和它不同（忽略首尾空白）；reviews 最近的在前，包括并进来的知识点的（mergedFrom 为它的标题），sessionId 是那次学习的会话，没有时为 null（#82）；sources 来自 kp_source，题号来自自己和并进来的知识点的草稿条目，去重时补关联的材料没有题号。源码材料（#90）没有题号，files 是这个知识点和并进来的知识点依据的文件路径，去重后保持顺序；题目材料的 files 为 null。不存在、不属于当前用户、已删除或被合并 404。见决策 030 |
 | `PATCH /api/knowledge-points/{id}` | 编辑知识点（#25） | `{title?, type?, summary?}`，只改传了的字段 | — | 有改动时先存修改前的快照（kp_revision）；改成只收录的类型时保留 card_state，改成参与调度的类型时没有 card_state 的才初始化。标题或要点为空、标题超过 500 字 400；不存在、不属于当前用户或已删除 404。“恢复 AI 版本”也走这里。见决策 029 |

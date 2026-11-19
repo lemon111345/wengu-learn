@@ -90,8 +90,15 @@ public class KnowledgePointService {
      * 一个待创建的知识点。
      *
      * @param draftItemId 来自哪个草稿条目；不是从草稿来的为 null
+     * @param hasCode     是否带源码数据（确认源码草稿时为 true），决定个人经历题是否参与调度（决策 051）
      */
-    public record NewKnowledgePoint(KnowledgePointType type, String title, String summary, Long draftItemId) {
+    public record NewKnowledgePoint(KnowledgePointType type, String title, String summary, Long draftItemId,
+                                    boolean hasCode) {
+
+        /** 不带源码的知识点 */
+        public NewKnowledgePoint(KnowledgePointType type, String title, String summary, Long draftItemId) {
+            this(type, title, summary, draftItemId, false);
+        }
     }
 
     /**
@@ -117,7 +124,7 @@ public class KnowledgePointService {
      * <ul>
      *   <li>sort_order 接在用户已有知识点的最大值之后，连续编号，新知识就按这个顺序派发（决策 009）</li>
      *   <li>每个知识点关联到 sourceId（为 null 时不关联，例如以后由学习会话产生的知识点）</li>
-     *   <li>参与调度的类型调用 review 初始化 card_state；SYSTEM_DESIGN、EXPERIENCE 不初始化（决策 007）</li>
+     *   <li>参与调度的调用 review 初始化 card_state：SYSTEM_DESIGN 和不带源码的 EXPERIENCE 不初始化（决策 007、051）</li>
      * </ul>
      * 在调用方的事务中执行，任何一步失败都整体回滚。
      *
@@ -142,7 +149,7 @@ public class KnowledgePointService {
             kp.setUpdatedAt(now);
             knowledgePointMapper.insert(kp);
             ids.add(kp.getId());
-            if (p.type().isScheduled()) {
+            if (p.type().isScheduled(p.hasCode())) {
                 scheduled.add(kp.getId());
             }
             if (sourceId != null) {
@@ -200,7 +207,7 @@ public class KnowledgePointService {
                         .eq(KnowledgePoint::getUserId, userId)
                         .eq(KnowledgePoint::getStatus, KnowledgePointStatus.ACTIVE)
                         .isNull(KnowledgePoint::getDeletedAt)
-                        .in(KnowledgePoint::getType, KnowledgePointType.scheduledTypes())
+                        .and(KnowledgePointService::scheduledOnly)
                         .in(KnowledgePoint::getId, kpIds)
                         .orderByAsc(KnowledgePoint::getSortOrder)
                         .orderByAsc(KnowledgePoint::getId))
@@ -323,7 +330,7 @@ public class KnowledgePointService {
         }
         Instant now = Instant.now(clock);
         revisionMapper.insert(KpRevision.before(kp, now));
-        if (type != kp.getType() && type.isScheduled()) {
+        if (type != kp.getType() && type.isScheduled(kpCodeMapper.selectById(kpId) != null)) {
             reviewService.ensureCard(userId, kpId);
         }
         knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
@@ -534,7 +541,7 @@ public class KnowledgePointService {
                 .eq(KnowledgePoint::getUserId, userId)
                 .eq(KnowledgePoint::getStatus, KnowledgePointStatus.ACTIVE)
                 .isNull(KnowledgePoint::getDeletedAt)
-                .in(KnowledgePoint::getType, KnowledgePointType.scheduledTypes())
+                .and(KnowledgePointService::scheduledOnly)
                 .in(KnowledgePoint::getId, newIds)
                 .orderByAsc(KnowledgePoint::getSortOrder)
                 .orderByAsc(KnowledgePoint::getId));
@@ -595,5 +602,15 @@ public class KnowledgePointService {
                 .orderByDesc(KnowledgePoint::getSortOrder)
                 .last("LIMIT 1"));
         return last == null ? 0 : last.getSortOrder();
+    }
+
+    /**
+     * 只取参与调度的知识点（决策 051）：类型本身参与调度，或者是带源码（kp_code 中有这一行）的个人经历题。
+     * 用法：{@code .and(KnowledgePointService::scheduledOnly)}，条件整体加括号，不会和外面的 AND 搅在一起
+     */
+    private static void scheduledOnly(LambdaQueryWrapper<KnowledgePoint> query) {
+        query.in(KnowledgePoint::getType, KnowledgePointType.scheduledTypes())
+                .or(code -> code.eq(KnowledgePoint::getType, KnowledgePointType.EXPERIENCE)
+                        .inSql(KnowledgePoint::getId, "SELECT kp_id FROM kp_code"));
     }
 }

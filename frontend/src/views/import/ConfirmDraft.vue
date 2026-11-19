@@ -16,8 +16,13 @@ import { summaryLines } from './codeFiles'
 const props = defineProps<{ draft: DraftView }>()
 const router = useRouter()
 
-/** 只收录、暂时不能学的类型（决策 007） */
+/** 只收录、暂时不能学的类型（决策 007）；带源码的个人经历题可以学（决策 051），用 unscheduled() 判断 */
 const UNSCHEDULED: KnowledgePointType[] = ['SYSTEM_DESIGN', 'EXPERIENCE']
+
+/** 这一条确认后是否只收录：源码条目都是带源码的个人经历题，能学 */
+function unscheduled(item: DraftItemView) {
+  return UNSCHEDULED.includes(item.type) && !item.evidence
+}
 
 const confirmed = computed(() => props.draft.status === 'CONFIRMED')
 /** 源码草稿（#90）：没有题号，每条显示代码依据，要点里的得分点缩进显示 */
@@ -143,7 +148,7 @@ useShortcut('Mod+Enter', () => void confirm())
             <p v-else class="summary">{{ item.summary }}</p>
             <p class="meta">
               {{ sources(item) }}
-              <span v-if="UNSCHEDULED.includes(item.type)">暂不支持学习，先进知识库，支持后自动加入计划</span>
+              <span v-if="unscheduled(item)">暂不支持学习，先进知识库，支持后自动加入计划</span>
               <span v-if="confirmed && item.decision === 'REJECTED'">没有加入</span>
             </p>
           </div>
@@ -159,7 +164,7 @@ useShortcut('Mod+Enter', () => void confirm())
         </p>
         <ul v-if="typeCounts.length > 0" class="types">
           <li v-for="[type, n] in typeCounts" :key="type">
-            <span>{{ typeLabels[type] }}{{ UNSCHEDULED.includes(type) ? '（暂不支持）' : '' }}</span>
+            <span>{{ typeLabels[type] }}{{ UNSCHEDULED.includes(type) && !code ? '（暂不支持）' : '' }}</span>
             <span>{{ n }}</span>
           </li>
         </ul>
