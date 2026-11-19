@@ -258,6 +258,18 @@ public class KnowledgePointService {
     }
 
     /**
+     * 源码知识点的前置概念（#90），学习页在第一次学习前显示。只读 kp_code，不读源码文件：会话接口每次刷新都要调用。
+     * 不是源码知识点、不属于这个用户时为空列表。
+     */
+    public List<CodePrerequisite> prerequisites(long userId, long kpId) {
+        KpCode code = kpCodeMapper.selectById(kpId);
+        if (code == null || code.getUserId() != userId) {
+            return List.of();
+        }
+        return List.of(jsonMapper.readValue(code.getPrerequisites(), CodePrerequisite[].class));
+    }
+
+    /**
      * 源码知识点（#90）的细节、代码证明不了的问题、前置概念，以及代码依据涉及的文件。
      * 文件从导入时的快照（source_file）中取，按依据中第一次出现的顺序；不是源码知识点时为 null。
      */

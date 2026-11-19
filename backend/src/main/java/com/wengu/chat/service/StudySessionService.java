@@ -15,6 +15,7 @@ import com.wengu.chat.mapper.StudySessionMapper;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.common.time.StudyDay;
+import com.wengu.knowledge.dto.CodePrerequisite;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.knowledge.service.KnowledgePointService;
@@ -253,7 +254,19 @@ public class StudySessionService {
                 session.getEndedAt() != null, Boolean.TRUE.equals(session.getSkippedExplanation()),
                 isGenerating(session.getId()), session.getActiveSeconds(), rating(session),
                 kpExists && reviewService.isRatingChangeable(session.getId()), followUpSessionId(session), messages,
-                settingsService.get(session.getUserId()).teacherName(), referenceAnswer(session, all));
+                settingsService.get(session.getUserId()).teacherName(), referenceAnswer(session, all),
+                prerequisites(session, kpExists));
+    }
+
+    /**
+     * 源码知识点第一次学习时的前置卡（#90）：学习页在老师开口前显示，第一条消息也会告诉老师学生读过（CodeChatPrompt）。
+     * 第一次学习 = 这次之前没有这个知识点的学习会话，和评分建议判断复习的口径相同。
+     */
+    private List<CodePrerequisite> prerequisites(StudySession session, boolean kpExists) {
+        if (session.getType() != SessionType.STUDY || !kpExists || !earlierStudySessions(session, 1).isEmpty()) {
+            return List.of();
+        }
+        return knowledgePointService.prerequisites(session.getUserId(), session.getKpId());
     }
 
     /**

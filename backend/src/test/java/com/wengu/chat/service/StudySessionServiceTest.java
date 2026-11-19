@@ -178,12 +178,28 @@ class StudySessionServiceTest {
         kpCode.setSourceId(sourceId);
         kpCode.setEvidence("[{\"file\":\"chat/ChatService.java\",\"symbol\":\"ChatService\"}]");
         kpCode.setUnverifiable("[]");
-        kpCode.setPrerequisites("[]");
+        kpCode.setPrerequisites("[{\"concept\":\"唯一索引\",\"explanation\":\"同一列不能有两条一样的值。\"}]");
         kpCodeMapper.insert(kpCode);
+        // 正式流程中确认草稿时就建好调度状态（决策 051），这里直接插入的知识点要补上
+        reviewService.ensureCard(USER_ID, code);
 
         assertError(() -> sessionService.start(USER_ID, new StartSessionRequest(plain)), ErrorCode.BAD_REQUEST);
-        long sessionId = sessionService.start(USER_ID, new StartSessionRequest(code)).id();
-        assertThat(sessionMapper.selectById(sessionId).getPromptVersion()).isEqualTo(CodeChatPrompt.VERSION);
+        SessionView first = sessionService.start(USER_ID, new StartSessionRequest(code));
+        assertThat(sessionMapper.selectById(first.id()).getPromptVersion()).isEqualTo(CodeChatPrompt.VERSION);
+        // 第一次学习：学习页在老师开口前显示前置卡
+        assertThat(first.prerequisites()).extracting(p -> p.concept()).containsExactly("唯一索引");
+
+        // 学完评了分再学（复习）：不再显示前置卡
+        StudySession saved = sessionMapper.selectById(first.id());
+        saved.setEndedAt(NOW);
+        sessionMapper.updateById(saved);
+        reviewService.rate(USER_ID, code, first.id(), Rating.GOOD, null);
+        SessionView again = sessionService.start(USER_ID, new StartSessionRequest(code));
+        assertThat(again.id()).isNotEqualTo(first.id());
+        assertThat(again.prerequisites()).isEmpty();
+        // 普通知识点没有前置卡
+        long concept = kp(USER_ID, "什么是 MVCC？", KnowledgePointType.CONCEPT);
+        assertThat(sessionService.start(USER_ID, new StartSessionRequest(concept)).prerequisites()).isEmpty();
     }
 
     @Test

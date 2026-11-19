@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 学习页 /session/:id（ui.md 5.3）：标题区、对话、底部输入。学完（会话结束）后同一页切换成收尾与评分（5.4）
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { studyHeader } from '@/layouts/studyHeader'
+import { modKeyLabel, useShortcut } from '@/shortcuts/useShortcut'
 import { typeLabels } from '@/utils/labels'
 import ChatInput from './ChatInput.vue'
 import ChatThread from './ChatThread.vue'
@@ -14,12 +15,38 @@ const sessionId = () => Number(props.id)
 const { session, messages, streamingText, busy, error, loadError, refresh, reply, send, skipExplanation } =
   useChat(sessionId)
 
+/** 点过“读完了，开始学” */
+const started = ref(false)
+
+/** 老师还没开口、也没在后台生成：刚开始 */
+const notStarted = computed(() => {
+  const s = session.value
+  return !!s && !s.ended && s.messages.length === 0 && !s.generating
+})
+
+/** 源码知识点第一次学习、带前置卡：老师开口前先读卡（ui.md 5.3，#90） */
+const readingCards = computed(() => notStarted.value && !started.value && session.value!.prerequisites.length > 0)
+
 onMounted(async () => {
   await refresh()
-  // 刚开始：老师还没开口，也没有在后台生成，请老师说第一句
-  const s = session.value
-  if (s && !s.ended && s.messages.length === 0 && !s.generating) {
+  // 刚开始：请老师说第一句。要先读前置卡的，等点了“读完了，开始学”再请
+  if (notStarted.value && !readingCards.value) {
     await reply()
+  }
+})
+
+async function startStudy() {
+  if (!readingCards.value) {
+    return
+  }
+  started.value = true
+  await reply()
+}
+
+// 读卡时输入框还没出现，Ctrl Enter 就是“读完了，开始学”
+useShortcut('Mod+Enter', () => {
+  if (readingCards.value) {
+    void startStudy()
   }
 })
 
@@ -75,8 +102,28 @@ useAutoScroll(() => [messages.value.length, streamingText.value])
       </div>
     </section>
 
+    <!-- 前置卡：先读再开始；开始以后折叠在这里，想回头看可以展开 -->
+    <section v-if="readingCards" class="cards">
+      <h2>学之前先看这几张卡</h2>
+      <p class="cards-hint">都是这道题要用到的基础概念，读完再开始，对话里没看懂的随时可以问</p>
+      <div v-for="card in session.prerequisites" :key="card.concept" class="card">
+        <p class="card-concept">{{ card.concept }}</p>
+        <p class="card-text">{{ card.explanation }}</p>
+      </div>
+      <el-button type="primary" class="start" @click="startStudy">
+        读完了，开始学<kbd>{{ modKeyLabel }} Enter</kbd>
+      </el-button>
+    </section>
+    <details v-else-if="session.prerequisites.length > 0 && !session.ended" class="cards-fold">
+      <summary>前置卡（{{ session.prerequisites.length }} 张）</summary>
+      <div v-for="card in session.prerequisites" :key="card.concept" class="card">
+        <p class="card-concept">{{ card.concept }}</p>
+        <p class="card-text">{{ card.explanation }}</p>
+      </div>
+    </details>
+
     <FinishPanel v-if="session.ended" :session="session" />
-    <template v-else>
+    <template v-else-if="!readingCards">
       <ChatThread
         :messages="messages"
         :streaming-text="streamingText"
@@ -141,6 +188,55 @@ h1 {
 .skip-hint {
   color: var(--wg-text-muted);
   font-size: 13px;
+}
+
+.cards,
+.cards-fold {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cards h2 {
+  font-size: 20px;
+}
+
+.cards-hint {
+  color: var(--wg-text-muted);
+  font-size: 14px;
+}
+
+.card {
+  padding: 14px 16px;
+  border-radius: var(--wg-radius-card);
+  background: var(--wg-surface);
+}
+
+.card-concept {
+  font-weight: 700;
+}
+
+.card-text {
+  margin-top: 4px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.start {
+  align-self: flex-start;
+  height: 48px;
+  padding: 0 22px;
+  font-size: 16px;
+}
+
+.start kbd {
+  margin-left: 12px;
+}
+
+.cards-fold summary {
+  color: var(--wg-text-muted);
+  font-size: 14px;
+  cursor: pointer;
 }
 
 .chat-error {

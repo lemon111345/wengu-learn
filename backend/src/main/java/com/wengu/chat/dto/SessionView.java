@@ -1,6 +1,7 @@
 package com.wengu.chat.dto;
 
 import com.wengu.chat.entity.SessionType;
+import com.wengu.knowledge.dto.CodePrerequisite;
 
 import java.util.List;
 
@@ -19,9 +20,10 @@ import java.util.List;
  * @param messages           按时间排列
  * @param teacherName        用户现在设置的老师称呼，界面显示用；历史对话也显示现在的称呼（决策 042）
  * @param referenceAnswer    学习会话结束后，从收尾中切出的面试参考答法；没结束、不是学习会话、收尾里没有找到时为 null（决策 047）
+ * @param prerequisites      源码知识点第一次学习时的前置卡（#90），学习页在老师开口前显示；复习、接着问、普通知识点为空列表
  */
 public record SessionView(long id, SessionType type, Long kpId, Long parentSessionId, String kpTitle, boolean ended,
                           boolean skippedExplanation, boolean generating, int activeSeconds, RatingOption rating,
                           boolean ratingEditable, Long followUpSessionId, List<MessageView> messages,
-                          String teacherName, String referenceAnswer) {
+                          String teacherName, String referenceAnswer, List<CodePrerequisite> prerequisites) {
 }
