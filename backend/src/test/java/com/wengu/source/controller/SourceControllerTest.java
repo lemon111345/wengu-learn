@@ -4,6 +4,7 @@ import com.wengu.TestcontainersConfiguration;
 import com.wengu.llm.dto.LlmResult;
 import com.wengu.source.dto.GenerateResult;
 import com.wengu.source.dto.GeneratedQuestion;
+import com.wengu.source.dto.ImportCodeRequest;
 import com.wengu.source.service.QuestionGenerateService;
 import com.wengu.source.service.QuestionSplitService;
 import com.wengu.user.dto.RegisterRequest;
@@ -91,6 +92,25 @@ class SourceControllerTest {
         // 发给模型的是提取并整理过的文字
         verify(generateService).generate(eq(NOTE.strip()));
         verify(splitService, never()).split(anyString());
+    }
+
+    @Test
+    void 导入源码_只保存不调用模型_没有登录时401() throws Exception {
+        String body = jsonMapper.writeValueAsString(new ImportCodeRequest("wengu-learn",
+                List.of(new ImportCodeRequest.CodeFile("chat/ChatService.java", "class ChatService {}\n"))));
+
+        mockMvc.perform(post("/api/sources/code").contentType(MediaType.APPLICATION_JSON).content(body)
+                        .session(login).with(csrfToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.type").value("CODE"))
+                .andExpect(jsonPath("$.data.files[0].path").value("chat/ChatService.java"))
+                .andExpect(jsonPath("$.data.files[0].chars").value(21));
+        verify(splitService, never()).split(anyString());
+        verify(generateService, never()).generate(anyString());
+
+        mockMvc.perform(post("/api/sources/code").contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(csrfToken()))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
