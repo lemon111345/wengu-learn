@@ -105,14 +105,23 @@ final class LearningChatPrompt {
                 来源面试题：
                 %s""".formatted(material.title(), material.type().name(), material.type().label(),
                 material.summary(), questions);
-        return review == null ? info + "\n\n请开始。" : info + "\n\n" + reviewSection(review) + "\n\n请开始。";
+        return review == null ? info + "\n\n请开始。"
+                : info + "\n\n" + reviewSection(review, WEAK_POINTS_HEADING) + "\n\n请开始。";
     }
 
-    private static String reviewSection(Review review) {
+    /** 普通学习对话的复习：开场优先围绕没掌握的点提问（决策 035） */
+    private static final String WEAK_POINTS_HEADING = "上次没掌握的（开场优先围绕其中一点提问）：";
+
+    /**
+     * 复习信息：评过几次分、上次的评分、上次没掌握的、以前问过的问题。
+     *
+     * @param weakPointsHeading “上次没掌握的”这一行怎么写：源码知识点的复习按要点顺序走，讲到那一点时才重点问（#90）
+     */
+    static String reviewSection(Review review, String weakPointsHeading) {
         StringBuilder text = new StringBuilder("这是复习：这个知识点以前学过 %d 次，上次的评分是“%s”。"
                 .formatted(review.timesRated(), RATING_LABELS.get(review.lastRating())));
         if (!review.weakPoints().isEmpty()) {
-            text.append("\n上次没掌握的（开场优先围绕其中一点提问）：\n").append(bullets(review.weakPoints()));
+            text.append("\n").append(weakPointsHeading).append("\n").append(bullets(review.weakPoints()));
         }
         if (!review.askedQuestions().isEmpty()) {
             text.append("\n以前问过的问题（换一个角度，不要重复，也不要只是换个说法）：\n")

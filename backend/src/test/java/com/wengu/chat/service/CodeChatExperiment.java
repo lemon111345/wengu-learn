@@ -57,7 +57,7 @@ public class CodeChatExperiment {
     static final String DEFAULT_ROUND = "3";
     static final String DEFAULT_RESULT = "code-20261112-144623-deepseek/A-1";
     static final String DEFAULT_KPS = "1,9,12";
-    static final String DEFAULT_CHAT_VERSION = "v4";
+    static final String DEFAULT_CHAT_VERSION = "v5";
     static final String DEFAULT_RATING_VERSION = "v2";
     static final double RATING_TEMPERATURE = 0.2;
     static final int MAX_REPLY_ATTEMPTS = 3;
