@@ -13,8 +13,9 @@ export interface SourceQuestion {
  * 资料类型（#26）：
  * - QUESTION 题目清单：从原文中识别出题目（逐字保留）
  * - DOCUMENT 讲解资料：笔记、文章等没有现成题目的，根据内容整理出题目
+ * - CODE 源码（#90）：项目文件，直接抽取个人经历类知识点，没有题目；只用 importCode 导入
  */
-export type SourceType = 'QUESTION' | 'DOCUMENT'
+export type SourceType = 'QUESTION' | 'DOCUMENT' | 'CODE'
 
 export interface ImportedSource {
   id: number
@@ -69,4 +70,21 @@ export function startImageRecognition(files: File[]) {
 
 export function fetchImageRecognition(taskId: string) {
   return get<ImageRecognitionView>(`/api/sources/image-recognitions/${taskId}`)
+}
+
+/** 源码导入的限制，和后端 SourceService 一致（决策 050） */
+export const MAX_CODE_CHARS = 150_000
+export const MAX_CODE_FILES = 300
+export const MAX_CODE_PATH_LENGTH = 500
+
+export interface ImportedCode {
+  id: number
+  name: string
+  type: 'CODE'
+  files: { path: string; chars: number }[]
+}
+
+/** 导入源码（#90）：只保存、不调用模型，之后用 createDraft(id) 发起抽取 */
+export function importCode(name: string, files: { path: string; content: string }[]) {
+  return post<ImportedCode>('/api/sources/code', { name, files })
 }

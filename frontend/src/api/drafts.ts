@@ -42,6 +42,14 @@ export interface DraftItemView {
   sourceQuestionIds: number[]
   /** 确认时的处理；还没确认时为 null */
   decision: 'ACCEPTED' | 'REJECTED' | null
+  /** 源码条目的代码依据（#90），题目条目为 null */
+  evidence: CodeEvidence[] | null
+}
+
+export interface CodeEvidence {
+  file: string
+  /** 类名#方法名，涉及整个类时只写类名 */
+  symbol: string
 }
 
 /** 草稿详情，对应后端的 DraftView（决策 012～015） */
@@ -57,6 +65,13 @@ export interface DraftView {
   covered: { questionId: number; titles: string[] }[]
   /** 没拆出知识点的题（#22） */
   uncovered: { questionId: number; text: string }[]
+}
+
+/**
+ * 是不是源码草稿（#90）：源码只有一批、没有题号。不看条目的 evidence，因为一个知识点都没抽出时没有条目
+ */
+export function isCodeDraft(draft: DraftView): boolean {
+  return draft.batches.length > 0 && draft.batches.every((b) => b.questionIds.length === 0)
 }
 
 /** 发起抽取；questionIds 不传则全部。后台执行，立即返回抽取中的草稿 */
