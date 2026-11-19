@@ -401,8 +401,8 @@ class KnowledgeLibraryServiceTest {
         knowledgePointService.linkToSource(USER_ID, second, List.of(kpId));
 
         assertThat(libraryService.detail(USER_ID, kpId).sources()).containsExactly(
-                new SourceRef(first, "Java 面试题", List.of(1, 3, 5)),
-                new SourceRef(second, "并发专题", List.of()));
+                new SourceRef(first, "Java 面试题", List.of(1, 3, 5), null),
+                new SourceRef(second, "并发专题", List.of(), null));
     }
 
     @Test
@@ -429,8 +429,8 @@ class KnowledgeLibraryServiceTest {
                 new StudyRecord(LocalDate.of(2026, 10, 20), true, Rating.HARD, null, "volatile 有什么用？", null),
                 new StudyRecord(LocalDate.of(2026, 10, 10), true, Rating.AGAIN, Rating.HARD, "volatile 的可见性是什么？", null));
         assertThat(detail.sources()).containsExactly(
-                new SourceRef(first, "Java 面试题", List.of(1)),
-                new SourceRef(second, "并发专题", List.of(2, 4, 6)));
+                new SourceRef(first, "Java 面试题", List.of(1), null),
+                new SourceRef(second, "并发专题", List.of(2, 4, 6), null));
         // 主知识点的复习进度不变：它自己的卡
         assertThat(detail.mastery()).isEqualTo(Mastery.NEW);
     }

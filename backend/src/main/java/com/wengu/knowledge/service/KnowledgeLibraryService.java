@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.common.time.StudyDay;
+import com.wengu.knowledge.dto.CodeEvidence;
 import com.wengu.knowledge.dto.KnowledgePointDetail;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.LibraryItem;
@@ -17,10 +18,12 @@ import com.wengu.knowledge.dto.StudyRecord;
 import com.wengu.knowledge.entity.ExtractionDraft;
 import com.wengu.knowledge.entity.ExtractionDraftItem;
 import com.wengu.knowledge.entity.KnowledgePoint;
+import com.wengu.knowledge.entity.KpCode;
 import com.wengu.knowledge.entity.KpSource;
 import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftMapper;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.knowledge.mapper.KpCodeMapper;
 import com.wengu.knowledge.mapper.KpSourceMapper;
 import com.wengu.review.dto.CardProgress;
 import com.wengu.review.service.ReviewService;
@@ -28,6 +31,7 @@ import com.wengu.source.service.SourceService;
 import com.wengu.user.dto.SettingsView;
 import com.wengu.user.service.UserSettingsService;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -39,6 +43,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -64,11 +69,14 @@ public class KnowledgeLibraryService {
     private final SourceService sourceService;
     private final UserSettingsService settingsService;
     private final Clock clock;
+    private final KpCodeMapper kpCodeMapper;
+    private final JsonMapper jsonMapper;
 
     public KnowledgeLibraryService(KnowledgePointMapper knowledgePointMapper, KpSourceMapper kpSourceMapper,
                                    ExtractionDraftItemMapper draftItemMapper, ExtractionDraftMapper draftMapper,
                                    ReviewService reviewService, SourceService sourceService,
-                                   UserSettingsService settingsService, Clock clock) {
+                                   UserSettingsService settingsService, Clock clock, KpCodeMapper kpCodeMapper,
+                                   JsonMapper jsonMapper) {
         this.knowledgePointMapper = knowledgePointMapper;
         this.kpSourceMapper = kpSourceMapper;
         this.draftItemMapper = draftItemMapper;
@@ -77,6 +85,8 @@ public class KnowledgeLibraryService {
         this.sourceService = sourceService;
         this.settingsService = settingsService;
         this.clock = clock;
+        this.kpCodeMapper = kpCodeMapper;
+        this.jsonMapper = jsonMapper;
     }
 
     /** 一个知识点和它的掌握程度；card 为 null 表示没有调度状态 */
@@ -166,7 +176,8 @@ public class KnowledgeLibraryService {
 
         return new KnowledgePointDetail(kp.getId(), kp.getTitle(), kp.getType(), kp.getStatus(), mastery,
                 nextReview(mastery, card, today, settings), kp.getSummary(), aiSummary, edited,
-                studyRecords(userId, kpId, merged, settings), sources(userId, kpId, draftItems.values()));
+                studyRecords(userId, kpId, merged, settings),
+                sources(userId, kpId, draftItems.values(), merged.stream().map(KnowledgePoint::getId).toList()));
     }
 
     /** 学习记录，最近的在前；并进来的知识点的记录带上它的标题 */
@@ -194,9 +205,9 @@ public class KnowledgeLibraryService {
 
     /**
      * 来源材料和题号。材料来自 kp_source；题号按“草稿条目 → 草稿的材料”找到，只认 kp_source 中有的材料。
-     * 材料被删掉了（名称查不到）的不显示。
+     * 材料被删掉了（名称查不到）的不显示。源码材料另外带上依据的文件（#90），来自自己和并进来的知识点的 kp_code。
      */
-    private List<SourceRef> sources(long userId, long kpId, Collection<ExtractionDraftItem> items) {
+    private List<SourceRef> sources(long userId, long kpId, Collection<ExtractionDraftItem> items, List<Long> mergedIds) {
         List<Long> sourceIds = kpSourceMapper.selectList(new LambdaQueryWrapper<KpSource>()
                         .eq(KpSource::getKpId, kpId)
                         .orderByAsc(KpSource::getSourceId))
@@ -216,7 +227,8 @@ public class KnowledgeLibraryService {
         Map<Long, Set<Integer>> questions = new HashMap<>();
         for (ExtractionDraftItem item : items) {
             Long sourceId = draftSources.get(item.getDraftId());
-            if (sourceId != null) {
+            // 源码条目没有题号，存的是空字符串（决策 050）
+            if (sourceId != null && !item.getSourceQuestionIds().isBlank()) {
                 Arrays.stream(item.getSourceQuestionIds().split(","))
                         .map(String::strip)
                         .map(Integer::valueOf)
@@ -224,10 +236,34 @@ public class KnowledgeLibraryService {
             }
         }
 
+        Map<Long, List<String>> files = evidenceFiles(userId, kpId, mergedIds);
         return sourceIds.stream()
                 .filter(names::containsKey)
-                .map(id -> new SourceRef(id, names.get(id), List.copyOf(questions.getOrDefault(id, Set.of()))))
+                .map(id -> new SourceRef(id, names.get(id), List.copyOf(questions.getOrDefault(id, Set.of())),
+                        files.get(id)))
                 .toList();
+    }
+
+    /** 源码知识点依据的文件，按材料分组，去重后保持顺序：先自己的，再按 id 排并进来的（#90）。 */
+    private Map<Long, List<String>> evidenceFiles(long userId, long kpId, List<Long> mergedIds) {
+        List<Long> ids = new ArrayList<>(List.of(kpId));
+        ids.addAll(mergedIds);
+        Map<Long, Set<String>> files = new HashMap<>();
+        kpCodeMapper.selectList(new LambdaQueryWrapper<KpCode>()
+                        .select(KpCode::getKpId, KpCode::getSourceId, KpCode::getEvidence)
+                        .eq(KpCode::getUserId, userId)
+                        .in(KpCode::getKpId, ids))
+                .stream()
+                .sorted(Comparator.comparing((KpCode c) -> c.getKpId() != kpId).thenComparing(KpCode::getKpId))
+                .forEach(code -> {
+                    Set<String> paths = files.computeIfAbsent(code.getSourceId(), k -> new LinkedHashSet<>());
+                    for (CodeEvidence evidence : jsonMapper.readValue(code.getEvidence(), CodeEvidence[].class)) {
+                        paths.add(evidence.file());
+                    }
+                });
+        Map<Long, List<String>> result = new HashMap<>();
+        files.forEach((sourceId, paths) -> result.put(sourceId, List.copyOf(paths)));
+        return result;
     }
 
     /**
