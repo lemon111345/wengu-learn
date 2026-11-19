@@ -37,14 +37,18 @@ class CodeExtractionValidatorTest {
         return kp(order, SUMMARY, List.of(new CodeEvidence("chat/ChatService.java", "ChatService#send")));
     }
 
+    private static CodeExtractionValidator.Checked check(KnowledgePoint... kps) {
+        return CodeExtractionValidator.check(FILES, new CodeExtractionResult(List.of(kps)));
+    }
+
+    /** 发现的问题 */
     private static List<String> validate(KnowledgePoint... kps) {
-        return CodeExtractionValidator.validate(FILES, new CodeExtractionResult(List.of(kps)));
+        return check(kps).problems();
     }
 
     @Test
-    void 合格的结果没有问题_一个都没抽出也算合格() {
+    void 合格的结果没有问题() {
         assertThat(validate(kp(1), kp(2, SUMMARY, List.of(new CodeEvidence("chat/RatingService.java", "RatingService"))))).isEmpty();
-        assertThat(validate()).isEmpty();
     }
 
     @Test
@@ -91,14 +95,33 @@ class CodeExtractionValidatorTest {
     }
 
     @Test
-    void 编号连续_数量和标题() {
-        assertThat(validate(kp(1), kp(3))).containsExactly("order 要从 1 开始连续编号，实际是 [1, 3]");
-        assertThat(validate(IntStream.rangeClosed(1, 21).mapToObj(CodeExtractionValidatorTest::kp)
-                .toArray(KnowledgePoint[]::new))).containsExactly("知识点有 21 个，最多 20 个");
+    void 不合格的单独丢掉_合格的留下并重新编号() {
+        KnowledgePoint bad = kp(2, SUMMARY, List.of(new CodeEvidence("chat/Other.java", "Other")));
+
+        CodeExtractionValidator.Checked checked = check(kp(3), bad, kp(1));
+
+        assertThat(checked.accepted()).extracting(KnowledgePoint::order).containsExactly(1, 2);
+        assertThat(checked.problems()).containsExactly("第 2 个知识点：文件不在导入的文件中：chat/Other.java");
+    }
+
+    @Test
+    void 全都不合格或者缺少结果时整批不能用_本来就没抽出时算成功() {
         KnowledgePoint untitled = new KnowledgePoint("CHAIN", List.of(new CodeEvidence("chat/ChatService.java", "ChatService")),
                 1, List.of(), SUMMARY, "", " ", List.of());
-        assertThat(validate(untitled)).containsExactly("第 1 个知识点：没有标题");
-        assertThat(CodeExtractionValidator.validate(FILES, new CodeExtractionResult(null))).containsExactly("缺少 knowledgePoints");
+
+        assertThat(check(untitled).accepted()).isNull();
+        assertThat(check(untitled).problems()).containsExactly("第 1 个知识点：没有标题");
+        assertThat(CodeExtractionValidator.check(FILES, new CodeExtractionResult(null)).accepted()).isNull();
+        assertThat(check().accepted()).isEmpty();
+    }
+
+    @Test
+    void 合格的超过20个时只留前20个() {
+        CodeExtractionValidator.Checked checked = check(IntStream.rangeClosed(1, 21)
+                .mapToObj(CodeExtractionValidatorTest::kp).toArray(KnowledgePoint[]::new));
+
+        assertThat(checked.accepted()).hasSize(20);
+        assertThat(checked.problems()).containsExactly("合格的知识点有 21 个，只留前 20 个");
     }
 
     @Test

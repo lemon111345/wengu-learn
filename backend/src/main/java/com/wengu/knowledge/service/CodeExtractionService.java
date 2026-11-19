@@ -4,12 +4,14 @@ import com.wengu.knowledge.dto.CodeExtractionResult;
 import com.wengu.llm.dto.LlmResult;
 import com.wengu.llm.service.LlmService;
 import com.wengu.source.dto.CodeFileContent;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -25,10 +27,13 @@ public class CodeExtractionService {
     private static final String PROMPT_PATH = "prompts/code-extraction-v3.md";
 
     private final LlmService llmService;
+    private final Duration timeout;
     private final String systemPrompt;
 
-    public CodeExtractionService(LlmService llmService) {
+    /** @param timeout 单次请求的超时，比全局的长：一次输出近 2 万 token，要 2～5 分钟 */
+    public CodeExtractionService(LlmService llmService, @Value("${wengu.code-extraction.timeout}") Duration timeout) {
         this.llmService = llmService;
+        this.timeout = timeout;
         this.systemPrompt = loadPrompt();
     }
 
@@ -37,7 +42,7 @@ public class CodeExtractionService {
      */
     public LlmResult<CodeExtractionResult> extract(List<CodeFileContent> files) {
         return llmService.call(systemPrompt, formatFiles(files), CodeExtractionResult.class,
-                KnowledgeExtractionService.TEMPERATURE);
+                KnowledgeExtractionService.TEMPERATURE, timeout);
     }
 
     /** 用户消息：每个文件前面一行“===== 文件：路径 =====”，模型在 evidence.file 中原样引用这个路径。和 #89 实验的输入相同。 */

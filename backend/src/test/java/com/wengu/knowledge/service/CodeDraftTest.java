@@ -147,6 +147,27 @@ class CodeDraftTest {
     }
 
     @Test
+    void 有一个不合格时单独丢掉_不重抽_丢掉的原因记在批次上() {
+        KnowledgePoint good = result("ChatService#send").content().knowledgePoints().getFirst();
+        KnowledgePoint bad = new KnowledgePoint("FAILURE", List.of(new CodeEvidence("chat/ChatService.java", "ChatService#reply")),
+                2, List.of(), SUMMARY, "", "回复失败时会怎样？", List.of());
+        when(codeExtractionService.extract(anyList())).thenReturn(
+                new LlmResult<>(new CodeExtractionResult(List.of(bad, good)), "{...}", "test-model", "stop", 100, 50));
+
+        long draftId = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null)).id();
+        executor.runAll();
+
+        DraftView view = draftService.get(USER_ID, draftId);
+        assertThat(view.status()).isEqualTo(DraftStatus.READY);
+        assertThat(view.items()).extracting(DraftItemView::title).containsExactly("发一条消息时依次发生了什么？");
+        verify(codeExtractionService, times(1)).extract(anyList());
+        ExtractionBatch batch = batchMapper.selectOne(new LambdaQueryWrapper<ExtractionBatch>()
+                .eq(ExtractionBatch::getDraftId, draftId));
+        assertThat(batch.getError()).startsWith(ExtractionWorker.DROPPED_PREFIX)
+                .contains("第 2 个知识点：chat/ChatService.java 中没有 reply");
+    }
+
+    @Test
     void 依据不存在时重试一次_第二次合格就成功() {
         when(codeExtractionService.extract(anyList()))
                 .thenReturn(result("ChatService#reply"))

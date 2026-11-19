@@ -75,10 +75,7 @@ class CodeImportExperiment {
 
     @Test
     void 导入评分链路的源码并抽取() throws Exception {
-        List<CodeFile> files = new ArrayList<>();
-        for (String path : RATING_CHAIN) {
-            files.add(new CodeFile(path, Files.readString(SOURCE_ROOT.resolve(path), StandardCharsets.UTF_8)));
-        }
+        List<CodeFile> files = "large".equals(System.getProperty("code.files")) ? largeSet() : chain();
         long sourceId = sourceService.importCode(USER_ID, new ImportCodeRequest("wengu-learn 评分链路", files)).id();
         long draftId = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null)).id();
         ((ManualTaskExecutor) testExecutor).runAll();
@@ -110,5 +107,40 @@ class CodeImportExperiment {
             Files.writeString(dir.resolve("raw.txt"), batches.getLast().getRawOutput(), StandardCharsets.UTF_8);
         }
         System.out.println("结果在 " + dir.toAbsolutePath().normalize());
+    }
+
+    private static List<CodeFile> chain() throws java.io.IOException {
+        List<CodeFile> files = new ArrayList<>();
+        for (String path : RATING_CHAIN) {
+            files.add(new CodeFile(path, Files.readString(SOURCE_ROOT.resolve(path), StandardCharsets.UTF_8)));
+        }
+        return files;
+    }
+
+    /**
+     * 接近上限的一组（-Dcode.files=large）：chat、review、plan 三个模块，去掉 dto、entity、mapper（导入页默认不勾），
+     * 按路径排序，加到 15 万字符为止。看输出很长时会不会超时、会不会被截断。
+     */
+    private static List<CodeFile> largeSet() throws java.io.IOException {
+        List<Path> paths = new ArrayList<>();
+        for (String module : List.of("chat", "review", "plan")) {
+            try (var walk = Files.walk(SOURCE_ROOT.resolve(module))) {
+                walk.filter(p -> p.toString().endsWith(".java"))
+                        .filter(p -> !p.toString().matches(".*[\\\\/](dto|entity|mapper)[\\\\/].*"))
+                        .forEach(paths::add);
+            }
+        }
+        paths.sort(null);
+        List<CodeFile> files = new ArrayList<>();
+        int total = 0;
+        for (Path p : paths) {
+            String content = Files.readString(p, StandardCharsets.UTF_8).replace("\r\n", "\n");
+            if (total + content.length() > SourceService.MAX_CODE_CHARS) {
+                break;
+            }
+            total += content.length();
+            files.add(new CodeFile(SOURCE_ROOT.relativize(p).toString().replace('\\', '/'), content));
+        }
+        return files;
     }
 }

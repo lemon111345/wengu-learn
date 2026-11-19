@@ -22,6 +22,7 @@ import java.io.UncheckedIOException;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CompletionException;
@@ -103,6 +104,16 @@ class LlmErrorTest {
 
         assertThat(callError()).isEqualTo(expected);
         assertThat(streamError()).isEqualTo(expected);
+    }
+
+    @Test
+    void 单独放宽超时的调用_不受全局超时限制() {
+        // 假服务 2 秒后才回复，全局超时是 1 秒
+        mode = "slow";
+
+        assertThat(llmService.call("系统", "你好", Reply.class, null, Duration.ofSeconds(10)).content().answer())
+                .isEqualTo("hi");
+        assertThat(callError()).isEqualTo(ErrorCode.LLM_TIMEOUT);
     }
 
     @Test

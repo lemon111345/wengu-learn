@@ -180,7 +180,11 @@ public class LlmService {
      * @param temperature 为 null 时不设置，使用服务商的默认值
      */
     private OpenAiChatOptions.Builder options(Double temperature) {
-        OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder().timeout(timeout);
+        return options(temperature, timeout);
+    }
+
+    private OpenAiChatOptions.Builder options(Double temperature, Duration requestTimeout) {
+        OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder().timeout(requestTimeout);
         if (temperature != null) {
             builder.temperature(temperature);
         }
@@ -213,12 +217,23 @@ public class LlmService {
      * @param temperature 为 null 时不设置，使用服务商的默认值
      */
     public <T> LlmResult<T> call(String system, String user, Class<T> type, Double temperature) {
+        return call(system, user, type, temperature, timeout);
+    }
+
+    /**
+     * 结构化调用，并指定本次请求的 temperature 和超时。输出特别长的调用（源码抽取一次输出近 2 万 token，#90）
+     * 用这个方法单独放宽超时，其他调用仍用 spring.ai.openai.timeout。
+     *
+     * @param requestTimeout 这一次请求的超时
+     */
+    public <T> LlmResult<T> call(String system, String user, Class<T> type, Double temperature,
+                                 Duration requestTimeout) {
         BeanOutputConverter<T> converter = new BeanOutputConverter<>(type);
         String fullUser = user + "\n\n" + converter.getFormat();
         ChatResponse response = guard(() -> chatClient.prompt()
                 .system(system)
                 .user(fullUser)
-                .options(options(temperature))
+                .options(options(temperature, requestTimeout))
                 .call()
                 .chatResponse());
         if (response == null || response.getResult() == null) {

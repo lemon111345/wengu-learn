@@ -58,6 +58,9 @@ public class ExtractionWorker {
 
     static final String SKIPPED = "前面一批调用模型出错，这一批没有执行";
 
+    /** 源码抽取成功、但丢掉了不合格的知识点时，batch.error 以这句开头 */
+    static final String DROPPED_PREFIX = "丢掉了不合格的知识点：";
+
     private final KnowledgeExtractionService extractionService;
     private final CodeExtractionService codeExtractionService;
     private final KnowledgePointService knowledgePointService;
@@ -235,8 +238,8 @@ public class ExtractionWorker {
     }
 
     /**
-     * 源码抽取，重试规则和 {@link #extractWithRetry} 相同：只有输出解析失败或校验不通过时才重试，模型调用本身的异常直接抛出。
-     * 源码没有“漏题”，两次都不合格就是失败。
+     * 源码抽取。不合格的知识点单独丢掉，合格的照样留下（决策 050）：丢了哪些、为什么，记在 batch.error 里，供以后分析（#9）。
+     * 只有输出解析失败、或者抽出的全都不合格时才重试；模型调用本身的异常直接抛出，和 {@link #extractWithRetry} 相同。
      */
     private CodeExtractionResult extractCodeWithRetry(List<CodeFileContent> files, ExtractionBatch batch) {
         Map<String, String> byPath = files.stream()
@@ -246,13 +249,17 @@ public class ExtractionWorker {
             try {
                 LlmResult<CodeExtractionResult> result = codeExtractionService.extract(files);
                 record(batch, result);
-                List<String> problems = CodeExtractionValidator.validate(byPath, result.content());
-                if (problems.isEmpty()) {
-                    batch.setError(null);
-                    return result.content();
+                CodeExtractionValidator.Checked checked = CodeExtractionValidator.check(byPath, result.content());
+                if (checked.accepted() != null) {
+                    batch.setError(checked.problems().isEmpty() ? null
+                            : DROPPED_PREFIX + "\n" + String.join("\n", checked.problems()));
+                    if (!checked.problems().isEmpty()) {
+                        log.warn("源码抽取丢掉了不合格的知识点: batchId={}, problems={}", batch.getId(), checked.problems());
+                    }
+                    return new CodeExtractionResult(checked.accepted());
                 }
-                batch.setError(String.join("\n", problems));
-                log.warn("源码抽取校验不通过（第 {} 次）: batchId={}, problems={}", attempt, batch.getId(), problems);
+                batch.setError(String.join("\n", checked.problems()));
+                log.warn("源码抽取整批不能用（第 {} 次）: batchId={}, problems={}", attempt, batch.getId(), checked.problems());
             } catch (LlmOutputParseException e) {
                 record(batch, e.getResult());
                 batch.setError(e.getMessage());

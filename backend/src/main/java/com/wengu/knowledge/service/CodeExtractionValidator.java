@@ -5,13 +5,17 @@ import com.wengu.knowledge.dto.CodeExtractionResult;
 import com.wengu.knowledge.dto.CodeExtractionResult.KnowledgePoint;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * 检查源码抽取的结果是否满足 prompt 中的硬性要求（#90，决策 050）：代码依据真实存在、每条要点带 2～3 个得分点、
- * 编号连续。这些问题不会导致 JSON 解析失败，必须单独检查。
+ * 检查源码抽取的结果（#90，决策 050）：代码依据真实存在、每条要点带 2～3 个得分点、有标题。
+ * 这些问题不会导致 JSON 解析失败，必须单独检查。
+ * <p>
+ * 不合格的知识点单独丢掉，合格的留下，不让一两个知识点拖垮整批：一次源码抽取要两三分钟，
+ * 实测第一次调用几乎总有一两个知识点不合格（要点写了 5 条、得分点 1 个或 4 个），整批重抽又会出现新的不合格。
  * <p>
  * 纯函数，不依赖 Spring 和模型，可以直接单元测试。
  */
@@ -26,37 +30,63 @@ public final class CodeExtractionValidator {
     /** 编号要点的开头，如“1. ”“2、” */
     private static final Pattern NUMBERED = Pattern.compile("^\\d+[.、．]\\s*\\S.*");
 
+    /**
+     * 检查的结果。
+     *
+     * @param accepted 留下的知识点，按原来的顺序重新从 1 连续编号；为 null 表示整批不能用，要重试
+     *                 （没有 knowledgePoints，或者抽出的全都不合格）。模型本来就一个都没抽出时是空列表，算成功
+     * @param problems 发现的问题：丢掉了哪些、为什么，或者整批不能用的原因
+     */
+    public record Checked(List<KnowledgePoint> accepted, List<String> problems) {
+    }
+
     private CodeExtractionValidator() {
     }
 
     /**
      * @param files 这次导入的文件，路径 → 内容
-     * @return 发现的问题，为空表示通过。抽出 0 个知识点也算通过：这些文件可能确实没有值得问的地方
      */
-    public static List<String> validate(Map<String, String> files, CodeExtractionResult result) {
+    public static Checked check(Map<String, String> files, CodeExtractionResult result) {
         if (result == null || result.knowledgePoints() == null) {
-            return List.of("缺少 knowledgePoints");
+            return new Checked(null, List.of("缺少 knowledgePoints"));
         }
-        List<KnowledgePoint> kps = result.knowledgePoints();
+        List<KnowledgePoint> sorted = result.knowledgePoints().stream()
+                .sorted(Comparator.comparingInt(KnowledgePoint::order))
+                .toList();
+        List<KnowledgePoint> kept = new ArrayList<>();
         List<String> problems = new ArrayList<>();
-        if (kps.size() > MAX_KNOWLEDGE_POINTS) {
-            problems.add("知识点有 " + kps.size() + " 个，最多 " + MAX_KNOWLEDGE_POINTS + " 个");
-        }
-        List<Integer> orders = kps.stream().map(KnowledgePoint::order).sorted().toList();
-        for (int i = 0; i < orders.size(); i++) {
-            if (orders.get(i) != i + 1) {
-                problems.add("order 要从 1 开始连续编号，实际是 " + orders);
-                break;
+        for (KnowledgePoint kp : sorted) {
+            List<String> found = problemsOf(files, kp);
+            if (found.isEmpty()) {
+                kept.add(kp);
+            } else {
+                problems.addAll(found);
             }
         }
-        for (KnowledgePoint kp : kps) {
-            String label = "第 " + kp.order() + " 个知识点：";
-            if (kp.title() == null || kp.title().isBlank()) {
-                problems.add(label + "没有标题");
-            }
-            problems.addAll(checkEvidence(files, kp, label));
-            problems.addAll(checkScorePoints(kp.summary(), label));
+        if (!sorted.isEmpty() && kept.isEmpty()) {
+            return new Checked(null, problems);
         }
+        if (kept.size() > MAX_KNOWLEDGE_POINTS) {
+            problems.add("合格的知识点有 " + kept.size() + " 个，只留前 " + MAX_KNOWLEDGE_POINTS + " 个");
+            kept = kept.subList(0, MAX_KNOWLEDGE_POINTS);
+        }
+        List<KnowledgePoint> renumbered = new ArrayList<>();
+        for (KnowledgePoint kp : kept) {
+            renumbered.add(new KnowledgePoint(kp.angle(), kp.evidence(), renumbered.size() + 1, kp.prerequisites(),
+                    kp.summary(), kp.summaryDetails(), kp.title(), kp.unverifiable()));
+        }
+        return new Checked(renumbered, problems);
+    }
+
+    /** 一个知识点的问题，为空表示合格。问题前面带上模型给的编号，如“第 3 个知识点：” */
+    static List<String> problemsOf(Map<String, String> files, KnowledgePoint kp) {
+        String label = "第 " + kp.order() + " 个知识点：";
+        List<String> problems = new ArrayList<>();
+        if (kp.title() == null || kp.title().isBlank()) {
+            problems.add(label + "没有标题");
+        }
+        problems.addAll(checkEvidence(files, kp, label));
+        problems.addAll(checkScorePoints(kp.summary(), label));
         return problems;
     }
 
