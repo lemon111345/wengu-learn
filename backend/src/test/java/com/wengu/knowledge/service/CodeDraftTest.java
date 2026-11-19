@@ -7,6 +7,7 @@ import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.CodeEvidence;
 import com.wengu.knowledge.dto.CodeExtractionResult;
 import com.wengu.knowledge.dto.CodeExtractionResult.KnowledgePoint;
+import com.wengu.knowledge.dto.CodeMaterial;
 import com.wengu.knowledge.dto.CodePrerequisite;
 import com.wengu.knowledge.dto.ConfirmDraftRequest;
 import com.wengu.knowledge.dto.CreateDraftRequest;
@@ -101,6 +102,9 @@ class CodeDraftTest {
 
     @Autowired
     private KnowledgeLibraryService libraryService;
+
+    @Autowired
+    private KnowledgePointService knowledgePointService;
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -297,6 +301,30 @@ class CodeDraftTest {
             // 同一个文件引用了两次，只列一次
             assertThat(source.files()).containsExactly("chat/ChatService.java", "chat/RatingService.java");
         });
+    }
+
+    @Test
+    void 学习材料带上细节和依据的文件_文件按依据中第一次出现的顺序去重() {
+        when(codeExtractionService.extract(anyList())).thenReturn(twoPoints());
+        long draftId = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null)).id();
+        executor.runAll();
+        draftService.confirm(USER_ID, draftId, null);
+        var kps = knowledgePointMapper.selectList(null);
+        long first = kps.stream().filter(kp -> kp.getTitle().equals("发一条消息时依次发生了什么？"))
+                .findFirst().orElseThrow().getId();
+        long second = kps.stream().filter(kp -> kp.getTitle().equals("评分前后怎么衔接？"))
+                .findFirst().orElseThrow().getId();
+
+        CodeMaterial code = knowledgePointService.studyMaterial(USER_ID, first).code();
+        assertThat(code.details()).isEqualTo("1. 内容不超过 5000 字。");
+        assertThat(code.unverifiable()).containsExactly("为什么先校验？");
+        assertThat(code.prerequisites()).extracting(CodePrerequisite::concept).containsExactly("事务");
+        assertThat(code.files()).singleElement().satisfies(f -> {
+            assertThat(f.path()).isEqualTo("chat/ChatService.java");
+            assertThat(f.content()).isEqualTo(CHAT_SERVICE);
+        });
+        assertThat(knowledgePointService.studyMaterial(USER_ID, second).code().files()).extracting(f -> f.path())
+                .containsExactly("chat/ChatService.java", "chat/RatingService.java");
     }
 
     /** 两个合格的知识点：第 1 个依据一个文件，第 2 个依据两个文件（其中一个引用了两次） */

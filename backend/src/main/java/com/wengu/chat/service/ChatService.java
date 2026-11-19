@@ -67,6 +67,7 @@ public class ChatService {
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
     private final String studyPrompt = LearningChatPrompt.system();
+    private final String codeStudyPrompt = CodeChatPrompt.system();
     private final String followUpPrompt = FollowUpPrompt.system();
 
     public ChatService(StudySessionService sessions, StudySessionMapper sessionMapper, MessageMapper messageMapper,
@@ -220,7 +221,12 @@ public class ChatService {
         StudyMaterial material = knowledgePointService.studyMaterial(session.getUserId(), session.getKpId());
         String teacherName = settingsService.get(session.getUserId()).teacherName();
         return switch (session.getType()) {
-            case STUDY -> new Rules(LearningChatPrompt.withTeacherName(studyPrompt, teacherName),
+            // 源码知识点（#90）换成源码的 prompt 和第一条消息，其他规则不变
+            case STUDY -> material.code() != null
+                    ? new Rules(LearningChatPrompt.withTeacherName(codeStudyPrompt, teacherName),
+                    CodeChatPrompt.history(material, review(session), messages),
+                    LearningChatPrompt.TEMPERATURE, LearningChatPrompt.MAX_ANSWERS, true)
+                    : new Rules(LearningChatPrompt.withTeacherName(studyPrompt, teacherName),
                     LearningChatPrompt.history(material, review(session), messages),
                     LearningChatPrompt.TEMPERATURE, LearningChatPrompt.MAX_ANSWERS, true);
             case FOLLOW_UP -> new Rules(LearningChatPrompt.withTeacherName(followUpPrompt, teacherName),

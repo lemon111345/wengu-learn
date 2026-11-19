@@ -11,6 +11,8 @@ import com.wengu.chat.dto.StartSessionRequest;
 import com.wengu.chat.entity.Marker;
 import com.wengu.chat.entity.MessageRole;
 import com.wengu.chat.entity.RatingSuggestion;
+import com.wengu.chat.entity.SessionType;
+import com.wengu.chat.entity.StudySession;
 import com.wengu.chat.mapper.MessageMapper;
 import com.wengu.chat.mapper.RatingSuggestionMapper;
 import com.wengu.chat.mapper.StudySessionMapper;
@@ -19,7 +21,9 @@ import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
+import com.wengu.knowledge.entity.KpCode;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.knowledge.mapper.KpCodeMapper;
 import com.wengu.llm.dto.ChatTurn;
 import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmService;
@@ -27,6 +31,8 @@ import com.wengu.review.fsrs.Rating;
 import com.wengu.review.mapper.CardStateMapper;
 import com.wengu.review.mapper.ReviewLogMapper;
 import com.wengu.review.service.ReviewService;
+import com.wengu.source.dto.ImportCodeRequest;
+import com.wengu.source.service.SourceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -92,6 +98,12 @@ class ChatServiceTest {
     @Autowired
     private KnowledgePointMapper knowledgePointMapper;
 
+    @Autowired
+    private KpCodeMapper kpCodeMapper;
+
+    @Autowired
+    private SourceService sourceService;
+
     private long sessionId;
 
     @BeforeEach
@@ -102,6 +114,7 @@ class ChatServiceTest {
         jdbc.update("UPDATE user_settings SET teacher_name = '老师' WHERE user_id = 1");
         messageMapper.delete(null);
         sessionMapper.delete(null);
+        kpCodeMapper.delete(null);
         knowledgePointMapper.delete(null);
         KnowledgePoint kp = new KnowledgePoint();
         kp.setUserId(USER_ID);
@@ -488,5 +501,60 @@ class ChatServiceTest {
         collect(chatService.send(USER_ID, sessionId, new SendMessageRequest("回答 2")));
 
         assertThat(sessionMapper.selectById(sessionId).getActiveSeconds()).isEqualTo(180 + 600);
+    }
+
+    @Test
+    void 源码知识点用源码的prompt_第一条消息带上细节和依据的文件() {
+        long codeSession = codeSession();
+        modelReplies("这里会发生什么？");
+
+        collect(chatService.reply(USER_ID, codeSession));
+
+        assertThat(lastSystemPrompt()).isEqualTo(CodeChatPrompt.system());
+        String kickoff = lastHistory().getFirst().content();
+        assertThat(kickoff).contains("细节（漏了不影响掌握）：1. 上限 5000 字。", "- 为什么先校验？",
+                "===== 文件：chat/ChatService.java =====\nclass ChatService {}");
+        // 没被依据引用的文件不发
+        assertThat(kickoff).doesNotContain("chat/Other.java");
+    }
+
+    /**
+     * 一个源码知识点和它的学习会话。个人经历类在 #90 第二步放开调度之前 start 会拒绝，这里直接插入会话。
+     * 导入两个文件，依据只引用其中一个
+     */
+    private long codeSession() {
+        long sourceId = sourceService.importCode(USER_ID, new ImportCodeRequest("wengu-learn", List.of(
+                new ImportCodeRequest.CodeFile("chat/ChatService.java", "class ChatService {}\n"),
+                new ImportCodeRequest.CodeFile("chat/Other.java", "class Other {}\n")))).id();
+        KnowledgePoint kp = new KnowledgePoint();
+        kp.setUserId(USER_ID);
+        kp.setType(KnowledgePointType.EXPERIENCE);
+        kp.setTitle("发一条消息时依次发生了什么？");
+        kp.setSummary("1. 先校验再保存。\n- 先校验内容\n- 校验通过才保存");
+        kp.setStatus(KnowledgePointStatus.ACTIVE);
+        kp.setSortOrder(2);
+        kp.setCreatedAt(NOW);
+        kp.setUpdatedAt(NOW);
+        knowledgePointMapper.insert(kp);
+        KpCode code = new KpCode();
+        code.setKpId(kp.getId());
+        code.setUserId(USER_ID);
+        code.setSourceId(sourceId);
+        code.setDetails("1. 上限 5000 字。");
+        code.setEvidence("[{\"file\":\"chat/ChatService.java\",\"symbol\":\"ChatService\"}]");
+        code.setUnverifiable("[\"为什么先校验？\"]");
+        code.setPrerequisites("[]");
+        kpCodeMapper.insert(code);
+        StudySession session = new StudySession();
+        session.setUserId(USER_ID);
+        session.setType(SessionType.STUDY);
+        session.setKpId(kp.getId());
+        session.setStartedAt(NOW);
+        session.setSkippedExplanation(false);
+        session.setActiveSeconds(0);
+        session.setLastActiveAt(NOW);
+        session.setPromptVersion(CodeChatPrompt.VERSION);
+        sessionMapper.insert(session);
+        return session.getId();
     }
 }
