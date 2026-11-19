@@ -4,6 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
+import com.wengu.knowledge.dto.CodeEvidence;
+import com.wengu.knowledge.dto.CodeFile;
+import com.wengu.knowledge.dto.CodeMaterial;
+import com.wengu.knowledge.dto.CodePrerequisite;
 import com.wengu.knowledge.dto.KnowledgePointSummary;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.StudyMaterial;
@@ -12,18 +16,22 @@ import com.wengu.knowledge.entity.ExtractionDraft;
 import com.wengu.knowledge.entity.ExtractionDraftItem;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
+import com.wengu.knowledge.entity.KpCode;
 import com.wengu.knowledge.entity.KpRevision;
 import com.wengu.knowledge.entity.KpSource;
 import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftMapper;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.knowledge.mapper.KpCodeMapper;
 import com.wengu.knowledge.mapper.KpRevisionMapper;
 import com.wengu.knowledge.mapper.KpSourceMapper;
 import com.wengu.review.service.ReviewService;
+import com.wengu.source.dto.CodeFileContent;
 import com.wengu.source.dto.SourceQuestion;
 import com.wengu.source.service.SourceService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -59,10 +67,13 @@ public class KnowledgePointService {
     private final ReviewService reviewService;
     private final SourceService sourceService;
     private final Clock clock;
+    private final KpCodeMapper kpCodeMapper;
+    private final JsonMapper jsonMapper;
 
     public KnowledgePointService(KnowledgePointMapper knowledgePointMapper, KpSourceMapper kpSourceMapper,
                                  KpRevisionMapper revisionMapper, ExtractionDraftItemMapper draftItemMapper, ExtractionDraftMapper draftMapper,
-                                 ReviewService reviewService, SourceService sourceService, Clock clock) {
+                                 ReviewService reviewService, SourceService sourceService, Clock clock,
+                                 KpCodeMapper kpCodeMapper, JsonMapper jsonMapper) {
         this.knowledgePointMapper = knowledgePointMapper;
         this.kpSourceMapper = kpSourceMapper;
         this.revisionMapper = revisionMapper;
@@ -71,6 +82,8 @@ public class KnowledgePointService {
         this.reviewService = reviewService;
         this.sourceService = sourceService;
         this.clock = clock;
+        this.kpCodeMapper = kpCodeMapper;
+        this.jsonMapper = jsonMapper;
     }
 
     /**
@@ -225,7 +238,7 @@ public class KnowledgePointService {
     }
 
     /**
-     * 学习一个知识点时发给模型的材料：标题、类型、要点、来源面试题（#19）。
+     * 学习一个知识点时发给模型的材料：标题、类型、要点、来源面试题（#19）；源码知识点另外带上细节和依据的文件（#90）。
      * 来源面试题按“知识点 → 草稿条目 → 草稿的材料”找到，题号来自条目的 source_question_ids。
      * 暂停的知识点也能取：用户从知识库直接打开时照样可以学。
      *
@@ -234,7 +247,31 @@ public class KnowledgePointService {
     public StudyMaterial studyMaterial(long userId, long kpId) {
         KnowledgePoint kp = owned(userId, kpId);
         return new StudyMaterial(kp.getId(), kp.getTitle(), kp.getType(), kp.getSummary(),
-                sourceQuestions(userId, kp.getDraftItemId()));
+                sourceQuestions(userId, kp.getDraftItemId()), codeMaterial(userId, kpId));
+    }
+
+    /**
+     * 源码知识点（#90）的细节、代码证明不了的问题、前置概念，以及代码依据涉及的文件。
+     * 文件从导入时的快照（source_file）中取，按依据中第一次出现的顺序；不是源码知识点时为 null。
+     */
+    private CodeMaterial codeMaterial(long userId, long kpId) {
+        KpCode code = kpCodeMapper.selectById(kpId);
+        if (code == null || code.getUserId() != userId) {
+            return null;
+        }
+        List<String> paths = Arrays.stream(jsonMapper.readValue(code.getEvidence(), CodeEvidence[].class))
+                .map(CodeEvidence::file)
+                .distinct()
+                .toList();
+        Map<String, String> contents = sourceService.getCodeFiles(userId, code.getSourceId(), paths).stream()
+                .collect(Collectors.toMap(CodeFileContent::path, CodeFileContent::content));
+        List<CodeFile> files = paths.stream()
+                .filter(contents::containsKey)
+                .map(path -> new CodeFile(path, contents.get(path)))
+                .toList();
+        return new CodeMaterial(code.getDetails(),
+                List.of(jsonMapper.readValue(code.getUnverifiable(), String[].class)),
+                List.of(jsonMapper.readValue(code.getPrerequisites(), CodePrerequisite[].class)), files);
     }
 
     /** 草稿条目引用的来源题，带上追问；找不到时返回空列表，不影响学习。 */

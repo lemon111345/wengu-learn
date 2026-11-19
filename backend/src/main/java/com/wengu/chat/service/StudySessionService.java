@@ -106,7 +106,8 @@ public class StudySessionService {
         session.setSkippedExplanation(false);
         session.setActiveSeconds(0);
         session.setLastActiveAt(now);
-        session.setPromptVersion(LearningChatPrompt.VERSION);
+        // 源码知识点（#90）用源码的 prompt，版本分开记，以后分析时能区分
+        session.setPromptVersion(material.code() != null ? CodeChatPrompt.VERSION : LearningChatPrompt.VERSION);
         sessionMapper.insert(session);
         return view(session, material.title(), true);
     }

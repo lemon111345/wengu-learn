@@ -17,7 +17,11 @@ import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
+import com.wengu.knowledge.entity.KpCode;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.knowledge.mapper.KpCodeMapper;
+import com.wengu.source.dto.ImportCodeRequest;
+import com.wengu.source.service.SourceService;
 import com.wengu.llm.dto.LlmResult;
 import com.wengu.llm.service.LlmException;
 import com.wengu.llm.service.LlmOutputParseException;
@@ -69,6 +73,12 @@ class RatingSuggestionServiceTest {
     @Autowired
     private KnowledgePointMapper knowledgePointMapper;
 
+    @Autowired
+    private KpCodeMapper kpCodeMapper;
+
+    @Autowired
+    private SourceService sourceService;
+
     private long kpId;
 
     @BeforeEach
@@ -76,6 +86,7 @@ class RatingSuggestionServiceTest {
         suggestionMapper.delete(null);
         messageMapper.delete(null);
         sessionMapper.delete(null);
+        kpCodeMapper.delete(null);
         knowledgePointMapper.delete(null);
         KnowledgePoint kp = new KnowledgePoint();
         kp.setUserId(USER_ID);
@@ -228,5 +239,33 @@ class RatingSuggestionServiceTest {
         assertError(() -> suggestionService.suggest(USER_ID, sessionId), ErrorCode.RATING_SUGGESTION_FAILED);
         verify(llmService, times(3)).call(anyString(), anyString(), eq(RatingSuggestionResult.class), any());
         assertThat(suggestionMapper.selectById(sessionId)).isNull();
+    }
+
+    @Test
+    void 源码知识点用源码的评分prompt_第一次学习和复习分开写_带上源码() {
+        long sourceId = sourceService.importCode(USER_ID, new ImportCodeRequest("wengu-learn",
+                List.of(new ImportCodeRequest.CodeFile("chat/RatingService.java", "class RatingService {}\n")))).id();
+        KpCode code = new KpCode();
+        code.setKpId(kpId);
+        code.setUserId(USER_ID);
+        code.setSourceId(sourceId);
+        code.setEvidence("[{\"file\":\"chat/RatingService.java\",\"symbol\":\"RatingService\"}]");
+        code.setUnverifiable("[]");
+        code.setPrerequisites("[]");
+        kpCodeMapper.insert(code);
+        long first = session(SessionType.STUDY, true);
+        long second = session(SessionType.STUDY, true);
+        modelReturns(new RatingSuggestionResult("依据", List.of(), Rating.GOOD, List.of()));
+
+        suggestionService.suggest(USER_ID, first);
+        suggestionService.suggest(USER_ID, second);
+
+        ArgumentCaptor<String> system = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> input = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(2)).call(system.capture(), input.capture(), eq(RatingSuggestionResult.class), any());
+        assertThat(system.getAllValues()).containsOnly(CodeChatPrompt.ratingSystem());
+        assertThat(input.getAllValues().get(0)).contains("这次对话：第一次学习", "===== 文件：chat/RatingService.java =====");
+        assertThat(input.getAllValues().get(1)).contains("这次对话：复习");
+        assertThat(suggestionMapper.selectById(first).getPromptVersion()).isEqualTo(CodeChatPrompt.RATING_VERSION);
     }
 }

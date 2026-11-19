@@ -294,6 +294,24 @@ public class SourceService {
     }
 
     /**
+     * 源码导入中指定路径的文件，学习时取知识点依据的那几个（#90）。按导入顺序返回；不存在的路径、
+     * 或者材料不属于这个用户时不在结果中。
+     */
+    public List<CodeFileContent> getCodeFiles(long userId, long sourceId, Collection<String> paths) {
+        if (paths.isEmpty()) {
+            return List.of();
+        }
+        return sourceFileMapper.selectList(new LambdaQueryWrapper<SourceFile>()
+                        .eq(SourceFile::getSourceId, sourceId)
+                        .eq(SourceFile::getUserId, userId)
+                        .in(SourceFile::getPath, paths)
+                        .orderByAsc(SourceFile::getFileOrder))
+                .stream()
+                .map(f -> new CodeFileContent(f.getPath(), f.getContent()))
+                .toList();
+    }
+
+    /**
      * 按 id 查材料名称，供草稿列表显示。只查 id 和 name 两列，不读原文；不存在或不属于该用户的 id 不在结果中。
      */
     public Map<Long, String> getNames(long userId, Collection<Long> sourceIds) {

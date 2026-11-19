@@ -50,6 +50,7 @@ public class RatingSuggestionService {
     private final JsonMapper jsonMapper;
     private final Clock clock;
     private final String systemPrompt = RatingPrompt.system();
+    private final String codeSystemPrompt = CodeChatPrompt.ratingSystem();
 
     public RatingSuggestionService(StudySessionService sessions, RatingSuggestionMapper suggestionMapper,
                                    KnowledgePointService knowledgePointService, LlmService llmService,
@@ -82,8 +83,14 @@ public class RatingSuggestionService {
         }
 
         StudyMaterial material = knowledgePointService.studyMaterial(userId, session.getKpId());
-        LlmResult<RatingSuggestionResult> result = callModel(sessionId,
-                RatingPrompt.input(material, sessions.messages(sessionId)));
+        // 源码知识点（#90）用源码的评分 prompt：核心要点和细节分开、带上源码，复习时 EASY 的标准不同（决策 048）。
+        // 这次之前有过学习会话就是复习：同一个知识点上一次学完评了分，start 才会新建会话
+        boolean code = material.code() != null;
+        String input = code
+                ? CodeChatPrompt.ratingInput(material, !sessions.earlierStudySessions(session, 1).isEmpty(),
+                sessions.messages(sessionId))
+                : RatingPrompt.input(material, sessions.messages(sessionId));
+        LlmResult<RatingSuggestionResult> result = callModel(sessionId, code ? codeSystemPrompt : systemPrompt, input);
         RatingSuggestionResult content = result.content();
 
         RatingSuggestion suggestion = new RatingSuggestion();
@@ -94,7 +101,7 @@ public class RatingSuggestionService {
         suggestion.setWeakPoints(jsonMapper.writeValueAsString(orEmpty(content.weakPoints())));
         suggestion.setOutOfScopeGaps(jsonMapper.writeValueAsString(orEmpty(content.outOfScopeGaps())));
         suggestion.setModel(result.model());
-        suggestion.setPromptVersion(RatingPrompt.VERSION);
+        suggestion.setPromptVersion(code ? CodeChatPrompt.RATING_VERSION : RatingPrompt.VERSION);
         suggestion.setPromptTokens(result.promptTokens());
         suggestion.setCompletionTokens(result.completionTokens());
         suggestion.setCreatedAt(Instant.now(clock));
@@ -130,10 +137,10 @@ public class RatingSuggestionService {
         return saved == null ? null : saved.getRating();
     }
 
-    private LlmResult<RatingSuggestionResult> callModel(long sessionId, String input) {
+    private LlmResult<RatingSuggestionResult> callModel(long sessionId, String system, String input) {
         for (int attempt = 1; ; attempt++) {
             try {
-                LlmResult<RatingSuggestionResult> result = llmService.call(systemPrompt, input,
+                LlmResult<RatingSuggestionResult> result = llmService.call(system, input,
                         RatingSuggestionResult.class, RatingPrompt.TEMPERATURE);
                 if (result.content() != null && result.content().rating() != null) {
                     return result;
