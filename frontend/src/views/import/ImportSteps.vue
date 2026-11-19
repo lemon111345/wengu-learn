@@ -1,8 +1,13 @@
 <script setup lang="ts">
-// 导入的三步进度（ui.md 5.7）：粘贴或上传 / 确认题目 / 抽取知识点。程序自己知道走到了哪一步，所以可以显示
-defineProps<{ current: 1 | 2 | 3 }>()
+// 导入的三步进度（ui.md 5.7）：粘贴或上传 / 确认题目 / 抽取知识点。程序自己知道走到了哪一步，所以可以显示。
+// 源码导入（#90）是：选择文件夹 / 勾选文件 / 抽取知识点
+import { computed } from 'vue'
 
-const steps = ['粘贴或上传', '确认题目', '抽取知识点']
+const props = defineProps<{ current: 1 | 2 | 3; code?: boolean }>()
+
+const steps = computed(() =>
+  props.code ? ['选择文件夹', '勾选文件', '抽取知识点'] : ['粘贴或上传', '确认题目', '抽取知识点'],
+)
 </script>
 
 <template>

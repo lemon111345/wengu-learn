@@ -32,7 +32,16 @@ export function studyRecordText(record: StudyRecord): string {
   return record.ratingAi ? `${text}（AI 建议：${ratingLabels[record.ratingAi]}）` : text
 }
 
-/** 如“Java 后端面试题，第 1、3 题”；没有题号时只有材料名 */
+/**
+ * 如“Java 后端面试题，第 1、3 题”；没有题号时只有材料名。
+ * 源码（#90）写依据的文件名，如“wengu-learn · ChatService.java 等 2 个文件”（ui.md 5.9）
+ */
 export function sourceText(source: SourceRef): string {
+  if (source.files && source.files.length > 0) {
+    const first = source.files[0].slice(source.files[0].lastIndexOf('/') + 1)
+    return source.files.length > 1
+      ? `${source.name} · ${first} 等 ${source.files.length} 个文件`
+      : `${source.name} · ${first}`
+  }
   return source.questionIds.length > 0 ? `${source.name}，第 ${source.questionIds.join('、')} 题` : source.name
 }

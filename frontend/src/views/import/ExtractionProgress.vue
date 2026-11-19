@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 抽取进度（ui.md 5.7 第 3 步）：每批一个进度块，失败的可以重试；抽完后点“查看结果”进入确认
 import { computed } from 'vue'
-import type { BatchView, DraftView } from '@/api/drafts'
+import { isCodeDraft, type BatchView, type DraftView } from '@/api/drafts'
 
 const props = defineProps<{ draft: DraftView; retrying: boolean }>()
 const emit = defineEmits<{ retry: []; viewResult: [] }>()
@@ -9,6 +9,8 @@ const emit = defineEmits<{ retry: []; viewResult: [] }>()
 /** 每道题大约 4 秒：30 题一批约 2 分钟，和决策 013 实测的“1～3 分钟”一致。批次按顺序执行 */
 const SECONDS_PER_QUESTION = 4
 
+/** 源码（#90）只有一批、没有题号，不按题数估算：一次调用通常要 2～5 分钟（决策 050） */
+const code = computed(() => isCodeDraft(props.draft))
 const totalQuestions = computed(() => props.draft.batches.reduce((n, b) => n + b.questionIds.length, 0))
 const unfinished = computed(() => props.draft.batches.filter((b) => b.status === 'PENDING' || b.status === 'RUNNING'))
 const failed = computed(() => props.draft.batches.filter((b) => b.status === 'FAILED'))
@@ -25,13 +27,18 @@ const title = computed(() => {
 })
 
 const description = computed(() => {
+  if (unfinished.value.length > 0 && code.value) {
+    return '正在从源码抽取知识点，通常要 2～5 分钟。可以先离开，完成后会出现在今天页的“等你确认”里。'
+  }
   if (unfinished.value.length > 0) {
     return `${totalQuestions.value} 道题分成 ${props.draft.batches.length} 批处理，大约还要 ${minutesLeft.value} 分钟。可以先离开，完成后会出现在今天页的“等你确认”里。`
   }
   if (failed.value.length > 0) {
     return `${failed.value.length} 批没抽出来，可以重试；已经抽出来的会保留。`
   }
-  return `${totalQuestions.value} 道题拆成了 ${props.draft.items.length} 个知识点。`
+  return code.value
+    ? `抽出了 ${props.draft.items.length} 个知识点。`
+    : `${totalQuestions.value} 道题拆成了 ${props.draft.items.length} 个知识点。`
 })
 
 /** 题号连续时写“第 1～30 题”，否则写“30 道题” */
@@ -43,6 +50,9 @@ function range(batch: BatchView) {
 
 /** 一批抽出的知识点数：条目不会跨批，按第一个来源题号归到批次 */
 function itemCount(batch: BatchView) {
+  if (code.value) {
+    return props.draft.items.length
+  }
   return props.draft.items.filter((i) => batch.questionIds.includes(i.sourceQuestionIds[0])).length
 }
 
@@ -71,7 +81,7 @@ function statusText(batch: BatchView) {
         <div class="batch-line">
           <span class="batch-name">
             <span v-if="batch.status === 'READY'" class="check" aria-hidden="true">✓</span>
-            第 {{ batch.no }} 批：{{ range(batch) }}
+            {{ code ? '源码' : `第 ${batch.no} 批：${range(batch)}` }}
           </span>
           <span class="batch-status">{{ statusText(batch) }}</span>
         </div>

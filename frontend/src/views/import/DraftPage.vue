@@ -3,7 +3,7 @@
 // 等你确认时是“确认知识点”（ui.md 5.8）；已确认时是结果摘要。
 // 今天页的提示条、导入页的“最近导入”都链接到这里，刷新、离开后再回来都能接着看
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { fetchDraft, retryDraft, type DraftView } from '@/api/drafts'
+import { fetchDraft, isCodeDraft, retryDraft, type DraftView } from '@/api/drafts'
 import { ApiError } from '@/api/http'
 import PageHeader from '@/components/PageHeader.vue'
 import ConfirmDraft from './ConfirmDraft.vue'
@@ -89,7 +89,7 @@ onBeforeUnmount(stopPolling)
   <el-skeleton v-else-if="!draft" class="wg-page-body" :rows="6" animated />
   <template v-else-if="showProgress">
     <PageHeader title="导入资料">
-      <ImportSteps :current="3" />
+      <ImportSteps :current="3" :code="isCodeDraft(draft)" />
     </PageHeader>
     <div class="wg-page-body layout">
       <main class="main">

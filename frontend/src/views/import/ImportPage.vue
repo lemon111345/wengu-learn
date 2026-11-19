@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 导入资料 /import（ui.md 5.7）的第 1、2 步：粘贴原文或上传文件 → 识别（或整理）题目 → 勾选题目 → 开始抽取。
 // 开始抽取后换成 /drafts/:id，第 3 步的进度在那里显示，刷新、离开后再回来都能接着看（决策 028）。
-// 第 1、2 步只在页面内存中：确认题目时刷新，识别结果会丢，要重新识别
+// 第 1、2 步只在页面内存中：确认题目时刷新，识别结果会丢，要重新识别。
+// 源码（#90）的第 1、2 步在 CodeImport 中，它不识别题目，选好文件就直接抽取
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { createDraft } from '@/api/drafts'
@@ -16,15 +17,19 @@ import {
 } from '@/api/sources'
 import PageHeader from '@/components/PageHeader.vue'
 import { modKeyLabel, useShortcut } from '@/shortcuts/useShortcut'
+import CodeImport from './CodeImport.vue'
 import ImageUploader from './ImageUploader.vue'
 import ImportSidebar from './ImportSidebar.vue'
 import ImportSteps from './ImportSteps.vue'
 
 const router = useRouter()
 
-/** 粘贴文本、上传文件还是截图。截图识别完切回粘贴文本，用户核对后再识别题目（决策 044） */
-const mode = ref<'paste' | 'upload' | 'image'>('paste')
+/** 粘贴文本、上传文件、截图还是源码。截图识别完切回粘贴文本，用户核对后再识别题目（决策 044） */
+const mode = ref<'paste' | 'upload' | 'image' | 'code'>('paste')
 const uploader = ref<InstanceType<typeof ImageUploader> | null>(null)
+const codeImport = ref<InstanceType<typeof CodeImport> | null>(null)
+/** 源码导入走到了第几步，由 CodeImport 告诉这里，用来显示进度 */
+const codeStep = ref<1 | 2>(1)
 /** 内容框里的文字刚从截图识别出来，提示用户核对 */
 const recognizedFromImages = ref(false)
 /** 资料类型（#26，决策 037）：题目清单从原文中识别题目，讲解资料根据内容整理题目 */
@@ -39,7 +44,7 @@ const selected = ref<Set<number>>(new Set())
 const busy = ref(false)
 const error = ref<string | null>(null)
 
-const step = computed(() => (source.value ? 2 : 1))
+const step = computed(() => (mode.value === 'code' ? codeStep.value : source.value ? 2 : 1))
 const isDocument = computed(() => type.value === 'DOCUMENT')
 /** 第 1 步主按钮和第 2 步标题里的动作：识别（逐字找出原题）或整理（根据内容出题） */
 const verb = computed(() => (isDocument.value ? '整理' : '识别'))
@@ -59,6 +64,7 @@ function pickFile(event: Event) {
 
 function selectMode(value: typeof mode.value) {
   mode.value = value
+  codeStep.value = 1
   error.value = null
   recognizedFromImages.value = false
 }
@@ -147,12 +153,14 @@ async function startExtraction() {
 
 // 第 1 步 Ctrl Enter 识别（焦点在输入框中也生效）；第 2 步 Enter 开始抽取
 useShortcut('Mod+Enter', () => {
-  if (step.value === 1) {
+  if (mode.value === 'code') {
+    void codeImport.value?.submit()
+  } else if (step.value === 1) {
     void (mode.value === 'image' ? uploader.value?.submit() : recognize())
   }
 })
 useShortcut('Enter', () => {
-  if (step.value === 2) {
+  if (step.value === 2 && mode.value !== 'code') {
     void startExtraction()
   }
 })
@@ -160,15 +168,16 @@ useShortcut('Enter', () => {
 
 <template>
   <PageHeader title="导入资料">
-    <ImportSteps :current="step" />
+    <ImportSteps :current="step" :code="mode === 'code'" />
   </PageHeader>
   <div class="wg-page-body layout">
     <main class="main">
       <!-- 第 1 步：粘贴或上传 -->
       <section v-if="!source" class="panel">
-        <div class="segmented" role="tablist" aria-label="导入方式">
+        <!-- 源码第 2 步时不能换方式，回第 1 步（重新选择文件夹）才能换 -->
+        <div v-if="!(mode === 'code' && codeStep === 2)" class="segmented" role="tablist" aria-label="导入方式">
           <button
-            v-for="m in [{ value: 'paste', label: '粘贴文本' }, { value: 'upload', label: '上传文件' }, { value: 'image', label: '截图' }] as const"
+            v-for="m in [{ value: 'paste', label: '粘贴文本' }, { value: 'upload', label: '上传文件' }, { value: 'image', label: '截图' }, { value: 'code', label: '源码' }] as const"
             :key="m.value"
             type="button"
             role="tab"
@@ -180,7 +189,8 @@ useShortcut('Enter', () => {
             {{ m.label }}
           </button>
         </div>
-        <div class="field">
+        <CodeImport v-if="mode === 'code'" ref="codeImport" @step="(s) => (codeStep = s)" />
+        <div v-if="mode !== 'code'" class="field">
           <span id="source-type-label" class="label">资料类型</span>
           <div class="segmented" role="radiogroup" aria-labelledby="source-type-label">
             <button
@@ -204,7 +214,7 @@ useShortcut('Enter', () => {
             }}
           </p>
         </div>
-        <div class="field">
+        <div v-if="mode !== 'code'" class="field">
           <label for="source-name">资料名称</label>
           <el-input
             id="source-name"
@@ -226,7 +236,7 @@ useShortcut('Enter', () => {
           />
         </div>
         <ImageUploader v-else-if="mode === 'image'" ref="uploader" @recognized="onImagesRecognized" />
-        <div v-else class="field">
+        <div v-else-if="mode === 'upload'" class="field">
           <span class="label">文件</span>
           <input ref="fileInput" type="file" class="file-input" :accept="UPLOAD_ACCEPT" @change="pickFile" />
           <div v-if="file" class="file">
@@ -237,8 +247,8 @@ useShortcut('Enter', () => {
           <el-button v-else class="pick" @click="fileInput?.click()">选择文件</el-button>
           <p class="hint">支持 PDF、Word（.docx）、Markdown 和 txt，最大 10 MB。扫描件（图片）的 PDF 暂不支持。</p>
         </div>
-        <!-- 截图有自己的主按钮：先识别文字，核对后才识别题目 -->
-        <template v-if="mode !== 'image'">
+        <!-- 截图、源码有自己的主按钮：截图先识别文字，核对后才识别题目；源码不识别题目 -->
+        <template v-if="mode === 'paste' || mode === 'upload'">
           <p v-if="error" class="error" role="alert">{{ error }}</p>
           <div class="row">
             <el-button type="primary" class="primary" :loading="busy" @click="recognize">

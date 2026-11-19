@@ -5,12 +5,13 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { confirmDraft, createDraft, type DraftItemView, type DraftView } from '@/api/drafts'
+import { confirmDraft, createDraft, isCodeDraft, type DraftItemView, type DraftView } from '@/api/drafts'
 import { ApiError } from '@/api/http'
 import type { KnowledgePointType } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
 import { modKeyLabel, useShortcut } from '@/shortcuts/useShortcut'
 import { typeLabels } from '@/utils/labels'
+import { summaryLines } from './codeFiles'
 
 const props = defineProps<{ draft: DraftView }>()
 const router = useRouter()
@@ -19,6 +20,10 @@ const router = useRouter()
 const UNSCHEDULED: KnowledgePointType[] = ['SYSTEM_DESIGN', 'EXPERIENCE']
 
 const confirmed = computed(() => props.draft.status === 'CONFIRMED')
+/** 源码草稿（#90）：没有题号，每条显示代码依据，要点里的得分点缩进显示 */
+const code = computed(() => isCodeDraft(props.draft))
+/** 依据最多列几处，多的写“等 N 处”（ui.md 5.8） */
+const EVIDENCE_SHOWN = 3
 const rejected = ref<Set<number>>(new Set())
 const busy = ref(false)
 
@@ -47,6 +52,11 @@ function toggle(item: DraftItemView, checked: boolean) {
 }
 
 function sources(item: DraftItemView) {
+  if (item.evidence) {
+    const shown = item.evidence.slice(0, EVIDENCE_SHOWN).map((e) => e.symbol).join('、')
+    const more = item.evidence.length - EVIDENCE_SHOWN
+    return `依据：${shown}${more > 0 ? ` 等 ${item.evidence.length} 处` : ''}`
+  }
   return `来自第 ${item.sourceQuestionIds.join('、')} 题`
 }
 
@@ -102,6 +112,10 @@ useShortcut('Mod+Enter', () => void confirm())
           来自“{{ draft.sourceName ?? '未命名的资料' }}”，加入了 {{ accepted.length }} 个知识点，没有加入
           {{ draft.items.length - accepted.length }} 个。
         </p>
+        <p v-else-if="code">
+          来自源码“{{ draft.sourceName ?? '未命名的资料' }}”，抽出了 {{ draft.items.length }}
+          个知识点，已经按学习顺序排好。不想学的去掉勾选，确认后加入每日计划。
+        </p>
         <p v-else>
           来自“{{ draft.sourceName ?? '未命名的资料' }}”，{{ questionCount }} 道题拆成了 {{ draft.items.length }}
           个知识点，已经按学习顺序排好。不想学的去掉勾选，确认后加入每日计划。
@@ -120,7 +134,13 @@ useShortcut('Mod+Enter', () => void confirm())
               <span class="item-title">{{ item.title }}</span>
               <span class="tag">{{ typeLabels[item.type] }}</span>
             </div>
-            <p class="summary">{{ item.summary }}</p>
+            <!-- 源码条目的要点每行一条，以“-”开头的得分点缩进（决策 050） -->
+            <div v-if="item.evidence" class="summary">
+              <p v-for="(line, i) in summaryLines(item.summary)" :key="i" :class="{ 'score-point': line.scorePoint }">
+                {{ line.text }}
+              </p>
+            </div>
+            <p v-else class="summary">{{ item.summary }}</p>
             <p class="meta">
               {{ sources(item) }}
               <span v-if="UNSCHEDULED.includes(item.type)">暂不支持学习，先进知识库，支持后自动加入计划</span>
@@ -262,6 +282,18 @@ h1 {
   color: var(--wg-text-muted);
   font-size: 14px;
   line-height: 1.7;
+}
+
+/* 得分点缩进在要点下面，前面加一个短横 */
+.score-point {
+  position: relative;
+  padding-left: 1.6em;
+}
+
+.score-point::before {
+  content: '–';
+  position: absolute;
+  left: 0.6em;
 }
 
 .meta {

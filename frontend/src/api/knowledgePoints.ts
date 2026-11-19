@@ -54,8 +54,10 @@ export interface StudyRecord {
 export interface SourceRef {
   sourceId: number
   name: string
-  /** 题号；去重时补关联的材料没有题号 */
+  /** 题号；去重时补关联的材料没有题号，源码也没有 */
   questionIds: number[]
+  /** 源码材料中依据的文件路径（#90），去重后保持顺序；题目材料为 null */
+  files: string[] | null
 }
 
 export interface KnowledgePointDetail {
