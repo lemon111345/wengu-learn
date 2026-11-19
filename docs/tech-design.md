@@ -149,6 +149,7 @@ frontend/src
 | review_log | 每次评分的流水 | id、user_id、kp_id、session_id（唯一，一次学习只有一条评分，改分时更新这一条）、rating_user、rating_ai（AI 建议还没生成时为空）、state_before、评分前的快照 step_before / stability_before / difficulty_before / due_before / last_review_before（V13 添加，due_before 为空表示没有快照，决策 039）、is_first_review（是否为该知识点的第一次学习）、due_after（评分后的下次到期时间，V10 添加，决策 020）、reviewed_at |
 | rating_suggestion | AI 评分建议，每个学习会话一条（V10） | session_id（主键）、user_id、rating、analysis、weak_points（JSON，#21 用）、out_of_scope_gaps（JSON，#31 用）、model、prompt_version、prompt_tokens、completion_tokens、created_at，见决策 026 |
 | study_day_completion | “当天完成”的记录（V10） | id、user_id、study_date（学习日）、completed_at；(user_id, study_date) 唯一。计划变空且今天学过时写入，是事实不是计划快照，见决策 020、026 |
+| plan_pick | 用户自己加入今天的知识点（V19，#128） | id、user_id、kp_id、study_date（学习日）、created_at；(user_id, study_date, kp_id) 唯一。只在那个学习日算“今天加入的”；记的是用户的意图，不是计划快照，见决策 052 |
 | extraction_draft | 一次抽取，用户确认后才生成知识点（V3 添加，V4 精简） | id、user_id、source_id（会话来源由 #31 添加，见决策 008）、created_at、confirmed_at（V6 添加）；状态不存库：确认后为 CONFIRMED，之前由批次推算（RUNNING / READY / FAILED），见决策 012、013、015 |
 | extraction_batch | 草稿中的一批，每批调用一次抽取（V4 添加） | id、user_id、draft_id、batch_no（重试时新增一行、批号不变，旧行保留）、status（PENDING / RUNNING / READY / FAILED）、questions（发给模型的题目）、context（这一批用的去重上下文，V5 添加）、covered（被已有内容覆盖的题，换回了知识点 id 或条目 id，带标题快照，V5 添加，见决策 014）、raw_output、error（原始信息，不返回前端）、error_code（失败原因的返回码，V12 添加，见决策 032）、attempts、prompt_version、model、prompt_tokens、completion_tokens（多次调用累加）、created_at、started_at、finished_at，见决策 013 |
 | extraction_draft_item | 草稿中的一个知识点（V3 添加） | id、user_id、draft_id、batch_id（V4 添加）、item_order（批内顺序）、title、summary、type、source_question_ids（如 "1,3,5"，对应 source 中的题号）、decision（确认时的处理：ACCEPTED / REJECTED，V6 添加，见决策 015） |
@@ -171,16 +172,21 @@ frontend/src
 
 ## 每日计划的计算逻辑
 
-**每日计划不建表，每次打开时实时计算。** 它是派生数据，事实已经存在 card_state 和 review_log 里。
+**每日计划不建表，每次打开时实时计算。** 它是派生数据，事实已经存在 card_state 和 review_log 里。用户自己把哪些题加入今天是算不出来的意图，存在 plan_pick，计划照样实时计算（决策 052）。
 
 计算步骤：
 
 1. 根据用户时区和 day_start_hour，算出“今天”的起止时间（换算成 UTC）。
 2. 到期复习：review 查 card_state 中 user_id 匹配、**last_review 不为空**、且 due 早于今天结束时间的 kp_id。必须排除 last_review 为空的新卡片，否则新知识会被误当成到期复习。
 3. 今天已学的新知识数：review 查 review_log 中今天范围内、**is_first_review 为真**的记录条数。不能用 state_before 判断：新卡片的 state 也是“学习中”。
-4. 剩余新知识名额 = max(0, daily_new_limit − 今天占名额的知识点数)。daily_new_limit 是每天学习总量（含复习）；今天占名额的 = 第 2 步还没完成的到期复习 ∪ 今天范围内 review_log 的知识点，按知识点去重。已完成的复习也要算，否则每完成一个复习，新学名额就会多出一个。到期复习全部列出，不截断，超过总量时新知识为 0（决策 016 的修订）。
+4. 剩余新知识名额 = max(0, daily_new_limit − 今天占名额的知识点数)。daily_new_limit 是每天学习总量（含复习）；今天占名额的 = 第 2 步还没完成的到期复习 ∪ 今天范围内 review_log 的知识点 ∪ 第 6 步的学到一半的 ∪ 今天加入还没学的，按知识点去重。已完成的复习也要算，否则每完成一个复习，新学名额就会多出一个。到期复习全部列出，不截断，超过总量时新知识为 0（决策 016 的修订）。
 5. 新知识候选：review 查 card_state 中 last_review 为空的 kp_id。
-6. 过滤与排序：plan 把第 2、5 步的 kp_id 交给 knowledge，排除暂停的、删除的和只收录类型的知识点，按排序字段排序；新知识取前“剩余名额”个。
+6. 过滤与排序：plan 把第 2、5 步的 kp_id 交给 knowledge，排除暂停的、删除的和只收录类型的知识点，按排序字段排序。新知识列表依次是（决策 052）：
+   - 学到一半的：候选中有学习会话的（plan 向 chat 查询），按学习顺序。待学的一评分就不再是待学，所以有会话就是还没走完
+   - 今天加入的：plan_pick 中今天学习日、仍在候选中的，按加入的先后
+   - 计划派发的：其余候选按学习顺序取前“剩余名额”个
+
+   同一个知识点只出现一次。前两部分不受剩余名额限制，比名额多时照样全部列出。
 7. 返回：到期复习列表 + 新知识列表，先复习后新学。另附今天已完成的条目（今天范围内的 review_log，同一知识点取最后一次，暂停的也显示）和接下来 7 个学习日每天到期的复习数（从明天起，不算暂停的），见 [决策 024](./decisions/024-今天页的补充数据.md)。
 
 第 4 步把今天已学的也算进去，是防止重复派发的关键：否则用户下午再打开页面时会被重新分配一批新知识，每日上限就失效了。
@@ -200,6 +206,7 @@ frontend/src
 | 决策 | 理由 | 放弃的方案 |
 | --- | --- | --- |
 | 存事实，算派生：每日计划实时计算 | 避免两份数据不同步；查询有索引，毫秒级 | 建 daily_plan 表存快照 |
+| 自己挑题加入今天：存加入记录（只当天有效），学到一半的从学习会话推出、留到学完；加入的和学到一半的先占名额，超出时照样全部列出，算今天的任务；只有待学的能加入 | “加入今天”是用户意图，算不出来；和 #81 单道开始学都占名额，口径一致；没开始的不留到第二天，避免一次挑太多以后天天学不完，见 [决策 052](./decisions/052-自己挑题加入今天.md) | 加入的不占名额；挪到待学顺序最前面；一直留到学完；学过的也能加入（提前复习） |
 | card_state 与 knowledge_point 拆开 | 内容很少变，调度状态频繁更新，职责不同；FSRS 字段可能随算法升级变化 | 合并成一张表 |
 | card_state 冗余 user_id | 有意识的反范式，用一点冗余换取 (user_id, due) 单索引查询 | 每次关联 knowledge_point 筛选用户 |
 | 状态表与流水表分离 | card_state 存“现在”，review_log 存“全部历史”，供统计和 FSRS 参数优化 | 只更新状态，不留历史 |
@@ -352,7 +359,8 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `POST /api/knowledge-points/restore` | 撤销删除（#25） | `{ids}` | — | 清空 deleted_at，删除前的状态和进度原样回来；后端不限时间。有一个没删除或是被合并的整批 404 |
 | `POST /api/knowledge-points/shuffle-pending` | 打乱待学的顺序（#77） | — | `{count}` | 待学的范围和知识库的“待学”一致（没学过、没暂停、没删除、参与调度）。按“来源资料 + 题号”分组（一个条目来自多道题时用最小的题号，找不到来源题的单独成组），只打乱组与组之间的顺序，组内先后不变；在这些知识点原来占用的 sort_order 之间重新分配，学过的不受影响。没有待学时 count 为 0。不能恢复 |
 | `POST /api/knowledge-points/merge` | 合并（#25） | `{primaryId, mergedIds}` | — | 主知识点的标题、要点、复习进度不变；被合并的来源并到主知识点，然后软删除、merged_into 指向主知识点，之前并进它们的也改指向主知识点；学习记录不搬；不能撤销。没有选择或 mergedIds 包含主知识点 400；有一个不存在、不属于当前用户或已删除 404。见决策 029 |
-| `GET /api/plan/today` | 今天的计划（#18、#48、#49、#19、#52） | — | `{date, dailyNewLimit, newLearnedToday, reviews: [{kpId, title, type}], newItems: [...], completed: [{kpId, title, type, rating, firstReview, sessionId}], upcomingReviews: [{date, count}], knowledgePointCount, studiedMinutesToday, daysToFinish, currentStreak, studiedMinutesThisWeek}` | 实时计算：先复习后新学，各自按学习顺序；到期复习全部列出，新知识只补足 dailyNewLimit（每天学几个，含复习）剩下的名额；date 是学习日（按时区和 day_start_hour）。completed 是今天已完成的，按完成时间排列，同一知识点取最后一次评分（sessionId 也是那一次的，回顾时用），暂停的也在内；upcomingReviews 是从明天起 7 个学习日每天到期的复习数，今天和已过期的在 reviews 中，不算暂停的。knowledgePointCount 是知识点总数（暂停的、不参与调度的也算），为 0 时今天页显示空状态：只看上面几个列表会把“都在很多天后到期”“只有只收录的”误判为空。studiedMinutesToday 是今天学习日内开始的会话的有效时长之和（分钟，不足一分钟舍去）。daysToFinish 是假设之后的名额都用来新学，至少还要几个学习日学完全部待学的新知识（不含暂停的）；每天学几个为 0 或没有待学时为 null。#85 起界面不再使用，接口约定不删除字段，所以保留。currentStreak 是连续学习天数，口径见决策 020；studiedMinutesThisWeek 是本周（从周一的学习日开始）开始的会话的有效时长之和，取整方式和 studiedMinutesToday 相同。见决策 016、024、025、041 |
+| `GET /api/plan/today` | 今天的计划（#18、#48、#49、#19、#52） | — | `{date, dailyNewLimit, newLearnedToday, reviews: [{kpId, title, type}], newItems: [...], completed: [{kpId, title, type, rating, firstReview, sessionId}], upcomingReviews: [{date, count}], knowledgePointCount, studiedMinutesToday, daysToFinish, currentStreak, studiedMinutesThisWeek}` | 实时计算：先复习后新学，各自按学习顺序；到期复习全部列出，新知识只补足 dailyNewLimit（每天学几个，含复习）剩下的名额。newItems 依次是学到一半的、今天加入的（#128）、计划派发的，前两部分先占名额、超出时照样列出，见决策 052；date 是学习日（按时区和 day_start_hour）。completed 是今天已完成的，按完成时间排列，同一知识点取最后一次评分（sessionId 也是那一次的，回顾时用），暂停的也在内；upcomingReviews 是从明天起 7 个学习日每天到期的复习数，今天和已过期的在 reviews 中，不算暂停的。knowledgePointCount 是知识点总数（暂停的、不参与调度的也算），为 0 时今天页显示空状态：只看上面几个列表会把“都在很多天后到期”“只有只收录的”误判为空。studiedMinutesToday 是今天学习日内开始的会话的有效时长之和（分钟，不足一分钟舍去）。daysToFinish 是假设之后的名额都用来新学，至少还要几个学习日学完全部待学的新知识（不含暂停的）；每天学几个为 0 或没有待学时为 null。#85 起界面不再使用，接口约定不删除字段，所以保留。currentStreak 是连续学习天数，口径见决策 020；studiedMinutesThisWeek 是本周（从周一的学习日开始）开始的会话的有效时长之和，取整方式和 studiedMinutesToday 相同。见决策 016、024、025、041 |
+| `POST /api/plan/today/picks` | 把知识点加入今天（#128） | `{kpIds}` | `{added, alreadyInToday, skipped}` | 只有待学的（没学过、没暂停、没删除、参与调度）能加入，写一条今天学习日的 plan_pick，算 added；已经在今天的新学列表里的不重复写，算 alreadyInToday；学过的、暂停的、只收录的、删除的、不存在或不属于当前用户的不加入，算 skipped，不因此整批失败。只当天有效。没有选择 400。见决策 052 |
 | `POST /api/sessions` | 开始学习一个知识点（#19、#23） | `{kpId}` | `{id, type, kpId, parentSessionId, kpTitle, ended, skippedExplanation, generating, activeSeconds, rating, ratingEditable, followUpSessionId, messages: [{id, role, content, marker, createdAt}], teacherName, referenceAnswer}` | 只创建会话，不调用模型，老师的第一句由 reply 生成；这个知识点最近的会话还没走完时返回那个会话：没结束的接着学，学完但还没评分的回去评分。知识点不存在 404，只收录的类型 400。见决策 025、027 |
 | `GET /api/sessions/{id}` | 会话和全部消息，刷新后恢复（#19、#23） | — | 同上 | messages 不含发给模型的知识点信息和附加提示；generating 为 true 表示上一条回复还在后台生成；activeSeconds 是有效时长；rating 是已评的分 `{rating, date, days}`，没评分或接着问时为 null；ratingEditable 是这次评分还能不能修改，没评分、接着问、知识点已合并或删除时为 false（决策 039）；followUpSessionId 是学习会话的接着问会话，只查不建，没有时为 null（#82）；知识点已合并或删除时 kpTitle 照常返回；teacherName 是用户现在设置的老师称呼（决策 042）；referenceAnswer 是学习结束后从收尾中切出的面试参考答法，没结束、接着问、收尾里没有找到时为 null（决策 047）。不存在或不属于当前用户 404 |
 | `POST /api/sessions/{id}/reply` | 生成老师的下一条回复：刚开始时的第一句，或出错后重试（#19） | — | `text/event-stream`：`delta {text}`、`done {messageId, marker, ended}`、`error {message}` | 已经轮到学生回答、会话已结束、正在生成时 409（统一格式的 JSON，不开始推送）。浏览器断开后回复照样生成完、存库。见决策 025 |
