@@ -8,19 +8,26 @@ import com.wengu.knowledge.dto.CodeEvidence;
 import com.wengu.knowledge.dto.CodeExtractionResult;
 import com.wengu.knowledge.dto.CodeExtractionResult.KnowledgePoint;
 import com.wengu.knowledge.dto.CodePrerequisite;
+import com.wengu.knowledge.dto.ConfirmDraftRequest;
 import com.wengu.knowledge.dto.CreateDraftRequest;
 import com.wengu.knowledge.dto.DraftItemView;
 import com.wengu.knowledge.dto.DraftView;
+import com.wengu.knowledge.dto.KnowledgePointDetail;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.entity.BatchStatus;
 import com.wengu.knowledge.entity.DraftStatus;
 import com.wengu.knowledge.entity.ExtractionBatch;
 import com.wengu.knowledge.entity.ExtractionDraftItemCode;
+import com.wengu.knowledge.entity.KpCode;
 import com.wengu.knowledge.mapper.ExtractionBatchMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftItemCodeMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftMapper;
+import com.wengu.knowledge.mapper.KnowledgePointMapper;
+import com.wengu.knowledge.mapper.KpCodeMapper;
+import com.wengu.knowledge.mapper.KpSourceMapper;
 import com.wengu.llm.dto.LlmResult;
+import com.wengu.review.mapper.CardStateMapper;
 import com.wengu.source.dto.CodeFileContent;
 import com.wengu.source.dto.ImportCodeRequest;
 import com.wengu.source.dto.ImportCodeRequest.CodeFile;
@@ -31,6 +38,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.task.TaskExecutor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -57,6 +65,8 @@ class CodeDraftTest {
 
     private static final String CHAT_SERVICE = "class ChatService {\n    void send() {}\n}\n";
 
+    private static final String RATING_SERVICE = "class RatingService {\n    void rate() {}\n}\n";
+
     private static final String SUMMARY = "1. 先校验再保存。\n- 先校验内容\n- 校验通过才保存";
 
     @Autowired
@@ -76,6 +86,24 @@ class CodeDraftTest {
 
     @Autowired
     private ExtractionDraftItemCodeMapper itemCodeMapper;
+
+    @Autowired
+    private KpCodeMapper kpCodeMapper;
+
+    @Autowired
+    private KnowledgePointMapper knowledgePointMapper;
+
+    @Autowired
+    private KpSourceMapper kpSourceMapper;
+
+    @Autowired
+    private CardStateMapper cardStateMapper;
+
+    @Autowired
+    private KnowledgeLibraryService libraryService;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     @MockitoBean
     private CodeExtractionService codeExtractionService;
@@ -98,12 +126,17 @@ class CodeDraftTest {
     void importCode() {
         executor = (ManualTaskExecutor) testExecutor;
         executor.reset();
+        kpCodeMapper.delete(null);
+        cardStateMapper.delete(null);
+        kpSourceMapper.delete(null);
+        knowledgePointMapper.delete(null);
         itemCodeMapper.delete(null);
         itemMapper.delete(null);
         batchMapper.delete(null);
         draftMapper.delete(null);
         sourceId = sourceService.importCode(USER_ID, new ImportCodeRequest("wengu-learn",
-                List.of(new CodeFile("chat/ChatService.java", CHAT_SERVICE)))).id();
+                List.of(new CodeFile("chat/ChatService.java", CHAT_SERVICE),
+                        new CodeFile("chat/RatingService.java", RATING_SERVICE)))).id();
     }
 
     private static LlmResult<CodeExtractionResult> result(String symbol) {
@@ -132,7 +165,8 @@ class CodeDraftTest {
         assertThat(item.type()).isEqualTo(KnowledgePointType.EXPERIENCE);
         assertThat(item.sourceQuestionIds()).isEmpty();
         assertThat(item.evidence()).containsExactly(new CodeEvidence("chat/ChatService.java", "ChatService#send"));
-        verify(codeExtractionService).extract(List.of(new CodeFileContent("chat/ChatService.java", CHAT_SERVICE)));
+        verify(codeExtractionService).extract(List.of(new CodeFileContent("chat/ChatService.java", CHAT_SERVICE),
+                new CodeFileContent("chat/RatingService.java", RATING_SERVICE)));
         verify(extractionService, never()).extract(anyList(), any());
 
         ExtractionBatch batch = batchMapper.selectOne(new LambdaQueryWrapper<ExtractionBatch>()
@@ -214,6 +248,66 @@ class CodeDraftTest {
         DraftView view = draftService.get(USER_ID, draftId);
         assertThat(view.status()).isEqualTo(DraftStatus.READY);
         assertThat(view.items()).isEmpty();
+    }
+
+    @Test
+    void 确认后写入kp_code_取消勾选的不写_个人经历不初始化调度状态() {
+        when(codeExtractionService.extract(anyList())).thenReturn(twoPoints());
+        long draftId = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null)).id();
+        executor.runAll();
+        List<DraftItemView> items = draftService.get(USER_ID, draftId).items();
+
+        draftService.confirm(USER_ID, draftId, new ConfirmDraftRequest(List.of(items.get(1).id())));
+
+        // 知识点实体和抽取结果里的 KnowledgePoint 同名，这里用 var
+        var kps = knowledgePointMapper.selectList(null);
+        assertThat(kps).singleElement().satisfies(kp -> {
+            assertThat(kp.getType()).isEqualTo(KnowledgePointType.EXPERIENCE);
+            assertThat(kp.getSummary()).isEqualTo(SUMMARY);
+        });
+        long kpId = kps.getFirst().getId();
+        KpCode code = kpCodeMapper.selectById(kpId);
+        assertThat(code.getSourceId()).isEqualTo(sourceId);
+        assertThat(code.getUserId()).isEqualTo(USER_ID);
+        assertThat(code.getDetails()).isEqualTo("1. 内容不超过 5000 字。");
+        assertThat(code.getEvidence()).contains("ChatService#send");
+        assertThat(kpCodeMapper.selectCount(null)).isOne();
+        assertThat(cardStateMapper.selectCount(null)).isZero();
+    }
+
+    @Test
+    void 源码知识点的详情_来源没有题号_带上依据的文件() {
+        when(codeExtractionService.extract(anyList())).thenReturn(twoPoints());
+        long draftId = draftService.create(USER_ID, new CreateDraftRequest(sourceId, null)).id();
+        executor.runAll();
+        draftService.confirm(USER_ID, draftId, null);
+        long kpId = knowledgePointMapper.selectList(null).stream()
+                .filter(kp -> kp.getTitle().equals("评分前后怎么衔接？"))
+                .findFirst().orElseThrow().getId();
+
+        // 详情要按用户设置换算学习日；空库上用户 1 没有设置（同 KnowledgeLibraryServiceTest）
+        jdbc.update("INSERT IGNORE INTO user_settings (user_id, daily_new_limit, timezone, day_start_hour)"
+                + " VALUES (1, 3, 'Asia/Shanghai', 4)");
+
+        KnowledgePointDetail detail = libraryService.detail(USER_ID, kpId);
+
+        assertThat(detail.sources()).singleElement().satisfies(source -> {
+            assertThat(source.name()).isEqualTo("wengu-learn");
+            assertThat(source.questionIds()).isEmpty();
+            // 同一个文件引用了两次，只列一次
+            assertThat(source.files()).containsExactly("chat/ChatService.java", "chat/RatingService.java");
+        });
+    }
+
+    /** 两个合格的知识点：第 1 个依据一个文件，第 2 个依据两个文件（其中一个引用了两次） */
+    private static LlmResult<CodeExtractionResult> twoPoints() {
+        KnowledgePoint first = result("ChatService#send").content().knowledgePoints().getFirst();
+        KnowledgePoint second = new KnowledgePoint("CHAIN", List.of(
+                new CodeEvidence("chat/ChatService.java", "ChatService"),
+                new CodeEvidence("chat/RatingService.java", "RatingService#rate"),
+                new CodeEvidence("chat/ChatService.java", "ChatService#send")),
+                2, List.of(), SUMMARY, "", "评分前后怎么衔接？", List.of());
+        return new LlmResult<>(new CodeExtractionResult(List.of(first, second)), "{...}", "test-model", "stop", 100, 50);
     }
 
     @Test

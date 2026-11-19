@@ -22,10 +22,12 @@ import com.wengu.knowledge.entity.ExtractionDraft;
 import com.wengu.knowledge.entity.ExtractionDraftItem;
 import com.wengu.knowledge.entity.ExtractionDraftItemCode;
 import com.wengu.knowledge.entity.ItemDecision;
+import com.wengu.knowledge.entity.KpCode;
 import com.wengu.knowledge.mapper.ExtractionBatchMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftItemCodeMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftMapper;
+import com.wengu.knowledge.mapper.KpCodeMapper;
 import com.wengu.source.dto.SourceQuestion;
 import com.wengu.source.entity.SourceType;
 import com.wengu.source.service.SourceService;
@@ -64,6 +66,7 @@ public class ExtractionDraftService {
     private final ExtractionBatchMapper batchMapper;
     private final ExtractionDraftItemMapper itemMapper;
     private final ExtractionDraftItemCodeMapper itemCodeMapper;
+    private final KpCodeMapper kpCodeMapper;
     private final Clock clock;
     private final JsonMapper jsonMapper;
     private final TransactionTemplate transactionTemplate;
@@ -71,7 +74,8 @@ public class ExtractionDraftService {
     public ExtractionDraftService(SourceService sourceService, ExtractionWorker worker,
                                   KnowledgePointService knowledgePointService,
                                   ExtractionDraftMapper draftMapper, ExtractionBatchMapper batchMapper,
-                                  ExtractionDraftItemMapper itemMapper, ExtractionDraftItemCodeMapper itemCodeMapper, Clock clock,
+                                  ExtractionDraftItemMapper itemMapper, ExtractionDraftItemCodeMapper itemCodeMapper,
+                                  KpCodeMapper kpCodeMapper, Clock clock,
                                   JsonMapper jsonMapper, TransactionTemplate transactionTemplate) {
         this.sourceService = sourceService;
         this.worker = worker;
@@ -80,6 +84,7 @@ public class ExtractionDraftService {
         this.batchMapper = batchMapper;
         this.itemMapper = itemMapper;
         this.itemCodeMapper = itemCodeMapper;
+        this.kpCodeMapper = kpCodeMapper;
         this.clock = clock;
         this.jsonMapper = jsonMapper;
         this.transactionTemplate = transactionTemplate;
@@ -244,7 +249,8 @@ public class ExtractionDraftService {
 
     /**
      * 确认草稿（决策 015）：勾选的条目按草稿中的顺序生成知识点，关联到这份材料，参与调度的类型初始化 card_state；
-     * covered 中引用的已有知识点也关联到这份材料；每个条目记下 ACCEPTED 或 REJECTED。全部在一个事务中完成。
+     * covered 中引用的已有知识点也关联到这份材料；源码条目的细节、代码依据等复制到 kp_code（#90）；
+     * 每个条目记下 ACCEPTED 或 REJECTED。全部在一个事务中完成。
      * <p>
      * 只有所有批次都成功（READY）的草稿才能确认：有批次失败时先重试，否则失败批次中的题会悄悄地没有被抽取。
      * 全部取消勾选也可以确认，等于“这份草稿处理完了，一个都不要”。
@@ -272,10 +278,11 @@ public class ExtractionDraftService {
             }
 
             List<ExtractionDraftItem> accepted = items.stream().filter(item -> !rejected.contains(item.getId())).toList();
-            knowledgePointService.create(draft.getUserId(), draft.getSourceId(), accepted.stream()
+            List<Long> kpIds = knowledgePointService.create(draft.getUserId(), draft.getSourceId(), accepted.stream()
                     .map(item -> new KnowledgePointService.NewKnowledgePoint(
                             item.getType(), item.getTitle(), item.getSummary(), item.getId()))
                     .toList());
+            copyCode(accepted, kpIds, draft.getSourceId());
             if (draft.getSourceId() != null) {
                 knowledgePointService.linkToSource(draft.getUserId(), draft.getSourceId(), coveredKnowledgePoints(batches));
             }
@@ -286,6 +293,26 @@ public class ExtractionDraftService {
                     .set(ExtractionDraft::getConfirmedAt, now));
         });
         return get(userId, draftId);
+    }
+
+    /**
+     * 源码条目的细节、代码依据等复制到 kp_code（#90，决策 050）。kpIds 和 accepted 按顺序一一对应（create 的约定）；
+     * 题目条目没有源码数据，跳过。在确认的事务中执行。
+     */
+    private void copyCode(List<ExtractionDraftItem> accepted, List<Long> kpIds, Long sourceId) {
+        if (accepted.isEmpty() || sourceId == null) {
+            return;
+        }
+        Map<Long, ExtractionDraftItemCode> codes = itemCodeMapper.selectList(new LambdaQueryWrapper<ExtractionDraftItemCode>()
+                        .in(ExtractionDraftItemCode::getItemId, accepted.stream().map(ExtractionDraftItem::getId).toList()))
+                .stream()
+                .collect(Collectors.toMap(ExtractionDraftItemCode::getItemId, code -> code));
+        for (int i = 0; i < accepted.size(); i++) {
+            ExtractionDraftItemCode code = codes.get(accepted.get(i).getId());
+            if (code != null) {
+                kpCodeMapper.insert(KpCode.of(kpIds.get(i), sourceId, code));
+            }
+        }
     }
 
     /** 锁住草稿这一行：同一份草稿的重试、确认请求依次执行。 */
