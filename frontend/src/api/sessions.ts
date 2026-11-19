@@ -51,6 +51,15 @@ export interface SessionView {
   teacherName: string
   /** 学习结束后从收尾中切出的面试参考答法；没结束、不是学习会话、收尾里没有找到时为 null（决策 047） */
   referenceAnswer: string | null
+  /** 源码知识点第一次学习时的前置卡（#90），老师开口前先显示；复习、接着问、普通知识点为空数组 */
+  prerequisites: PrerequisiteCard[]
+}
+
+/** 学之前要先懂的通用概念 */
+export interface PrerequisiteCard {
+  concept: string
+  /** 150 字以内的通俗解释 */
+  explanation: string
 }
 
 /** AI 评分建议（决策 026） */

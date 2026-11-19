@@ -4,6 +4,7 @@ import com.wengu.chat.entity.Message;
 import com.wengu.chat.entity.MessageRole;
 import com.wengu.knowledge.dto.CodeFile;
 import com.wengu.knowledge.dto.CodeMaterial;
+import com.wengu.knowledge.dto.CodePrerequisite;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.llm.dto.ChatTurn;
@@ -42,7 +43,7 @@ class CodeChatPromptTest {
         assertThat(kickoff.indexOf("细节")).isLessThan(kickoff.indexOf("相关源码"));
         assertThat(kickoff).endsWith("请开始。");
         assertThat(kickoff.indexOf("请开始。")).isEqualTo(kickoff.lastIndexOf("请开始。"));
-        // 页面显示前置卡之前，不告诉老师学生读过前置卡
+        // 没有前置卡时不提前置卡
         assertThat(kickoff).doesNotContain("前置卡", "这是复习");
     }
 
@@ -59,6 +60,22 @@ class CodeChatPromptTest {
         assertThat(kickoff).contains(CodeChatPrompt.WEAK_POINTS_HEADING + "\n- 没掌握的点").doesNotContain("开场优先");
         assertThat(kickoff).endsWith("请开始。");
         assertThat(kickoff.indexOf("请开始。")).isEqualTo(kickoff.lastIndexOf("请开始。"));
+    }
+
+    @Test
+    void 第一次学习写上学生读过的前置卡_复习时不写() {
+        CodeMaterial code = new CodeMaterial(null, List.of(),
+                List.of(new CodePrerequisite("唯一索引", "  同一列不能有两条一样的值。  ")),
+                List.of(new CodeFile("chat/A.java", "class A {}\n")));
+        StudyMaterial withCards = new StudyMaterial(1, "标题？", KnowledgePointType.EXPERIENCE, SUMMARY, List.of(), code);
+
+        String first = CodeChatPrompt.kickoff(withCards, null);
+        String review = CodeChatPrompt.kickoff(withCards,
+                new LearningChatPrompt.Review(1, Rating.GOOD, List.of(), List.of()));
+
+        assertThat(first).contains("学生开始前读过这几张前置卡：\n【唯一索引】\n同一列不能有两条一样的值。");
+        assertThat(first.indexOf("前置卡")).isLessThan(first.indexOf("相关源码"));
+        assertThat(review).doesNotContain("前置卡");
     }
 
     @Test
