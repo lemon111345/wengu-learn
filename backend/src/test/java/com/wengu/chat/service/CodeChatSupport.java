@@ -2,6 +2,8 @@ package com.wengu.chat.service;
 
 import com.wengu.chat.dto.RatingSuggestionResult;
 import com.wengu.chat.entity.Marker;
+import com.wengu.knowledge.dto.CodeFile;
+import com.wengu.knowledge.dto.CodeMaterial;
 import com.wengu.knowledge.dto.KnowledgePointType;
 import com.wengu.knowledge.dto.StudyMaterial;
 import com.wengu.llm.dto.ChatTurn;
@@ -78,13 +80,20 @@ final class CodeChatSupport {
      * 第一次学习时，学生开始前读过前置卡，也告诉老师读了哪几张；复习时不显示前置卡，也就不提。
      */
     static String kickoff(CodeKp kp, Map<String, String> files, LearningChatPrompt.Review review) {
-        StudyMaterial material = new StudyMaterial(0, kp.title(), KnowledgePointType.EXPERIENCE, kp.summary(), List.of());
-        String base = LearningChatPrompt.kickoff(material, review);
-        String head = base.substring(0, base.lastIndexOf("请开始。")).stripTrailing();
-        String details = kp.hasDetails() ? "\n细节（漏了不影响掌握）：" + kp.summaryDetails() : "";
-        String cards = review == null && kp.hasPrerequisites()
-                ? "\n\n学生开始前读过这几张前置卡：\n" + prerequisiteCards(kp) : "";
-        return head + details + cards + "\n\n" + codeContext(kp, files) + "\n\n请开始。";
+        // #90 起直接用正式的 CodeChatPrompt，预演和线上发的是同一份第一条消息。
+        // 前置卡在页面显示之前正式代码不写，实验里学生确实先读了卡，在代码证明不了的问题前面补上
+        CodeMaterial code = new CodeMaterial(kp.summaryDetails(),
+                kp.unverifiable() == null ? List.of() : kp.unverifiable(),
+                List.of(), files.entrySet().stream().map(e -> new CodeFile(e.getKey(), e.getValue())).toList());
+        StudyMaterial material = new StudyMaterial(0, kp.title(), KnowledgePointType.EXPERIENCE, kp.summary(), List.of(),
+                code);
+        String kickoff = CodeChatPrompt.kickoff(material, review);
+        if (review != null || !kp.hasPrerequisites()) {
+            return kickoff;
+        }
+        int at = kickoff.indexOf("\n\n代码证明不了的问题：");
+        return kickoff.substring(0, at) + "\n\n学生开始前读过这几张前置卡：\n" + prerequisiteCards(kp)
+                + kickoff.substring(at);
     }
 
     /**

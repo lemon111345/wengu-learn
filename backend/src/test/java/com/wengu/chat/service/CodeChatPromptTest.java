@@ -55,6 +55,19 @@ class CodeChatPromptTest {
 
         assertThat(kickoff).contains("这是复习", "问过的问题？", "没掌握的点", "相关源码").doesNotContain("细节");
         assertThat(kickoff.indexOf("这是复习")).isLessThan(kickoff.indexOf("相关源码"));
+        // 源码的复习按要点顺序走，没掌握的点讲到时才问；不能用普通学习对话的“开场优先围绕其中一点”
+        assertThat(kickoff).contains(CodeChatPrompt.WEAK_POINTS_HEADING + "\n- 没掌握的点").doesNotContain("开场优先");
+        assertThat(kickoff).endsWith("请开始。");
+        assertThat(kickoff.indexOf("请开始。")).isEqualTo(kickoff.lastIndexOf("请开始。"));
+    }
+
+    @Test
+    void 有细节的复习_细节在复习信息前面() {
+        LearningChatPrompt.Review review = new LearningChatPrompt.Review(1, Rating.GOOD, List.of(), List.of());
+
+        String kickoff = CodeChatPrompt.kickoff(material("1. 细节"), review);
+
+        assertThat(kickoff.indexOf("细节（漏了不影响掌握）")).isLessThan(kickoff.indexOf("这是复习"));
     }
 
     @Test
@@ -81,7 +94,7 @@ class CodeChatPromptTest {
 
     @Test
     void prompt文件能读到() {
-        assertThat(CodeChatPrompt.system()).contains("这一点要答出");
+        assertThat(CodeChatPrompt.system()).contains("这一点要答出", "逐点回忆").doesNotContain("3～5 次");
         assertThat(CodeChatPrompt.ratingSystem()).isNotBlank();
     }
 }
