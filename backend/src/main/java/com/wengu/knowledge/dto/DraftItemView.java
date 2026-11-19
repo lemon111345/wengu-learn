@@ -8,9 +8,10 @@ import java.util.List;
  * 草稿中的一个知识点。
  *
  * @param order             在整份草稿中的学习顺序，从 1 开始
- * @param sourceQuestionIds 来源题号，对应 source 中的题号
+ * @param sourceQuestionIds 来源题号，对应 source 中的题号；源码条目为空列表
  * @param decision          确认时的处理：ACCEPTED 或 REJECTED；草稿还没确认时为 null
+ * @param evidence          源码条目的代码依据（#90，决策 050），确认页显示为“依据”；题目条目为 null
  */
 public record DraftItemView(long id, int order, String title, String summary, KnowledgePointType type,
-                            List<Integer> sourceQuestionIds, ItemDecision decision) {
+                            List<Integer> sourceQuestionIds, ItemDecision decision, List<CodeEvidence> evidence) {
 }

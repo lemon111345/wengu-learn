@@ -5,6 +5,7 @@ import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.llm.dto.LlmResult;
 import com.wengu.llm.service.LlmOutputParseException;
+import com.wengu.source.dto.CodeFileContent;
 import com.wengu.source.dto.GenerateResult;
 import com.wengu.source.dto.ImportCodeRequest;
 import com.wengu.source.dto.ImportQuestionsRequest;
@@ -262,6 +263,34 @@ public class SourceService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "这份材料没有题目");
         }
         return List.of(jsonMapper.readValue(source.getQuestions(), SourceQuestion[].class));
+    }
+
+    /**
+     * 材料的类型，发起抽取时用来决定按题目抽还是按源码抽（#90）。只查 id、user_id 和 type 三列，不读原文。
+     *
+     * @throws BusinessException 材料不存在或不属于这个用户时为 NOT_FOUND
+     */
+    public SourceType getType(long userId, long sourceId) {
+        Source source = sourceMapper.selectOne(new LambdaQueryWrapper<Source>()
+                .select(Source::getId, Source::getUserId, Source::getType)
+                .eq(Source::getId, sourceId));
+        if (source == null || source.getUserId() != userId) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "材料不存在");
+        }
+        return source.getType();
+    }
+
+    /**
+     * 源码导入的全部文件，按导入顺序（#90）。不是源码材料、或者不属于这个用户时为空列表，调用方先用 {@link #getType} 判断。
+     */
+    public List<CodeFileContent> getCodeFiles(long userId, long sourceId) {
+        return sourceFileMapper.selectList(new LambdaQueryWrapper<SourceFile>()
+                        .eq(SourceFile::getSourceId, sourceId)
+                        .eq(SourceFile::getUserId, userId)
+                        .orderByAsc(SourceFile::getFileOrder))
+                .stream()
+                .map(f -> new CodeFileContent(f.getPath(), f.getContent()))
+                .toList();
     }
 
     /**

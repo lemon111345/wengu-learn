@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.BatchView;
+import com.wengu.knowledge.dto.CodeEvidence;
 import com.wengu.knowledge.dto.ConfirmDraftRequest;
 import com.wengu.knowledge.dto.CoveredView;
 import com.wengu.knowledge.dto.CreateDraftRequest;
@@ -19,11 +20,14 @@ import com.wengu.knowledge.entity.DraftStatus;
 import com.wengu.knowledge.entity.ExtractionBatch;
 import com.wengu.knowledge.entity.ExtractionDraft;
 import com.wengu.knowledge.entity.ExtractionDraftItem;
+import com.wengu.knowledge.entity.ExtractionDraftItemCode;
 import com.wengu.knowledge.entity.ItemDecision;
 import com.wengu.knowledge.mapper.ExtractionBatchMapper;
+import com.wengu.knowledge.mapper.ExtractionDraftItemCodeMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftItemMapper;
 import com.wengu.knowledge.mapper.ExtractionDraftMapper;
 import com.wengu.source.dto.SourceQuestion;
+import com.wengu.source.entity.SourceType;
 import com.wengu.source.service.SourceService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -59,6 +63,7 @@ public class ExtractionDraftService {
     private final ExtractionDraftMapper draftMapper;
     private final ExtractionBatchMapper batchMapper;
     private final ExtractionDraftItemMapper itemMapper;
+    private final ExtractionDraftItemCodeMapper itemCodeMapper;
     private final Clock clock;
     private final JsonMapper jsonMapper;
     private final TransactionTemplate transactionTemplate;
@@ -66,7 +71,7 @@ public class ExtractionDraftService {
     public ExtractionDraftService(SourceService sourceService, ExtractionWorker worker,
                                   KnowledgePointService knowledgePointService,
                                   ExtractionDraftMapper draftMapper, ExtractionBatchMapper batchMapper,
-                                  ExtractionDraftItemMapper itemMapper, Clock clock,
+                                  ExtractionDraftItemMapper itemMapper, ExtractionDraftItemCodeMapper itemCodeMapper, Clock clock,
                                   JsonMapper jsonMapper, TransactionTemplate transactionTemplate) {
         this.sourceService = sourceService;
         this.worker = worker;
@@ -74,6 +79,7 @@ public class ExtractionDraftService {
         this.draftMapper = draftMapper;
         this.batchMapper = batchMapper;
         this.itemMapper = itemMapper;
+        this.itemCodeMapper = itemCodeMapper;
         this.clock = clock;
         this.jsonMapper = jsonMapper;
         this.transactionTemplate = transactionTemplate;
@@ -92,16 +98,24 @@ public class ExtractionDraftService {
         if (request.sourceId() == null) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "缺少 sourceId");
         }
-        List<SourceQuestion> selected = select(sourceService.getQuestions(userId, request.sourceId()),
-                request.questionIds());
-        List<ExtractionQuestion> questions = selected.stream().map(ExtractionDraftService::toExtractionQuestion).toList();
+        List<List<ExtractionQuestion>> batches;
+        if (sourceService.getType(userId, request.sourceId()) == SourceType.CODE) {
+            // 源码（#90，决策 050）：15 万字符以内一次调用就够，只建一批；没有题目，输入是导入的全部文件，执行时再读
+            if (request.questionIds() != null) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "源码材料不按题目抽取，不要传 questionIds");
+            }
+            batches = List.of(List.of());
+        } else {
+            List<SourceQuestion> selected = select(sourceService.getQuestions(userId, request.sourceId()),
+                    request.questionIds());
+            batches = partition(selected.stream().map(ExtractionDraftService::toExtractionQuestion).toList(), BATCH_SIZE);
+        }
         Instant now = Instant.now(clock);
 
         ExtractionDraft draft = new ExtractionDraft();
         draft.setUserId(userId);
         draft.setSourceId(request.sourceId());
         draft.setCreatedAt(now);
-        List<List<ExtractionQuestion>> batches = partition(questions, BATCH_SIZE);
         transactionTemplate.executeWithoutResult(status -> {
             draftMapper.insert(draft);
             for (int i = 0; i < batches.size(); i++) {
@@ -418,17 +432,33 @@ public class ExtractionDraftService {
                     questions.stream().map(ExtractionQuestion::id).toList(),
                     BatchView.failureReason(batch.getStatus(), batch.getErrorCode())));
         }
+        Map<Long, List<CodeEvidence>> evidence = evidenceOf(items);
         List<DraftItemView> itemViews = new ArrayList<>();
         for (ExtractionDraftItem item : items) {
+            // 源码条目没有来源题号，存的是空字符串（决策 050）
+            List<Integer> questionIds = item.getSourceQuestionIds().isEmpty() ? List.of()
+                    : Arrays.stream(item.getSourceQuestionIds().split(",")).map(Integer::valueOf).toList();
             itemViews.add(new DraftItemView(item.getId(), itemViews.size() + 1, item.getTitle(), item.getSummary(),
-                    item.getType(), Arrays.stream(item.getSourceQuestionIds().split(",")).map(Integer::valueOf).toList(),
-                    item.getDecision()));
+                    item.getType(), questionIds, item.getDecision(), evidence.get(item.getId())));
         }
         DraftStatus status = draft.getConfirmedAt() != null ? DraftStatus.CONFIRMED : statusOf(batches);
         String sourceName = draft.getSourceId() == null ? null
                 : sourceService.getNames(draft.getUserId(), Set.of(draft.getSourceId())).get(draft.getSourceId());
         return new DraftView(draft.getId(), draft.getSourceId(), sourceName, status, batchViews, itemViews, coveredViews,
                 uncovered(readyQuestions, itemViews, coveredViews));
+    }
+
+    /** 源码条目的代码依据，按条目 id；题目条目没有这一行，不在结果中（#90）。 */
+    private Map<Long, List<CodeEvidence>> evidenceOf(List<ExtractionDraftItem> items) {
+        if (items.isEmpty()) {
+            return Map.of();
+        }
+        return itemCodeMapper.selectList(new LambdaQueryWrapper<ExtractionDraftItemCode>()
+                        .select(ExtractionDraftItemCode::getItemId, ExtractionDraftItemCode::getEvidence)
+                        .in(ExtractionDraftItemCode::getItemId, items.stream().map(ExtractionDraftItem::getId).toList()))
+                .stream()
+                .collect(Collectors.toMap(ExtractionDraftItemCode::getItemId,
+                        c -> List.of(jsonMapper.readValue(c.getEvidence(), CodeEvidence[].class))));
     }
 
     /** 成功的批次中，既没有条目引用、也没有标为已有的题，按原文顺序（#22） */

@@ -56,6 +56,10 @@ wengu:
     allow-registration: ${WENGU_ALLOW_REGISTRATION:true}
   # 注册时读不到浏览器时区，或者它不合法时使用
   default-timezone: ${WENGU_TIMEZONE:Asia/Shanghai}
+  code-extraction:
+    # 源码抽取单次请求的超时（#90，决策 050）。一次输出近 2 万 token，实测 140～170 秒，导入 15 万字符时更长，
+    # 全局的 WENGU_LLM_TIMEOUT（180 秒）不够用。抽取在后台执行，不占用请求
+    timeout: ${WENGU_CODE_EXTRACTION_TIMEOUT:10m}
 
 server:
   port: 8080
