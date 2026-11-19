@@ -159,6 +159,25 @@ public class StudySessionService {
     }
 
     /**
+     * 给定的知识点中，有学习会话的那些（#128，决策 052）。plan 传入待学的知识点，用来找出学到一半的：
+     * 待学的一评分就不再是待学，所以待学并且有学习会话，就是还没走完（包括学完还没评分的）。
+     * 接着问的会话挂在学习会话下面，不算。
+     */
+    public Set<Long> kpIdsWithStudySession(long userId, Collection<Long> kpIds) {
+        if (kpIds.isEmpty()) {
+            return Set.of();
+        }
+        return sessionMapper.selectList(new LambdaQueryWrapper<StudySession>()
+                        .select(StudySession::getKpId)
+                        .eq(StudySession::getUserId, userId)
+                        .eq(StudySession::getType, SessionType.STUDY)
+                        .in(StudySession::getKpId, kpIds))
+                .stream()
+                .map(StudySession::getKpId)
+                .collect(Collectors.toSet());
+    }
+
+    /**
      * [start, end) 之间开始的会话的有效时长之和（秒），今天页的“今天已学 X 分钟”用（#19）。
      * 按会话开始的时间归到某一天：跨过分界时刻的会话整个算在开始的那天，不拆开。
      */
