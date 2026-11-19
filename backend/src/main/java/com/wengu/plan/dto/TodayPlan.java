@@ -11,7 +11,8 @@ import java.util.List;
  * @param dailyNewLimit   每天学几个，含复习（#85 改了含义，接口约定不重命名字段，决策 016 的修订）
  * @param newLearnedToday 今天已经学过的新知识数，已从新知识名额中扣除
  * @param reviews         到期复习，按学习顺序排列，不含今天已完成的；全部列出，可能超过每天学几个
- * @param newItems        新知识，按学习顺序排列，只补足每天学几个剩下的名额
+ * @param newItems        新知识，依次是学到一半的（按学习顺序）、今天加入的（按加入的先后）、计划派发的（按学习顺序，
+ *                        只补足每天学几个剩下的名额）；前两部分先占名额，比名额多时照样全部列出（决策 052）
  * @param completed       今天已完成的，按完成时间排列；暂停的也在内
  * @param upcomingReviews 接下来 7 个学习日（从明天起）每天要复习的数量；今天和已经过期的在 reviews 中
  * @param knowledgePointCount 知识点总数，暂停的和不参与调度的也算；为 0 时今天页显示空状态。

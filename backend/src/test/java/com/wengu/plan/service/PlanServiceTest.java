@@ -12,11 +12,16 @@ import com.wengu.knowledge.entity.KnowledgePoint;
 import com.wengu.knowledge.entity.KnowledgePointStatus;
 import com.wengu.knowledge.mapper.KnowledgePointMapper;
 import com.wengu.knowledge.mapper.KpSourceMapper;
+import com.wengu.common.exception.BusinessException;
+import com.wengu.common.result.ErrorCode;
 import com.wengu.plan.dto.CompletedItem;
+import com.wengu.plan.dto.PickRequest;
+import com.wengu.plan.dto.PickResult;
 import com.wengu.plan.dto.PlanItem;
 import com.wengu.plan.dto.TodayPlan;
 import com.wengu.plan.dto.UpcomingDay;
 import com.wengu.plan.entity.StudyDayCompletion;
+import com.wengu.plan.mapper.PlanPickMapper;
 import com.wengu.plan.mapper.StudyDayCompletionMapper;
 import com.wengu.review.entity.CardState;
 import com.wengu.review.entity.ReviewLog;
@@ -39,9 +44,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 /**
@@ -92,6 +100,9 @@ class PlanServiceTest {
     private StudyDayCompletionMapper completionMapper;
 
     @Autowired
+    private PlanPickMapper planPickMapper;
+
+    @Autowired
     private JdbcTemplate jdbc;
 
     @BeforeEach
@@ -102,6 +113,7 @@ class PlanServiceTest {
                 + " VALUES (1, 3, 'Asia/Shanghai', 4)");
         settingsService.update(1, new UpdateSettingsRequest("Asia/Shanghai", 4, 3));
         completionMapper.delete(null);
+        planPickMapper.delete(null);
         messageMapper.delete(null);
         sessionMapper.delete(null);
         reviewLogMapper.delete(null);
@@ -865,5 +877,145 @@ class PlanServiceTest {
         session(1, Instant.parse("2026-10-18T20:00:00Z"), 600);
 
         assertThat(planService.today(1).studiedMinutesThisWeek()).isEqualTo(10);
+    }
+
+    // ---- #128 自己挑题加入今天（决策 052） ----
+
+    /** 从知识库开始学、还没走完的学习会话 */
+    private void studySession(KnowledgePoint kp, Instant startedAt) {
+        StudySession session = new StudySession();
+        session.setUserId(kp.getUserId());
+        session.setType(SessionType.STUDY);
+        session.setKpId(kp.getId());
+        session.setStartedAt(startedAt);
+        session.setSkippedExplanation(false);
+        session.setActiveSeconds(60);
+        sessionMapper.insert(session);
+    }
+
+    private PickResult pick(KnowledgePoint... kps) {
+        return planService.pick(1, new PickRequest(Arrays.stream(kps).map(KnowledgePoint::getId).toList()));
+    }
+
+    /** 五个新知识，学习顺序 1～5 */
+    private List<KnowledgePoint> fiveNew() {
+        return IntStream.rangeClosed(1, 5).mapToObj(i -> newKp("新知识 " + i, i)).toList();
+    }
+
+    @Test
+    void 加入的题先占名额_派发的只补剩下的() {
+        List<KnowledgePoint> kps = fiveNew();
+
+        assertThat(pick(kps.get(4))).isEqualTo(new PickResult(1, 0, 0));
+
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 5", "新知识 1", "新知识 2");
+    }
+
+    @Test
+    void 加入的比名额多时全部列出_按加入的先后_同一批按学习顺序() {
+        settingsService.update(1, new UpdateSettingsRequest(null, null, 1));
+        List<KnowledgePoint> kps = fiveNew();
+
+        pick(kps.get(4), kps.get(3));
+        pick(kps.get(2));
+
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 4", "新知识 5", "新知识 3");
+    }
+
+    @Test
+    void 加入只当天有效() {
+        List<KnowledgePoint> kps = fiveNew();
+        pick(kps.get(4));
+
+        setClock(NOW.plus(Duration.ofDays(1)));
+
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 1", "新知识 2", "新知识 3");
+    }
+
+    @Test
+    void 学到一半的排在最前_第二天还在_评分后移到已完成() {
+        List<KnowledgePoint> kps = fiveNew();
+        studySession(kps.get(3), DAY_START.minus(Duration.ofDays(2)));
+
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 4", "新知识 1", "新知识 2");
+
+        setClock(NOW.plus(Duration.ofDays(1)));
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 4", "新知识 1", "新知识 2");
+
+        firstReview(kps.get(3), NOW.plus(Duration.ofDays(1)));
+        TodayPlan plan = planService.today(1);
+        assertThat(titles(plan.newItems())).containsExactly("新知识 1", "新知识 2");
+        assertThat(plan.completed()).extracting(CompletedItem::title).containsExactly("新知识 4");
+    }
+
+    @Test
+    void 既学到一半又加入了的只出现一次() {
+        List<KnowledgePoint> kps = fiveNew();
+        studySession(kps.get(4), NOW);
+        PickResult result = pick(kps.get(4), kps.get(3));
+
+        assertThat(result).isEqualTo(new PickResult(1, 1, 0));
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 5", "新知识 4", "新知识 1");
+    }
+
+    @Test
+    void 学完加入的题后派发的不跳动() {
+        List<KnowledgePoint> kps = fiveNew();
+        pick(kps.get(4));
+
+        firstReview(kps.get(4), NOW);
+
+        TodayPlan plan = planService.today(1);
+        assertThat(titles(plan.newItems())).containsExactly("新知识 1", "新知识 2");
+        assertThat(plan.completed()).extracting(CompletedItem::title).containsExactly("新知识 5");
+    }
+
+    @Test
+    void 只加入待学的_其余分别计数() {
+        List<KnowledgePoint> kps = fiveNew();
+        KnowledgePoint learned = reviewedKp("学过的", 20, NOW.plus(Duration.ofDays(5)));
+        KnowledgePoint suspended = newKp(1, "暂停的", 21, KnowledgePointStatus.SUSPENDED);
+        KnowledgePoint recordOnly = newKp("改成系统设计的", 22);
+        recordOnly.setType(KnowledgePointType.SYSTEM_DESIGN);
+        knowledgePointMapper.updateById(recordOnly);
+        KnowledgePoint deleted = newKp("删除的", 23);
+        deleted.setDeletedAt(NOW);
+        knowledgePointMapper.updateById(deleted);
+        KnowledgePoint others = newKp(2, "别人的", 24, KnowledgePointStatus.ACTIVE);
+
+        PickResult result = planService.pick(1, new PickRequest(List.of(kps.get(0).getId(), kps.get(3).getId(),
+                kps.get(3).getId(), learned.getId(), suspended.getId(), recordOnly.getId(), deleted.getId(),
+                others.getId(), Long.MAX_VALUE)));
+
+        // 第 1 个本来就派发到今天，第 4 个加入；重复传的只算一次
+        assertThat(result).isEqualTo(new PickResult(1, 1, 6));
+        assertThat(planPickMapper.selectCount(null)).isEqualTo(1);
+        assertThat(pick(kps.get(3))).isEqualTo(new PickResult(0, 1, 0));
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 4", "新知识 1", "新知识 2");
+    }
+
+    @Test
+    void 加入的题没学完时今天不算学完() {
+        settingsService.update(1, new UpdateSettingsRequest(null, null, 1));
+        KnowledgePoint first = newKp("新知识 1", 1);
+        KnowledgePoint second = newKp("新知识 2", 2);
+        pick(second);
+
+        firstReview(first, NOW);
+        assertThat(titles(planService.today(1).newItems())).containsExactly("新知识 2");
+        assertThat(completionMapper.selectCount(null)).isZero();
+
+        firstReview(second, NOW);
+        assertThat(planService.today(1).newItems()).isEmpty();
+        assertThat(completionMapper.selectCount(null)).isEqualTo(1);
+    }
+
+    @Test
+    void 没有选择时加入失败() {
+        for (PickRequest request : Arrays.asList(null, new PickRequest(null), new PickRequest(List.of()))) {
+            assertThatThrownBy(() -> planService.pick(1, request))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.BAD_REQUEST));
+        }
     }
 }

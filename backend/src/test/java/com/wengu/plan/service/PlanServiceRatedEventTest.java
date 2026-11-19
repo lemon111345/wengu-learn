@@ -17,7 +17,7 @@ class PlanServiceRatedEventTest {
     void 检查当天完成失败时不把异常传回评分() {
         UserSettingsService settings = mock(UserSettingsService.class);
         when(settings.get(1L)).thenThrow(new IllegalStateException("数据库连不上"));
-        PlanService service = new PlanService(settings, null, null, null, null, Clock.systemUTC());
+        PlanService service = new PlanService(settings, null, null, null, null, null, Clock.systemUTC());
 
         assertThatCode(() -> service.onStudyRated(new StudyRatedEvent(1L))).doesNotThrowAnyException();
     }
