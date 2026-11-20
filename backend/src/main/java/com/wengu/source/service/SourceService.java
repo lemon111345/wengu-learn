@@ -129,6 +129,9 @@ public class SourceService {
         if (type == SourceType.CODE) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "源码请用“源码”方式导入");
         }
+        if (type == SourceType.GAP) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "学习缺口在评分页加入，不能从这里导入");
+        }
         SourceType sourceType = type == null ? SourceType.QUESTION : type;
         boolean document = sourceType == SourceType.DOCUMENT;
         String name = rawName == null ? "" : rawName.strip();
@@ -309,6 +312,47 @@ public class SourceService {
                 .stream()
                 .map(f -> new CodeFileContent(f.getPath(), f.getContent()))
                 .toList();
+    }
+
+    /**
+     * 建一份学习缺口材料（#31，决策 053）：评分页勾选的缺口就是题目，题号从 1 起，原文是这些缺口逐行拼起来。
+     * 不调用模型；校验（勾了几条、是不是这次评分的缺口）由调用方做。名称过长时截断，不报错：它是程序拼出来的。
+     *
+     * @param name      如“学习缺口：<原知识点标题>”
+     * @param questions 勾选的缺口，至少一条
+     * @return 新材料的 id
+     */
+    public long createGapSource(long userId, String name, List<String> questions) {
+        if (questions.isEmpty()) {
+            throw new IllegalArgumentException("学习缺口至少要有一条");
+        }
+        List<SourceQuestion> numbered = new ArrayList<>();
+        for (int i = 0; i < questions.size(); i++) {
+            numbered.add(new SourceQuestion(i + 1, questions.get(i), List.of()));
+        }
+        Source source = new Source();
+        source.setUserId(userId);
+        source.setType(SourceType.GAP);
+        source.setName(name.length() > NAME_MAX_LENGTH ? name.substring(0, NAME_MAX_LENGTH) : name);
+        source.setContent(String.join("\n", questions));
+        source.setQuestions(jsonMapper.writeValueAsString(numbered));
+        source.setCreatedAt(Instant.now(clock));
+        sourceMapper.insert(source);
+        return source.getId();
+    }
+
+    /**
+     * 这个用户某种类型的全部材料 id。knowledge 用它排除学习缺口：草稿列表不显示已确认的缺口草稿，
+     * 知识库详情的缺口来源不带题号（决策 053）。只查 id 一列。
+     */
+    public Set<Long> idsOfType(long userId, SourceType type) {
+        return sourceMapper.selectList(new LambdaQueryWrapper<Source>()
+                        .select(Source::getId)
+                        .eq(Source::getUserId, userId)
+                        .eq(Source::getType, type))
+                .stream()
+                .map(Source::getId)
+                .collect(Collectors.toSet());
     }
 
     /**
