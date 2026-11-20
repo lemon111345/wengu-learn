@@ -6,7 +6,7 @@ import com.wengu.review.fsrs.Rating;
 
 import java.time.Instant;
 
-/** AI 评分建议，对应 rating_suggestion 表（V10）。每个学习会话一条，生成后不再改。 */
+/** AI 评分建议，对应 rating_suggestion 表（V10）。每个学习会话一条，生成后不再改；只有学习缺口的处理结果（V20）在之后写一次。 */
 public class RatingSuggestion {
 
     /** 学习会话 id，由调用方给定 */
@@ -24,6 +24,10 @@ public class RatingSuggestion {
     private Integer promptTokens;
     private Integer completionTokens;
     private Instant createdAt;
+    /** 勾选加入知识库的缺口下标，JSON 数组；还没处理时为 null（V20，决策 053） */
+    private String gapPicks;
+    /** 由勾选的缺口生成的草稿，还没处理时为 null（V20） */
+    private Long gapDraftId;
 
     public Long getSessionId() {
         return sessionId;
@@ -111,5 +115,21 @@ public class RatingSuggestion {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getGapPicks() {
+        return gapPicks;
+    }
+
+    public void setGapPicks(String gapPicks) {
+        this.gapPicks = gapPicks;
+    }
+
+    public Long getGapDraftId() {
+        return gapDraftId;
+    }
+
+    public void setGapDraftId(Long gapDraftId) {
+        this.gapDraftId = gapDraftId;
     }
 }

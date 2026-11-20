@@ -185,7 +185,7 @@ class RatingSuggestionServiceTest {
         RatingSuggestionView again = suggestionService.suggest(USER_ID, sessionId);
 
         assertThat(first).isEqualTo(new RatingSuggestionView(Rating.HARD, "答出了可见性和原子性，漏了重排序",
-                List.of("volatile 禁止指令重排序"), List.of("什么是 happens-before？")));
+                List.of("volatile 禁止指令重排序"), List.of("什么是 happens-before？"), null, null));
         assertThat(again).isEqualTo(first);
         ArgumentCaptor<String> input = ArgumentCaptor.forClass(String.class);
         verify(llmService, times(1)).call(anyString(), input.capture(), eq(RatingSuggestionResult.class), eq(0.2));
