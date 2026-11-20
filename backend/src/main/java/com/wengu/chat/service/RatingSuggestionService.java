@@ -1,5 +1,7 @@
 package com.wengu.chat.service;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.wengu.chat.dto.GapsRequest;
 import com.wengu.chat.dto.RatingSuggestionResult;
 import com.wengu.chat.dto.RatingSuggestionView;
 import com.wengu.chat.entity.RatingSuggestion;
@@ -9,6 +11,7 @@ import com.wengu.chat.mapper.RatingSuggestionMapper;
 import com.wengu.common.exception.BusinessException;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.StudyMaterial;
+import com.wengu.knowledge.service.ExtractionDraftService;
 import com.wengu.knowledge.service.KnowledgePointService;
 import com.wengu.llm.dto.LlmResult;
 import com.wengu.llm.service.LlmException;
@@ -40,12 +43,16 @@ public class RatingSuggestionService {
     /** 结果解析失败或不完整时最多调用几次。模型调用本身出错（超时等）不重试，由用户决定 */
     static final int MAX_ATTEMPTS = 2;
 
+    private static final TypeReference<List<Integer>> INT_LIST = new TypeReference<>() {
+    };
+
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {
     };
 
     private final StudySessionService sessions;
     private final RatingSuggestionMapper suggestionMapper;
     private final KnowledgePointService knowledgePointService;
+    private final ExtractionDraftService draftService;
     private final LlmService llmService;
     private final JsonMapper jsonMapper;
     private final Clock clock;
@@ -53,11 +60,12 @@ public class RatingSuggestionService {
     private final String codeSystemPrompt = CodeChatPrompt.ratingSystem();
 
     public RatingSuggestionService(StudySessionService sessions, RatingSuggestionMapper suggestionMapper,
-                                   KnowledgePointService knowledgePointService, LlmService llmService,
-                                   JsonMapper jsonMapper, Clock clock) {
+                                   KnowledgePointService knowledgePointService, ExtractionDraftService draftService,
+                                   LlmService llmService, JsonMapper jsonMapper, Clock clock) {
         this.sessions = sessions;
         this.suggestionMapper = suggestionMapper;
         this.knowledgePointService = knowledgePointService;
+        this.draftService = draftService;
         this.llmService = llmService;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
@@ -125,6 +133,74 @@ public class RatingSuggestionService {
         return saved == null ? null : view(saved);
     }
 
+    /**
+     * 把勾选的学习缺口加入知识库（#31，决策 053）：记下勾了哪几条，交给 knowledge 建缺口草稿，后台抽取完自动确认。
+     * 一次评分建议的缺口只处理一次。不要求先评分。
+     * <p>
+     * 先用条件更新“占住”这组缺口，再建草稿：先查后写挡不住两个同时到达的请求，条件更新由数据库保证只有一个成功。
+     * 建草稿失败时撤销占位，用户可以再点一次。两步没有放进同一个事务：建草稿要在它自己的事务提交后才交给后台线程，
+     * 套在外层事务里，后台线程读不到批次。
+     *
+     * @throws BusinessException 会话不存在或不属于该用户时为 NOT_FOUND；不是学习会话、下标为空、越界或重复时为 BAD_REQUEST；
+     *                           还没有评分建议、已经处理过时为 CONFLICT
+     */
+    public RatingSuggestionView addGaps(long userId, long sessionId, GapsRequest request) {
+        StudySession session = sessions.find(userId, sessionId);
+        if (session.getType() != SessionType.STUDY) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "只有学习会话有学习缺口");
+        }
+        RatingSuggestion saved = suggestionMapper.selectById(sessionId);
+        if (saved == null) {
+            throw new BusinessException(ErrorCode.CONFLICT, "AI 评分建议还没有生成");
+        }
+        List<String> gaps = jsonMapper.readValue(saved.getOutOfScopeGaps(), STRING_LIST);
+        List<Integer> picks = validPicks(request, gaps.size());
+
+        int claimed = suggestionMapper.update(new LambdaUpdateWrapper<RatingSuggestion>()
+                .eq(RatingSuggestion::getSessionId, sessionId)
+                .isNull(RatingSuggestion::getGapPicks)
+                .set(RatingSuggestion::getGapPicks, jsonMapper.writeValueAsString(picks)));
+        if (claimed == 0) {
+            throw new BusinessException(ErrorCode.CONFLICT, "这次的学习缺口已经处理过了");
+        }
+        long draftId;
+        try {
+            draftId = draftService.createGapDraft(userId,
+                    knowledgePointService.titleIncludingDeleted(userId, session.getKpId()),
+                    picks.stream().map(gaps::get).toList());
+        } catch (RuntimeException e) {
+            suggestionMapper.update(new LambdaUpdateWrapper<RatingSuggestion>()
+                    .eq(RatingSuggestion::getSessionId, sessionId)
+                    .set(RatingSuggestion::getGapPicks, null));
+            throw e;
+        }
+        suggestionMapper.update(new LambdaUpdateWrapper<RatingSuggestion>()
+                .eq(RatingSuggestion::getSessionId, sessionId)
+                .set(RatingSuggestion::getGapDraftId, draftId));
+        return view(suggestionMapper.selectById(sessionId));
+    }
+
+    /** 下标至少一个、都在范围内、不重复，返回从小到大排好的 */
+    private static List<Integer> validPicks(GapsRequest request, int gapCount) {
+        if (request == null || request.indices() == null || request.indices().isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请至少勾选一条");
+        }
+        if (request.indices().stream().anyMatch(Objects::isNull)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "勾选的缺口不存在");
+        }
+        List<Integer> sorted = request.indices().stream().sorted().toList();
+        for (int i = 0; i < sorted.size(); i++) {
+            Integer index = sorted.get(i);
+            if (index < 0 || index >= gapCount) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "勾选的缺口不存在：" + index);
+            }
+            if (i > 0 && index.equals(sorted.get(i - 1))) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "勾选的缺口重复了：" + index);
+            }
+        }
+        return sorted;
+    }
+
     /** 这次学习的评分建议中“没掌握的”，还没有生成建议时为空。复习时针对它们提问（#21） */
     List<String> weakPoints(long sessionId) {
         RatingSuggestion saved = suggestionMapper.selectById(sessionId);
@@ -166,7 +242,9 @@ public class RatingSuggestionService {
     private RatingSuggestionView view(RatingSuggestion s) {
         return new RatingSuggestionView(s.getRating(), s.getAnalysis(),
                 jsonMapper.readValue(s.getWeakPoints(), STRING_LIST),
-                jsonMapper.readValue(s.getOutOfScopeGaps(), STRING_LIST));
+                jsonMapper.readValue(s.getOutOfScopeGaps(), STRING_LIST),
+                s.getGapPicks() == null ? null : jsonMapper.readValue(s.getGapPicks(), INT_LIST),
+                s.getGapDraftId());
     }
 
     private static List<String> orEmpty(List<String> list) {

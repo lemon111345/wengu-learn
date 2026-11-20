@@ -1,6 +1,7 @@
 package com.wengu.chat.controller;
 
 import com.wengu.chat.dto.FollowUpStatus;
+import com.wengu.chat.dto.GapsRequest;
 import com.wengu.chat.dto.RateRequest;
 import com.wengu.chat.dto.RatingOption;
 import com.wengu.chat.dto.RatingSuggestionView;
@@ -82,6 +83,15 @@ public class SessionController {
     @GetMapping("/{id}/rating-suggestion")
     public Result<RatingSuggestionView> savedRatingSuggestion(@PathVariable long id) {
         return Result.ok(ratingSuggestionService.saved(currentUser.id(), id));
+    }
+
+    /**
+     * 把评分页勾选的学习缺口加入知识库（#31，决策 053）：在后台抽取、完成后自动确认，立即返回。
+     * 前端用返回的 gapDraftId 轮询草稿查看结果。
+     */
+    @PostMapping("/{id}/gaps")
+    public Result<RatingSuggestionView> addGaps(@PathVariable long id, @RequestBody GapsRequest request) {
+        return Result.ok(ratingSuggestionService.addGaps(currentUser.id(), id, request));
     }
 
     /** 评分预览：四种评分分别对应的下次复习日期（学习日和距今天几天），不保存。 */

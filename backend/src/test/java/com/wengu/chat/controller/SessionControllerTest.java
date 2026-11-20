@@ -1,6 +1,7 @@
 package com.wengu.chat.controller;
 
 import com.wengu.TestcontainersConfiguration;
+import com.wengu.chat.dto.GapsRequest;
 import com.wengu.chat.dto.SendMessageRequest;
 import com.wengu.chat.dto.StartSessionRequest;
 import com.wengu.knowledge.dto.KnowledgePointType;
@@ -171,6 +172,17 @@ class SessionControllerTest {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"rating\":\"EASY\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.rating").value("EASY"));
+    }
+
+    @Test
+    void 还没有评分建议时加入学习缺口返回统一格式的409() throws Exception {
+        long sessionId = startSession();
+
+        mockMvc.perform(post("/api/sessions/" + sessionId + "/gaps").session(login).with(csrfToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonMapper.writeValueAsString(new GapsRequest(List.of(0)))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONFLICT"));
     }
 
     @Test
