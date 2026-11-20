@@ -137,7 +137,7 @@ frontend/src
 | --- | --- | --- |
 | user | 用户 | id、username（唯一，按数据库排序规则比较，不区分大小写）、password_hash（bcrypt，带 `{bcrypt}` 前缀，见决策 022） |
 | user_settings | 用户设置 | user_id、daily_new_limit（每天学几个，含复习，默认 5；列名沿用，见决策 016 的修订）、timezone（注册时取浏览器时区，读不到或不合法时用环境变量 WENGU_TIMEZONE）、day_start_hour（一天的分界，默认 4 点）、teacher_name（老师的称呼，默认“老师”，V14，见决策 042） |
-| source | 导入的学习材料 | id、user_id、type（QUESTION 题目清单 / DOCUMENT 讲解资料，#26；CODE 源码，#90，content 存文件清单、questions 为空，见决策 050；截图识别出的文字和粘贴的原文一样处理，决策 044）、name、content（用户粘贴的原文，包括答案；上传的文件存提取出的文字）、questions（识别或整理出的题目 JSON，V2 添加，见决策 011、037） |
+| source | 导入的学习材料 | id、user_id、type（QUESTION 题目清单 / DOCUMENT 讲解资料，#26；CODE 源码，#90，content 存文件清单、questions 为空，见决策 050；GAP 学习缺口，#31，评分页勾选的缺口，name 为“学习缺口：<原知识点标题>”，content 是缺口逐行拼起来，questions 是这些缺口，抽取后自动确认，见决策 053；截图识别出的文字和粘贴的原文一样处理，决策 044）、name、content（用户粘贴的原文，包括答案；上传的文件存提取出的文字）、questions（识别或整理出的题目 JSON，V2 添加，见决策 011、037） |
 | knowledge_point | 知识点（很少变） | id、user_id、type（知识点类型，见下文）、title（写成一个问题）、summary、status（ACTIVE / SUSPENDED）、sort_order（新知识按 sort_order、id 派发；确认草稿时接在已有知识点之后）、draft_item_id（来自哪个草稿条目，V6 添加，见决策 015）、deleted_at（软删除，为空表示没删）、merged_into（被合并时指向主知识点，同时写 deleted_at）（V11 添加，见决策 029） |
 | source_file | 源码导入的文件快照（#90） | id、user_id、source_id、path、content、chars、file_order；导入后不再修改，见决策 050 |
 | kp_source | 知识点与材料的多对多关联 | kp_id、source_id、user_id |
@@ -147,7 +147,7 @@ frontend/src
 | study_session | 一次学习会话，也是自动计时的来源 | id、user_id、type（STUDY / FOLLOW_UP / QUESTION）、kp_id（从一个问题开始时为空）、parent_session_id（接着问指向原来的学习会话，V9 添加）、started_at、ended_at（学习结束或回答到上限时写入）、skipped_explanation、active_seconds（两次活动之间最多算 10 分钟）、last_active_at、prompt_version（V8 添加），见决策 025 |
 | message | 会话中的对话消息 | id、user_id、session_id、role、content（不含标记）、marker（RESTATE / END）、model_note（附在学生消息后、只给模型看的提示）、created_at（V8 添加 marker、model_note）。学习对话的第一条消息（知识点信息）不存，每次现拼，见决策 025 |
 | review_log | 每次评分的流水 | id、user_id、kp_id、session_id（唯一，一次学习只有一条评分，改分时更新这一条）、rating_user、rating_ai（AI 建议还没生成时为空）、state_before、评分前的快照 step_before / stability_before / difficulty_before / due_before / last_review_before（V13 添加，due_before 为空表示没有快照，决策 039）、is_first_review（是否为该知识点的第一次学习）、due_after（评分后的下次到期时间，V10 添加，决策 020）、reviewed_at |
-| rating_suggestion | AI 评分建议，每个学习会话一条（V10） | session_id（主键）、user_id、rating、analysis、weak_points（JSON，#21 用）、out_of_scope_gaps（JSON，#31 用）、model、prompt_version、prompt_tokens、completion_tokens、created_at，见决策 026 |
+| rating_suggestion | AI 评分建议，每个学习会话一条（V10） | session_id（主键）、user_id、rating、analysis、weak_points（JSON，#21 用）、out_of_scope_gaps（JSON，#31 用）、model、prompt_version、prompt_tokens、completion_tokens、created_at；gap_picks（勾选加入知识库的缺口是第几条，JSON 数组，从 0 起，还没处理时为空）、gap_draft_id（由此生成的草稿）（V20，#31，决策 053），见决策 026 |
 | study_day_completion | “当天完成”的记录（V10） | id、user_id、study_date（学习日）、completed_at；(user_id, study_date) 唯一。计划变空且今天学过时写入，是事实不是计划快照，见决策 020、026 |
 | plan_pick | 用户自己加入今天的知识点（V19，#128） | id、user_id、kp_id、study_date（学习日）、created_at；(user_id, study_date, kp_id) 唯一。只在那个学习日算“今天加入的”；记的是用户的意图，不是计划快照，见决策 052 |
 | extraction_draft | 一次抽取，用户确认后才生成知识点（V3 添加，V4 精简） | id、user_id、source_id（会话来源由 #31 添加，见决策 008）、created_at、confirmed_at（V6 添加）；状态不存库：确认后为 CONFIRMED，之前由批次推算（RUNNING / READY / FAILED），见决策 012、013、015 |
@@ -217,6 +217,7 @@ frontend/src
 | 修改评分：评分时存快照，改分时恢复快照、用原来的评分时间重算；只能改最近一次 | FSRS 非线性、难度有截断，算不回去；结果和第一次就选这一档相同，见 [决策 039](./decisions/039-修改评分.md) | 从第一次评分起重放全部历史 |
 | 学习对话用 POST 返回 SSE，前端用 fetch 读流；回复生成和浏览器连接分开，断开后照样存库；标记从流中去掉、记在消息上；有效时长两次活动之间最多算 10 分钟 | EventSource 只能发 GET，带不上回答和 CSRF 令牌；刷新后能看到完整的回复；认真写的长回答不会被整段扣掉，见 [决策 025](./decisions/025-学习会话与流式对话.md) | EventSource；断开时取消生成；超过阈值整段不计时 |
 | 前端少用依赖：fetch 封装请求、模块级 ref 保存当前用户、CSS 变量做主题，宋体字体随前端打包 | 要做的事几十行代码就够；作者从零学前端，依赖越少越好读；Windows 默认没有标题用的宋体，Google Fonts 国内常连不上，见 [决策 023](./decisions/023-前端骨架.md) | axios；Pinia；Element Plus 的 SCSS 主题；Google Fonts |
+| 评分缺口生成候选知识点：评分页按题目确认、默认不勾，勾选的建成 GAP 材料走现有抽取，完成后自动确认、排在待学最前面；勾选记在评分建议上 | 缺口已经是题目；抽取要再等半分钟，确认知识点会让候选堆进“等你确认”；排在最前面，原知识点下次复习前大概率已学完，不用存前置关系，见 [决策 053](./decisions/053-评分缺口生成候选知识点.md) | 自动抽取全部缺口、在评分页确认知识点；默认全勾；存前置关系；草稿上直接记会话 |
 | 候选知识点先“整理成题目”，再走现有的抽取和确认流程 | 粒度、类型、去重的规则只在一处维护；对话 → 题目、题目 → 知识点分开，每步都能单独检查，见 [决策 019](./decisions/019-候选知识点的提炼方式.md) | 新写一个从对话直接抽知识点的 prompt；边聊边整理 |
 | 连续学习从 M1 起记录事实：评分后的到期日、“当天完成” | 计划不存库，过去的任务事后算不回来；只记已发生的事，不存计划快照，见 [决策 020](./decisions/020-连续学习的口径.md) | 建表保存每天的计划快照；M2 再开始记录 |
 | 今天页的补充数据放进每日计划接口：已完成的条目来自当天流水（暂停的也显示），接下来 7 天从明天起按学习日划分；草稿列表返回全部未确认的和最近 10 份已确认的 | 一次请求拿全今天页的数据，用同一个“现在”；今天到期和过期的已在复习列表里；旧的“等你确认”不会被挤出列表，见 [决策 024](./decisions/024-今天页的补充数据.md) | 另开接口；7 天包括今天；草稿列表只取最近 20 份 |
@@ -277,7 +278,7 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 - 源码知识点（#90，有 `kp_code` 的）：学习对话改用 `prompts/code-learning-chat-v5.md`（#89 实验的 v4 加上复习的固定结构：复习也按要点顺序逐点走、标出进度，每点先让学生回忆、答不出再讲，上次没掌握的讲到那一点时重点问，完整作答时先重复题目；决策 048 第 5 条），第一条用户消息在普通知识点信息后面加上细节、代码证明不了的问题和依据的文件（从导入时的快照 `source_file` 按路径取，不发整批）；评分建议改用 `prompts/code-rating-suggestion-v2.md`，输入写明这次是第一次学习还是复习，核心要点和细节分开写，带上源码。回答上限、标记、轮数提示和普通学习对话相同。会话和评分建议的版本分别记成 `code-v5`、`code-v2`。格式和 #89 实验一致，见 [决策 048](./decisions/048-源码导入实验结论.md)
 - 接着问 prompt：`prompts/follow-up-chat-v1.md`。第一次提问时在问题前面拼上知识点信息和整段学习对话；老师只回答、不出题、不反问，不输出标记
 - 评分建议 prompt：`prompts/rating-suggestion-v3.md`。以完整作答为主要依据、以知识点要点为标准，输出 `analysis`、`outOfScopeGaps`、`rating`、`weakPoints`（Spring AI 按字段名字母顺序生成 Schema，模型也按这个顺序输出，所以依据排在第一个）
-- `weakPoints` 供复习时针对性提问（#21，见上面“复习”）；`outOfScopeGaps` 和“接着问”中的新内容在学完后成为候选知识点，复用草稿确认流程（#15、#17）
+- `weakPoints` 供复习时针对性提问（#21，见上面“复习”）；`outOfScopeGaps` 在评分页按题目显示，用户勾选的建成一份 GAP 材料、走现有的抽取，完成后自动确认并排在待学最前面（#31 第一步，决策 053）；“接着问”中的新内容留到 #31 第二步
 - 用户确认的评分为准，AI 建议的评分同时记录
 
 ## AI 模块的原则与阶段
@@ -346,8 +347,8 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `POST /api/sources/code` | 导入源码（#90） | `{name, files: [{path, content}]}`，由前端读出勾选文件的文字 | `{id, name, type: "CODE", files: [{path, chars}]}` | 只保存，不调用模型；之后用 `POST /api/drafts` 发起抽取。合计不超过 150000 字符、最多 300 个文件、路径不超过 500 字符且不重复、内容不为空，否则 400 和处理建议。见决策 050 |
 | `POST /api/sources/image-recognitions` | 提交截图识别文字（#88） | multipart：`files`（PNG、JPG、WebP，最多 5 张，每张 5 MB，合计 10 MB，按顺序） | `{taskId}` | 异步：提交后马上返回，不写 `source` 表，图片用完即弃。张数、大小、格式不对 400；排队的任务太多 409。见决策 044 |
 | `GET /api/sources/image-recognitions/{taskId}` | 查询识别结果（#88） | — | `{status, text, message}` | status 为 RUNNING、DONE、FAILED；DONE 时 text 是识别出的文字，FAILED 时 message 是给用户看的原因（模型不支持图片为 `LLM_IMAGE_UNSUPPORTED` 的提示）。任务 30 分钟后过期，过期、不存在或不属于当前用户 404。见决策 044 |
-| `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, sourceName, status, batches: [{no, status, questionIds, failureReason}], items: [{id, order, title, summary, type, sourceQuestionIds, decision}], covered: [{questionId, titles}], uncovered: [{questionId, text}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；covered 是被已有知识点或同一草稿中其他批次覆盖的题（决策 014）；uncovered 是成功批次中既没有条目、也不在 covered 中的题及原文，最后一次尝试只漏了题时这一批照样成功（决策 028）；sourceName 是资料名称；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。源码材料（CODE，#90）只抽一批、不做去重，传 questionIds 返回 400，条目多一个 evidence（代码依据 [{file, symbol}]，其他材料为 null），covered、uncovered 为空。见决策 012、013、050 |
-| `GET /api/drafts` | 草稿列表（#48） | — | `[{id, sourceId, sourceName, status, itemCount, createdAt}]` | 未确认的全部返回，已确认的只返回最近 10 份，新的在前，不分页；status 和详情的算法相同；itemCount 是成功批次中的条目数。见决策 024 |
+| `POST /api/drafts` | 发起抽取，生成草稿（#15、#16） | `{sourceId, questionIds?}`，questionIds 为 source 中的题号，不传则全部 | `{id, sourceId, sourceName, status, batches: [{no, status, questionIds, failureReason}], items: [{id, order, title, summary, type, sourceQuestionIds, decision}], covered: [{questionId, titles}], uncovered: [{questionId, text}]}` | 在后台执行，立即返回 status 为 RUNNING 的草稿，前端轮询 GET；items 只包含成功批次的条目，order 在整份草稿内连续编号；covered 是被已有知识点或同一草稿中其他批次覆盖的题（决策 014）；uncovered 是成功批次中既没有条目、也不在 covered 中的题及原文，最后一次尝试只漏了题时这一批照样成功（决策 028）；sourceName 是资料名称；抽取失败时 status 为 FAILED；材料不存在 404，题号不存在或为空 400。源码材料（CODE，#90）只抽一批、不做去重，传 questionIds 返回 400，条目多一个 evidence（代码依据 [{file, symbol}]，其他材料为 null），covered、uncovered 为空。学习缺口（GAP，#31）的草稿不经过这个接口，由 `POST /api/sessions/{id}/gaps` 建，抽取和题目材料相同；全部批次成功后由后台自动确认（全部接受，新知识点挪到待学最前面），失败时照常用重试接口。见决策 012、013、050、053 |
+| `GET /api/drafts` | 草稿列表（#48） | — | `[{id, sourceId, sourceName, status, itemCount, createdAt}]` | 未确认的全部返回，已确认的只返回最近 10 份，新的在前，不分页；status 和详情的算法相同；itemCount 是成功批次中的条目数。评分页加入的学习缺口（GAP 材料）确认后不返回，抽取中和失败的照常返回（决策 053）。见决策 024 |
 | `GET /api/drafts/{id}` | 查看草稿和抽取进度（#15、#16） | — | 同上 | 不存在或不属于当前用户 404 |
 | `POST /api/drafts/{id}/retry` | 重新抽取失败的批次（#16） | — | 同上 | 失败的批次新增一行排队，成功的批次不动；还在抽取中或已确认 409 `CONFLICT`，没有失败的批次 400。见决策 013 |
 | `POST /api/drafts/{id}/confirm` | 确认草稿，生成知识点（#17） | `{rejectedItemIds?}`，取消勾选的条目 id，不传则全部接受 | 同上，status 为 CONFIRMED，每个条目的 decision 为 ACCEPTED 或 REJECTED | 一个事务中生成知识点（sort_order 接在已有之后）、关联材料、初始化 card_state（SYSTEM_DESIGN 和不带源码的 EXPERIENCE 不初始化，决策 051）；covered 引用的已有知识点也关联到这份材料。草稿不是 READY 或已确认 409，条目不属于这份草稿 400。见决策 015 |
@@ -370,8 +371,9 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 | `GET /api/sessions/{id}/follow-up-status` | 一次学习的接着问状态（#103） | — | `{studySessionId, followUpSessionId, kpTitle, canContinue, readOnlyReason, dueToday, teacherName}` | id 是学习会话；只查不建，还没有接着问时 followUpSessionId 为 null。canContinue 为 false 时 readOnlyReason 是原因（学习还没结束、问满上限、知识点已合并或删除）。dueToday 是知识点今天要复习、还没复习，暂停的不算。不是学习会话 400，不存在或不属于当前用户 404。见决策 043 |
 | `GET /api/follow-ups` | 问答记录的对话列表（#103） | `?keyword=` 可选 | `[{studySessionId, followUpSessionId, kpTitle, lastQuestion, questionCount, lastActiveDate, canContinue, dueToday}]` | 按最近活动排列，没有提问的不返回。lastActiveDate 是学习日。keyword 不区分大小写地匹配知识点标题、问题和回答。见决策 043 |
 | `GET /api/answers` | 答法速查（#112） | — | `[{kpId, kpTitle, sessionId, referenceAnswer, rating, studiedDate, dueToday}]` | 现在还在的知识点中学过的各一条，用最近一次已结束的学习会话（新学或复习）；按这次学习结束的时间倒序，已合并或删除的不返回。referenceAnswer 从收尾中切出，没有找到时为 null；rating 是这次学习的评分，没评分时为 null；studiedDate 是学习日；dueToday 是今天要复习、还没复习，暂停的不算。全部返回，搜索在前端。见决策 047 |
-| `GET /api/sessions/{id}/rating-suggestion` | 已经生成的 AI 评分建议（#82） | — | `{rating, analysis, weakPoints, outOfScopeGaps}` 或 null | 只读，不调用模型，回顾时用；没有生成过时 data 为 null。不存在或不属于当前用户 404 |
-| `POST /api/sessions/{id}/rating-suggestion` | AI 评分建议（#20） | — | `{rating, analysis, weakPoints, outOfScopeGaps}` | 学完后调用；第一次调用模型（十几到二十几秒）并存库，之后直接返回。不是学习会话 400，还没学完 409，模型出错或结果不可用 502 `RATING_SUGGESTION_FAILED`。评分不依赖它。见决策 026 |
+| `GET /api/sessions/{id}/rating-suggestion` | 已经生成的 AI 评分建议（#82） | — | `{rating, analysis, weakPoints, outOfScopeGaps, gapPicks, gapDraftId}` 或 null | 只读，不调用模型，回顾时用；没有生成过时 data 为 null。gapPicks、gapDraftId 见下面的 `gaps` 接口，还没处理时都为 null。不存在或不属于当前用户 404 |
+| `POST /api/sessions/{id}/rating-suggestion` | AI 评分建议（#20） | — | 同上 | 学完后调用；第一次调用模型（十几到二十几秒）并存库，之后直接返回。不是学习会话 400，还没学完 409，模型出错或结果不可用 502 `RATING_SUGGESTION_FAILED`。评分不依赖它。见决策 026 |
+| `POST /api/sessions/{id}/gaps` | 把勾选的学习缺口加入知识库（#31 第一步） | `{indices}`，outOfScopeGaps 中的下标，从 0 起 | 同上（gapPicks、gapDraftId 已填） | 记下勾选，建一份 GAP 材料和草稿，在后台抽取，立即返回；前端用 gapDraftId 轮询 `GET /api/drafts/{id}`，确认后的条目和 covered 就是结果。一次评分建议只能处理一次，再调 409；还没有评分建议 409；下标为空、越界或重复 400；不是学习会话 400；不存在或不属于当前用户 404。不要求先评分。见决策 053 |
 | `GET /api/sessions/{id}/rating-preview` | 评分预览（#20） | — | `[{rating, date, days}]`，按 AGAIN、HARD、GOOD、EASY 排列 | date 是下次复习的学习日，days 是距今天几个学习日；不保存。已经评过分时按评分前的快照和原来的评分时间计算，days 可能为负。不是学习会话 400，还没学完或评分不能修改（ratingEditable 为 false）409。见决策 039 |
 | `POST /api/sessions/{id}/rating` | 确认或修改评分（#20、#84） | `{rating}` | `{rating, date, days}` | 没评过分时更新 card_state、写 review_log（AI 建议已生成时记下 rating_ai）；评过分时就是修改：恢复评分前的快照，用原来的评分时间按新评分重算，更新 card_state 和这条流水的 rating_user、due_after。日期和预览一致（fuzz 的随机数固定）。评分为空 400，不是学习会话 400，还没学完或评分不能修改 409。见决策 026、039 |
 | `GET /api/llm/status` | 模型状态（#27） | — | `{model, lastCall: {ok, code, message, at} \| null}` | 最近一次调用的结果，存在内存中，重启后为 null；所有用户共用一套模型配置，状态也是全局的。不返回服务地址和 Key，不为此真实调用模型。头像上的红点、设置页的 AI 模型卡片用它。见决策 032 |
@@ -396,13 +398,13 @@ M0 用 30 道样本题验证，人工修改约 12%，达到验收标准；抽取
 
 | 表 | 需要的内容 | 来源 |
 | --- | --- | --- |
-| extraction_draft / extraction_draft_item | 候选知识点的草稿：来源是学习会话；勾选与取消复用条目的 decision 字段（决策 015） | 决策 019 |
+| extraction_draft / extraction_draft_item | 接着问的候选知识点（#31 第二步）：来源怎么记、勾选与取消怎么记，到时再定；评分缺口已经用 GAP 材料实现（决策 053） | 决策 019 |
 
 **接口：**
 
 | 需要的接口 | 内容 | 页面 |
 | --- | --- | --- |
-| 草稿列表补充 | 候选知识点的草稿（#31） | 今天、导入资料 |
+| 草稿列表补充 | 接着问的候选知识点草稿（#31 第二步） | 今天、导入资料 |
 | 知识点详情补充 | 来源“接着问：<原知识点标题>”（#31 有了学习会话产生的草稿之后） | 知识库 |
 
 ## 待补充
