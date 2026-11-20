@@ -68,7 +68,12 @@ export interface RatingSuggestionView {
   analysis: string
   /** 没掌握的内容，下次复习会重点问 */
   weakPoints: string[]
+  /** 超出要点范围的缺口，评分页按题目显示，勾选的加入知识库（#31，决策 053） */
   outOfScopeGaps: string[]
+  /** 勾选加入知识库的是第几条，从小到大；还没处理时为 null */
+  gapPicks: number[] | null
+  /** 由勾选的缺口生成的草稿，用它查看整理进度和结果；还没处理时为 null */
+  gapDraftId: number | null
 }
 
 /** 开始学习一个知识点；最近的会话还没走完（没结束、或者没评分）时返回那个会话 */
@@ -102,6 +107,14 @@ export function streamSkipExplanation(id: number, handlers: StreamHandlers, sign
 /** AI 评分建议：第一次调用要等模型十几到二十几秒 */
 export function fetchRatingSuggestion(id: number) {
   return post<RatingSuggestionView>(`/api/sessions/${id}/rating-suggestion`)
+}
+
+/**
+ * 把勾选的学习缺口加入知识库（#31）：后台抽取、完成后自动确认，立即返回带 gapDraftId 的评分建议。
+ * 一次评分的缺口只能处理一次
+ */
+export function addGaps(id: number, indices: number[]) {
+  return post<RatingSuggestionView>(`/api/sessions/${id}/gaps`, { indices })
 }
 
 /** 已经生成的 AI 评分建议，没有时为 null。只读，不调用模型，回顾时用（#82） */

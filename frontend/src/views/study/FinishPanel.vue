@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 收尾与评分（ui.md 5.4）：最后几条对话、AI 建议、四个评分按钮、“X月X日再见”、接着问和下一个。
+// 收尾与评分（ui.md 5.4）：最后几条对话、AI 建议、四个评分按钮、“X月X日再见”、学习缺口（GapPanel）、接着问和下一个。
 // 评分页是每个知识点的中转站：主线是评分后按 Enter 进入下一个，支线是进入接着问、问完回到这里
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -20,6 +20,7 @@ import { useShortcut } from '@/shortcuts/useShortcut'
 import { daysLater, formatMonthDay } from '@/utils/date'
 import { ratingColors, ratingLabels } from '@/utils/labels'
 import ChatThread from './ChatThread.vue'
+import GapPanel from './GapPanel.vue'
 
 const props = defineProps<{ session: SessionView }>()
 const router = useRouter()
@@ -217,6 +218,14 @@ useShortcut('Enter', () => void next())
       <span class="date">{{ seeYou }}</span>
       <p>到时会换个角度问，重点问这次没掌握的地方。</p>
     </div>
+
+    <!-- 学习缺口（#31）：放在评分下面，“X月X日再见”紧跟着评分按钮；和评分互不影响，不用先评分 -->
+    <GapPanel
+      v-if="suggestion && suggestion.outOfScopeGaps.length > 0"
+      :session-id="session.id"
+      :suggestion="suggestion"
+      @updated="suggestion = $event"
+    />
 
     <div class="actions">
       <el-button @click="followUp">接着问</el-button>
