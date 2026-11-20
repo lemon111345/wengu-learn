@@ -9,6 +9,7 @@ import com.wengu.knowledge.dto.CodeEvidence;
 import com.wengu.knowledge.dto.ConfirmDraftRequest;
 import com.wengu.knowledge.dto.CoveredView;
 import com.wengu.knowledge.dto.CreateDraftRequest;
+import com.wengu.knowledge.dto.DraftExtractedEvent;
 import com.wengu.knowledge.dto.DraftItemView;
 import com.wengu.knowledge.dto.DraftSummary;
 import com.wengu.knowledge.dto.DraftView;
@@ -31,6 +32,9 @@ import com.wengu.knowledge.mapper.KpCodeMapper;
 import com.wengu.source.dto.SourceQuestion;
 import com.wengu.source.entity.SourceType;
 import com.wengu.source.service.SourceService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.json.JsonMapper;
@@ -58,6 +62,8 @@ import java.util.stream.Collectors;
  */
 @Service
 public class ExtractionDraftService {
+
+    private static final Logger log = LoggerFactory.getLogger(ExtractionDraftService.class);
 
     private final SourceService sourceService;
     private final ExtractionWorker worker;
@@ -168,9 +174,14 @@ public class ExtractionDraftService {
         List<ExtractionDraft> drafts = new ArrayList<>(draftMapper.selectList(new LambdaQueryWrapper<ExtractionDraft>()
                 .eq(ExtractionDraft::getUserId, userId)
                 .isNull(ExtractionDraft::getConfirmedAt)));
+        // 已确认的学习缺口草稿不返回（决策 053）：每天会有好几份，会把真正的导入挤出“最近 10 份”。
+        // knowledge 不能查 source 的表，所以先问 source 要这些材料的 id，再在查询里排除
+        Set<Long> gapSourceIds = sourceService.idsOfType(userId, SourceType.GAP);
         drafts.addAll(draftMapper.selectList(new LambdaQueryWrapper<ExtractionDraft>()
                 .eq(ExtractionDraft::getUserId, userId)
                 .isNotNull(ExtractionDraft::getConfirmedAt)
+                .and(!gapSourceIds.isEmpty(), w -> w.isNull(ExtractionDraft::getSourceId)
+                        .or().notIn(ExtractionDraft::getSourceId, gapSourceIds))
                 .orderByDesc(ExtractionDraft::getId)
                 .last("LIMIT " + CONFIRMED_LIMIT)));
         if (drafts.isEmpty()) {
@@ -258,9 +269,19 @@ public class ExtractionDraftService {
      * @throws BusinessException 已经确认过、或者还不是 READY 时为 CONFLICT；取消的条目不属于这份草稿时为 BAD_REQUEST
      */
     public DraftView confirm(long userId, long draftId, ConfirmDraftRequest request) {
-        ExtractionDraft draft = find(userId, draftId);
         Set<Long> rejected = request == null || request.rejectedItemIds() == null ? Set.of()
                 : new HashSet<>(request.rejectedItemIds());
+        doConfirm(userId, draftId, rejected, false);
+        return get(userId, draftId);
+    }
+
+    /**
+     * 确认的主体，用户确认和学习缺口的自动确认共用。
+     *
+     * @param toFront 新知识点挪到学习顺序的最前面（学习缺口，决策 053）；否则接在已有知识点之后
+     */
+    private void doConfirm(long userId, long draftId, Set<Long> rejected, boolean toFront) {
+        ExtractionDraft draft = find(userId, draftId);
         Instant now = Instant.now(clock);
         transactionTemplate.executeWithoutResult(status -> {
             if (lock(draftId).getConfirmedAt() != null) {
@@ -284,6 +305,9 @@ public class ExtractionDraftService {
                     .map(item -> new KnowledgePointService.NewKnowledgePoint(
                             item.getType(), item.getTitle(), item.getSummary(), item.getId(), codes.containsKey(item.getId())))
                     .toList());
+            if (toFront) {
+                knowledgePointService.moveToFront(draft.getUserId(), kpIds);
+            }
             copyCode(accepted, kpIds, draft.getSourceId(), codes);
             if (draft.getSourceId() != null) {
                 knowledgePointService.linkToSource(draft.getUserId(), draft.getSourceId(), coveredKnowledgePoints(batches));
@@ -294,7 +318,46 @@ public class ExtractionDraftService {
                     .eq(ExtractionDraft::getId, draftId)
                     .set(ExtractionDraft::getConfirmedAt, now));
         });
-        return get(userId, draftId);
+    }
+
+    /** 学习缺口材料的名称前缀，后面接原知识点的标题；知识库详情的“来源”显示它 */
+    static final String GAP_SOURCE_PREFIX = "学习缺口：";
+
+    /**
+     * 把评分页勾选的学习缺口建成草稿（#31，决策 053）：建一份 GAP 材料，题目就是这些缺口，再走和导入相同的抽取。
+     * 抽取完成后由 {@link #onDraftExtracted} 自动确认。校验（是不是这次评分的缺口、只处理一次）由 chat 做。
+     * <p>
+     * 建材料和建草稿不在同一个事务里：{@link #create} 要在事务提交后才交给后台线程，套一层外部事务会让后台读不到批次。
+     * 建草稿失败时会留下一份没有草稿的材料，不影响别的数据。
+     *
+     * @param originTitle 产生这些缺口的知识点标题，拼进材料名称
+     * @param gaps        勾选的缺口，按评分建议中的顺序，至少一条
+     * @return 草稿 id，前端用它轮询 {@link #get}
+     */
+    public long createGapDraft(long userId, String originTitle, List<String> gaps) {
+        long sourceId = sourceService.createGapSource(userId, GAP_SOURCE_PREFIX + originTitle, gaps);
+        return create(userId, new CreateDraftRequest(sourceId, null)).id();
+    }
+
+    /**
+     * 抽取后台执行完一份草稿后，学习缺口的草稿全部成功就自动确认：全部接受，新知识点挪到学习顺序最前面（决策 053）。
+     * 失败的不确认，等用户重试；重试执行完会再走到这里。
+     * <p>
+     * 和抽取在同一个后台线程里执行。自动确认出错时只记日志：草稿停在“等你确认”，用户可以手动确认（那样会排在最后）。
+     */
+    @EventListener
+    public void onDraftExtracted(DraftExtractedEvent event) {
+        ExtractionDraft draft = draftMapper.selectById(event.draftId());
+        if (draft == null || draft.getConfirmedAt() != null || draft.getSourceId() == null
+                || sourceService.getType(draft.getUserId(), draft.getSourceId()) != SourceType.GAP
+                || statusOf(latestBatches(draft.getId())) != DraftStatus.READY) {
+            return;
+        }
+        try {
+            doConfirm(draft.getUserId(), draft.getId(), Set.of(), true);
+        } catch (RuntimeException e) {
+            log.warn("学习缺口草稿自动确认失败: draftId={}", draft.getId(), e);
+        }
     }
 
     /** 条目的源码数据，按条目 id；题目条目没有，不在结果中（#90） */

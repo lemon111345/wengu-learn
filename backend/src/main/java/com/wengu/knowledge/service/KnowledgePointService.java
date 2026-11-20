@@ -163,6 +163,29 @@ public class KnowledgePointService {
     }
 
     /**
+     * 把知识点挪到学习顺序的最前面，彼此的先后不变（#31，决策 053）：学习缺口生成的知识点要在原知识点下次复习之前学到。
+     * 新的 sort_order 比用户现有的最小值还小，可以是负数；每日计划和知识库都只按大小排，不受影响。
+     * 删除的也参与求最小值，理由同 {@link #maxSortOrder}。
+     * <p>
+     * 在调用方的事务中执行（确认草稿时和生成知识点一起提交）。
+     *
+     * @param kpIds 按想要的先后排列；不属于该用户的 id 不会被改
+     */
+    @Transactional
+    public void moveToFront(long userId, List<Long> kpIds) {
+        if (kpIds.isEmpty()) {
+            return;
+        }
+        int first = minSortOrder(userId) - kpIds.size();
+        for (int i = 0; i < kpIds.size(); i++) {
+            knowledgePointMapper.update(new LambdaUpdateWrapper<KnowledgePoint>()
+                    .eq(KnowledgePoint::getId, kpIds.get(i))
+                    .eq(KnowledgePoint::getUserId, userId)
+                    .set(KnowledgePoint::getSortOrder, first + i));
+        }
+    }
+
+    /**
      * 给已有知识点补上与材料的关联，例如新资料中的题被已有知识点覆盖时（决策 014）。
      * 已经关联过的跳过；不属于该用户、已经不存在或已删除的知识点跳过。
      */
@@ -614,6 +637,16 @@ public class KnowledgePointService {
                 .orderByDesc(KnowledgePoint::getSortOrder)
                 .last("LIMIT 1"));
         return last == null ? 0 : last.getSortOrder();
+    }
+
+    /** 用户已有知识点中最小的 sort_order，没有知识点时为 0。删除的也算 */
+    private int minSortOrder(long userId) {
+        KnowledgePoint first = knowledgePointMapper.selectOne(new LambdaQueryWrapper<KnowledgePoint>()
+                .select(KnowledgePoint::getSortOrder)
+                .eq(KnowledgePoint::getUserId, userId)
+                .orderByAsc(KnowledgePoint::getSortOrder)
+                .last("LIMIT 1"));
+        return first == null ? 0 : first.getSortOrder();
     }
 
     /**

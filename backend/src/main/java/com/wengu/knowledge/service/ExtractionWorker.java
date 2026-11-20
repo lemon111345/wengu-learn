@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.wengu.common.result.ErrorCode;
 import com.wengu.knowledge.dto.CodeExtractionResult;
+import com.wengu.knowledge.dto.DraftExtractedEvent;
 import com.wengu.knowledge.dto.ExtractedKnowledgePoint;
 import com.wengu.knowledge.dto.ExtractionQuestion;
 import com.wengu.knowledge.dto.ExtractionResult;
@@ -26,6 +27,7 @@ import com.wengu.source.service.SourceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
@@ -73,6 +75,7 @@ public class ExtractionWorker {
     private final Clock clock;
     private final JsonMapper jsonMapper;
     private final TransactionTemplate transactionTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** 要写入的一个条目；code 是源码条目特有的数据，题目条目为 null */
     private record NewItem(ExtractionDraftItem item, ExtractionDraftItemCode code) {
@@ -87,7 +90,8 @@ public class ExtractionWorker {
                             ExtractionDraftMapper draftMapper, ExtractionBatchMapper batchMapper,
                             ExtractionDraftItemMapper itemMapper, ExtractionDraftItemCodeMapper itemCodeMapper,
                             @Qualifier("extractionExecutor") TaskExecutor executor, Clock clock,
-                            JsonMapper jsonMapper, TransactionTemplate transactionTemplate) {
+                            JsonMapper jsonMapper, TransactionTemplate transactionTemplate,
+                            ApplicationEventPublisher eventPublisher) {
         this.extractionService = extractionService;
         this.codeExtractionService = codeExtractionService;
         this.knowledgePointService = knowledgePointService;
@@ -100,6 +104,7 @@ public class ExtractionWorker {
         this.clock = clock;
         this.jsonMapper = jsonMapper;
         this.transactionTemplate = transactionTemplate;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -125,8 +130,19 @@ public class ExtractionWorker {
      * <p>
      * 某一批输出解析失败或校验不通过时，照常执行下一批；模型调用本身出错（网络错误、Key 不对）时，
      * 后面的批次大概率也会失败，不再调用，直接标为失败，用户处理好之后一起重试。
+     * <p>
+     * 执行完（不论成败）发布 {@link DraftExtractedEvent}：学习缺口的草稿由 {@link ExtractionDraftService} 监听后自动确认
+     * （决策 053）。用事件而不是直接调用，是因为 ExtractionDraftService 已经依赖这个类，反过来调用会循环依赖。
      */
     void run(long draftId) {
+        try {
+            runPending(draftId);
+        } finally {
+            eventPublisher.publishEvent(new DraftExtractedEvent(draftId));
+        }
+    }
+
+    private void runPending(long draftId) {
         List<ExtractionBatch> pending = batchMapper.selectList(new LambdaQueryWrapper<ExtractionBatch>()
                 .eq(ExtractionBatch::getDraftId, draftId)
                 .eq(ExtractionBatch::getStatus, BatchStatus.PENDING)

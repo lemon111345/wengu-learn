@@ -27,6 +27,7 @@ import com.wengu.knowledge.mapper.KpCodeMapper;
 import com.wengu.knowledge.mapper.KpSourceMapper;
 import com.wengu.review.dto.CardProgress;
 import com.wengu.review.service.ReviewService;
+import com.wengu.source.entity.SourceType;
 import com.wengu.source.service.SourceService;
 import com.wengu.user.dto.SettingsView;
 import com.wengu.user.service.UserSettingsService;
@@ -218,6 +219,8 @@ public class KnowledgeLibraryService {
             return List.of();
         }
         Map<Long, String> names = sourceService.getNames(userId, sourceIds);
+        // 学习缺口的题号只是程序编的（决策 053），显示“学习缺口：…，第 1、2 题”没有意义
+        Set<Long> gapSources = sourceService.idsOfType(userId, SourceType.GAP);
 
         Map<Long, Long> draftSources = items.isEmpty() ? Map.of()
                 : draftMapper.selectList(new LambdaQueryWrapper<ExtractionDraft>()
@@ -230,7 +233,7 @@ public class KnowledgeLibraryService {
         for (ExtractionDraftItem item : items) {
             Long sourceId = draftSources.get(item.getDraftId());
             // 源码条目没有题号，存的是空字符串（决策 050）
-            if (sourceId != null && !item.getSourceQuestionIds().isBlank()) {
+            if (sourceId != null && !gapSources.contains(sourceId) && !item.getSourceQuestionIds().isBlank()) {
                 Arrays.stream(item.getSourceQuestionIds().split(","))
                         .map(String::strip)
                         .map(Integer::valueOf)
